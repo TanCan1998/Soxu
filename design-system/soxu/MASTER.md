@@ -97,12 +97,68 @@ Soxu 服务于高频并行操控多个本地编码 Agent（`claude`、`codex`、
 
 ---
 
-## 五、分页面与核心子系统规范索引
+## 五、代码语法高亮与纯黑终端 ANSI 16 色校准规范
+
+### 5.1 14 角色代码高亮板（`syntax.*`）
+传统暗色代码主题往往在 `#0F172A` 蓝黑背景上调校；放在 `#000000` / `#0D0D0D` 纯黑画布下容易出现过饱和刺眼或蓝紫暗沉。Soxu 从 `tokens.json -> color.{dark,light}.syntax` 统一下发 14 个语法角色：
+
+| 语法角色 | Token 键名 | Pure Black (`#000000`/`#0D0D0D`) | Clean Light (`#FFFFFF`) | 说明与边界 |
+| :--- | :--- | :---: | :---: | :--- |
+| 普通文本 / 标识符 | `syntax.plain` | `#ECECEC` | `#1F2328` | 代码槽默认前景色（对比度 ≥ 14.9:1） |
+| 关键字 / 控制流 | `syntax.keyword` | `#FF7B72` | `#CF222E` | `fn`、`pub`、`match`、`async`、`await` |
+| 函数 / 方法定义 | `syntax.function` | `#D2A8FF` | `#8250DF` | 与 `syntax.type` 在明度上明显区隔 |
+| 类型 / Trait / 枚举 | `syntax.type` | `#FFA657` | `#953800` | 结构名、泛型约束、枚举变体 |
+| 字符串 / 正则 | `syntax.string` | `#A5D6FF` | `#0A3069` | 字面量字符串与格式化模板 |
+| 数字 / 常量字面 | `syntax.number` | `#79C0FF` | `#0550AE` | 整浮点字面量与布尔常量 |
+| 注释 / 文档说明 | `syntax.comment` | `#8B949E` | `#6E7781` | **对 `#0D0D0D` 对比度 ≥ 5.2:1，严禁暗灰不可读** |
+| 属性 / 字段 / 宏 | `syntax.property` / `macro` | `#7EE787` / `#56D4DD` | `#116329` / `#0969DA` | Struct 字段、`#[derive(...)]` 与宏调用 |
+| Diff 新增 / 删除背景 | `syntax.diffAddBg` / `diffDelBg` | `14%` 翠绿 / `14%` 绯红 | `12%` 翠绿 / `11%` 绯红 | 行号槽 `Gutter` 采用双倍浓度（`26%`/`22%`）形成清晰视觉边缘 |
+
+### 5.2 纯黑 PTY 终端 ANSI 16 色规范（`ansi.*`）
+- 终端面板底色锁定 `--soxu-surface-terminal`（Dark `#050505` / Light `#F7F7F8`），保留细微 `1px` `--soxu-border-subtle` 外框；
+- 重点校准传统终端最容易失明的 **ANSI Black (`#262626`)**、**BrightBlack (`#737373`)** 与 **ANSI Blue (`#60A5FA`)**，确保 Git diff 输出、Cargo 编译进度条与 Test Summary 在纯黑屏上字字清晰。
+
+---
+
+## 六、全局组件像素几何常量与 Z-Index 层级表
+
+### 6.1 `sizing` 核心几何常量（GPUI `px()/sp()` 与 Web 1:1 对应）
+
+| 令牌键 | 像素值 | 用途说明 |
+| :--- | :---: | :--- |
+| `sizing.titlebarHeight` | `38px` | 桌面主窗口顶部标题栏与 `Cmd+K` 触发条固定高度 |
+| `sizing.tabbarHeight` | `36px` | 主会话标签条高度（单标签左右内边距 `12px`，关闭键 `18×18px`） |
+| `sizing.subagentBarHeight` | `28px` | 委派子代理横向细轨高度 |
+| `sizing.statusbarHeight` | `26px` | 桌面底栏全局 Daemon / Magpie / Git 状态横梁 |
+| `sizing.sidebarRowHeight` | `32px` | 左侧项目与 Worktree 紧凑树行高度 |
+| `sizing.toolCardHeaderHeight` | `34px` | 对话流中结构化工具调用折叠卡头部高度 |
+| `sizing.diffGutterWidth` | `52px` | 活动 Diff 与右侧审阅器双列行号槽宽度 |
+| `sizing.activityDiffMaxHeight` | `400px` | 对话流单张展开编辑 Diff 卡最大高度（超出原地滚动） |
+| `sizing.permissionDetailMaxHeight` | `96px` | 权限审批卡片命令详情区最大滚动高度 |
+| `sizing.cmdPaletteWidth` / `MaxHeight` | `640px` / `440px` | 全局 `Cmd+K` 命令面板尺寸（搜索输入区 `52px`） |
+| `sizing.turnNavRailWidth` | `20px` | 对话区右侧边缘轮次迷你刻线导航轨宽度 |
+
+### 6.2 Z-Index 层叠秩序（`zIndex`）
+`base(0)` → `sticky(10)`（移动顶/底浮动舱） → `rail(15)`（轮次导航轨） → `header(20)`（顶栏） → `popover(40)`（`@agent`/模型选择浮层） → `drawer(50)`（移动 Bottom Sheet / 历史导入抽屉） → `modalScrim(60)` → `modal(70)`（扫码配对/Checkpoint/提交弹窗） → `palette(80)`（`Cmd+K` 命令面板） → `toast(90)`（游标追平/自动回退轻提示）。
+
+---
+
+## 七、全端通用边界态规范（Boundary States）
+
+1. **Empty State（首次空画布 / 无改动工作树）**：居中卡片限宽 `440px`，配 `36px` 线性矢量徽标、一句话明确说明及 **最多 1 个主 CTA + 3 个可点击 Starter Prompt 示例芯片**；严禁堆砌空白说明墙。
+2. **Streaming & Skeleton（首次冷启动 / 会话详情回源）**：采用中性灰阶 `#171717` → `#212121` 微弱脉冲占位条（动画遵从 `prefers-reduced-motion`），占位行数严格匹配真实列表行高（`32px` 侧栏、`72px` 消息块），避免加载完成后发生剧烈布局跳变（CLS ≈ 0）。
+3. **Offline / Reconnecting（Daemon 断线与增量游标追平）**：保留桌面与移动端屏幕上**所有已渲染的对话 DOM 与未发送草稿**（绝不整页白屏跳转报错），仅在顶栏显示非阻塞状态微条：`⟳ 正在重连 Daemon (127.0.0.1:7698)...`，重连后自动携 `afterSeq` 拉取缺口并发出轻提示。
+4. **Actionable Error（可执行错误提示）**：绝不把裸 JSON / `0x80070005` 甩给用户；每个错误框（`dangerSoft` 底 + `dangerBorder` 边）必须包含三要素：**发生了什么（中文） + 影响范围 + 一键修复或拷贝脱敏诊断详情按钮**。
+
+---
+
+## 八、分页面与核心子系统规范索引
 
 在进行具体模块开发前，Agent 必须同时阅读本文件与对应的分页面规格书：
 
-1. [`pages/01-desktop-workbench.md`](pages/01-desktop-workbench.md) —— GPUI 桌面四栏工作台布局、状态桶优先级、面板伸缩极值、焦点上下文栈与全局快捷键表
-2. [`pages/02-composer-and-handoff.md`](pages/02-composer-and-handoff.md) —— 三态输入舱（`Idle` / `Queue` / `Steer` / `Interrupt`）完整状态机、模型/Magpie 胶囊栏、`@agent` 跨 CLI 移交与草稿防抖机制
-3. [`pages/03-timeline-tools-and-checkpoints.md`](pages/03-timeline-tools-and-checkpoints.md) —— 对话流角色排版、折叠思考窗、5 类结构化工具卡片、高优权限审批卡与 Git 对话轮次检查点（Checkpoint & Rewind）
-4. [`pages/04-magpie-and-cli-inspector.md`](pages/04-magpie-and-cli-inspector.md) —— Magpie 双态（`MagpieManaged` vs `StandaloneNative`）路由诊断面板、7 大原生 CLI 驱动矩阵与本地历史会话无损导入流
-5. [`pages/05-mobile-remote-pwa.md`](pages/05-mobile-remote-pwa.md) —— Daemon 内嵌移动遥控 PWA：一次性 `#offer=` 扫码配对、游标增量追平条、单手大拇指审批收件箱、安全区适配与 Workspace Scripts 遥控页
+1. [`pages/01-desktop-workbench.md`](pages/01-desktop-workbench.md) —— GPUI 桌面四栏工作台布局、**组件像素解剖表**、**轮次迷你导航轨**、工作区标签与恢复卡、焦点栈与快捷键表
+2. [`pages/02-composer-and-handoff.md`](pages/02-composer-and-handoff.md) —— 三态输入舱（`Idle` / `Queue` / `Steer` / `Interrupt`）、上下文附件芯片、模型切换 **`lost-controls` 回退机制**与 `@agent` 双向移交锚点
+3. [`pages/03-timeline-tools-and-checkpoints.md`](pages/03-timeline-tools-and-checkpoints.md) —— 对话流角色排版、折叠思考窗、5 类结构化工具卡、**`PendingUserInput` 结构化提问卡**、常规 vs 高危红线审批对比及 Git 检查点
+4. [`pages/04-magpie-and-cli-inspector.md`](pages/04-magpie-and-cli-inspector.md) —— Magpie 双态拓扑、7 大原生 CLI 徽标与能力矩阵、**Worktree 启动环境变量预览器**与本地历史会话无损导入流
+5. [`pages/05-mobile-remote-pwa.md`](pages/05-mobile-remote-pwa.md) —— Daemon 内嵌移动遥控 PWA：**13 组真机窗口矩阵**、Bottom Sheet 规范、`#offer=` 扫码与手填双路径、游标增量追平与大拇指审批流
+6. [`pages/06-modals-onboarding-and-automation.md`](pages/06-modals-onboarding-and-automation.md) —— **首次 3 步 Onboarding 向导、`Cmd+K` 全局命令面板、添加项目三合一弹窗、Git Emoji AI 提交预览弹窗、Schedules & Heartbeats 调度中心**

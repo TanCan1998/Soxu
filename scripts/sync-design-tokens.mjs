@@ -79,6 +79,20 @@ function buildCssDocument() {
     lines.push(`  --soxu-layout-${camelToKebab(k)}: ${v.$value};`);
   }
 
+  if (raw.sizing) {
+    lines.push("", "  /* Component Sizing */");
+    for (const [k, v] of Object.entries(raw.sizing)) {
+      lines.push(`  --soxu-size-${camelToKebab(k)}: ${v.$value};`);
+    }
+  }
+
+  if (raw.zIndex) {
+    lines.push("", "  /* Z-Index */");
+    for (const [k, v] of Object.entries(raw.zIndex)) {
+      lines.push(`  --soxu-z-${camelToKebab(k)}: ${v.$value};`);
+    }
+  }
+
   lines.push("", "  /* Motion */");
   lines.push(`  --soxu-motion-press: ${raw.motion.pressDuration.$value};`);
   lines.push(`  --soxu-motion-hover: ${raw.motion.hoverDuration.$value};`);

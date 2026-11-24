@@ -52,6 +52,36 @@
   --soxu-semantic-handoff: #a855f7;
   --soxu-semantic-handoff-soft: rgba(168, 85, 247, 0.14);
   --soxu-semantic-code-wash: rgba(255, 255, 255, 0.08);
+  --soxu-syntax-plain: #ececec;
+  --soxu-syntax-keyword: #ff7b72;
+  --soxu-syntax-function: #d2a8ff;
+  --soxu-syntax-type: #ffa657;
+  --soxu-syntax-string: #a5d6ff;
+  --soxu-syntax-number: #79c0ff;
+  --soxu-syntax-comment: #8b949e;
+  --soxu-syntax-operator: #ff7b72;
+  --soxu-syntax-property: #7ee787;
+  --soxu-syntax-macro: #56d4dd;
+  --soxu-syntax-diff-add-bg: rgba(34, 197, 94, 0.14);
+  --soxu-syntax-diff-add-gutter: rgba(34, 197, 94, 0.26);
+  --soxu-syntax-diff-del-bg: rgba(239, 68, 68, 0.14);
+  --soxu-syntax-diff-del-gutter: rgba(239, 68, 68, 0.26);
+  --soxu-ansi-black: #262626;
+  --soxu-ansi-red: #f87171;
+  --soxu-ansi-green: #4ade80;
+  --soxu-ansi-yellow: #facc15;
+  --soxu-ansi-blue: #60a5fa;
+  --soxu-ansi-magenta: #c084fc;
+  --soxu-ansi-cyan: #22d3ee;
+  --soxu-ansi-white: #e5e5e5;
+  --soxu-ansi-bright-black: #737373;
+  --soxu-ansi-bright-red: #fca5a5;
+  --soxu-ansi-bright-green: #86efac;
+  --soxu-ansi-bright-yellow: #fde047;
+  --soxu-ansi-bright-blue: #93c5fd;
+  --soxu-ansi-bright-magenta: #d8b4fe;
+  --soxu-ansi-bright-cyan: #67e8f9;
+  --soxu-ansi-bright-white: #ffffff;
 
   /* Typography */
   --soxu-font-sans: Inter, 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei UI', system-ui, -apple-system, sans-serif;
@@ -101,6 +131,36 @@
   --soxu-layout-touch-target-android: 48px;
   --soxu-layout-breakpoint-regular: 640px;
   --soxu-layout-breakpoint-wide: 1024px;
+
+  /* Component Sizing */
+  --soxu-size-titlebar-height: 38px;
+  --soxu-size-tabbar-height: 36px;
+  --soxu-size-subagent-bar-height: 28px;
+  --soxu-size-statusbar-height: 26px;
+  --soxu-size-sidebar-row-height: 32px;
+  --soxu-size-tool-card-header-height: 34px;
+  --soxu-size-diff-gutter-width: 52px;
+  --soxu-size-activity-diff-max-height: 400px;
+  --soxu-size-permission-detail-max-height: 96px;
+  --soxu-size-cmd-palette-width: 640px;
+  --soxu-size-cmd-palette-max-height: 440px;
+  --soxu-size-cmd-palette-input-height: 52px;
+  --soxu-size-turn-nav-rail-width: 20px;
+  --soxu-size-icon-sm: 14px;
+  --soxu-size-icon-md: 16px;
+  --soxu-size-icon-lg: 20px;
+
+  /* Z-Index */
+  --soxu-z-base: 0;
+  --soxu-z-sticky: 10;
+  --soxu-z-rail: 15;
+  --soxu-z-header: 20;
+  --soxu-z-popover: 40;
+  --soxu-z-drawer: 50;
+  --soxu-z-modal-scrim: 60;
+  --soxu-z-modal: 70;
+  --soxu-z-palette: 80;
+  --soxu-z-toast: 90;
 
   /* Motion */
   --soxu-motion-press: 100ms;
@@ -159,6 +219,36 @@
   --soxu-semantic-handoff: #7c3aed;
   --soxu-semantic-handoff-soft: rgba(124, 58, 237, 0.10);
   --soxu-semantic-code-wash: rgba(0, 0, 0, 0.06);
+  --soxu-syntax-plain: #1f2328;
+  --soxu-syntax-keyword: #cf222e;
+  --soxu-syntax-function: #8250df;
+  --soxu-syntax-type: #953800;
+  --soxu-syntax-string: #0a3069;
+  --soxu-syntax-number: #0550ae;
+  --soxu-syntax-comment: #6e7781;
+  --soxu-syntax-operator: #cf222e;
+  --soxu-syntax-property: #116329;
+  --soxu-syntax-macro: #0969da;
+  --soxu-syntax-diff-add-bg: rgba(22, 163, 74, 0.12);
+  --soxu-syntax-diff-add-gutter: rgba(22, 163, 74, 0.24);
+  --soxu-syntax-diff-del-bg: rgba(220, 38, 38, 0.11);
+  --soxu-syntax-diff-del-gutter: rgba(220, 38, 38, 0.22);
+  --soxu-ansi-black: #24292f;
+  --soxu-ansi-red: #cf222e;
+  --soxu-ansi-green: #116329;
+  --soxu-ansi-yellow: #9a6700;
+  --soxu-ansi-blue: #0969da;
+  --soxu-ansi-magenta: #8250df;
+  --soxu-ansi-cyan: #0e7490;
+  --soxu-ansi-white: #57606a;
+  --soxu-ansi-bright-black: #6e7781;
+  --soxu-ansi-bright-red: #a40e26;
+  --soxu-ansi-bright-green: #1a7f37;
+  --soxu-ansi-bright-yellow: #7d4e00;
+  --soxu-ansi-bright-blue: #0550ae;
+  --soxu-ansi-bright-magenta: #6639ba;
+  --soxu-ansi-bright-cyan: #155e75;
+  --soxu-ansi-bright-white: #0d0d0d;
 }
 
 @media (prefers-reduced-motion: reduce) {

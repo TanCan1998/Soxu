@@ -122,3 +122,32 @@ ModalDialog (延迟 2 帧安全聚焦)
 | 打开手机扫码遥控配对浮层 | `Ctrl + Shift + M` | `Cmd + Shift + M` | `WorkbenchGlobal` |
 | 批准当前聚焦权限审批卡（允许一次） | `Alt + Y` | `Cmd + Enter` (审批卡聚焦时) | `PermissionCard` |
 | 拒绝当前聚焦权限审批卡并聚焦反馈框 | `Alt + N` | `Cmd + Backspace` | `PermissionCard` |
+
+---
+
+## 六、组件像素级解剖表（GPUI Implementation Anatomy）
+
+| 组件部位 | 高度 / 尺寸 | 内边距 / 间距 | 字体规格 | 常态外观令牌 | 悬停 / 选中 / 按下 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **顶部 Titlebar** | `h = 38px` | `px(12)`, `gap(8)` | `sp(12.5)` `500` | `--soxu-surface-sidebar` + `1px` 底边 `#1A1A1A` | `Cmd+K` 胶囊居中限宽 `360px`, `h=26px`, `#171717` 底 + `#262626` 边 |
+| **左栏 Worktree 行** | `h = 32px` | `px(10)`, `gap(8)` | `sp(13)` `400/500` | 透明底 + `rounded(8)` | Hover: `interaction.hover` (`5%` 白)；Selected: `interaction.selected` (`9%` 白) + `#ECECEC` 字 |
+| **会话标签页 (Tab)** | `h = 36px` | `px(12)`, `gap(6)` | `sp(12.5)` `500` | `#0D0D0D` 轨底，`max-w: 210px` | 活跃页签衔接 `#000000` 主画布，顶边 `2px` `--soxu-semantic-accent` 指示线（可关闭） |
+| **Subagents 细轨** | `h = 28px` | `px(12)`, `gap(6)` | `sp(11.5)` `500` | `#0D0D0D` 底 + `1px` 底边 `#1A1A1A` | 胶囊 `h=20px`, `rounded-full`, `#171717` 底, 含 `[独立成页签]` 小按钮 |
+| **右栏 Context 页签头** | `h = 34px` | `px(10)`, `gap(4)` | `sp(12)` `500` | `#0D0D0D` 底 + `1px` 底边 `#1A1A1A` | 选中项采用 `--soxu-surface-raised` (`#212121`) + `border-subtle` |
+| **底部 Statusbar** | `h = 26px` | `px(12)`, `gap(16)` | `sp(11.5)` `tabular` | `#0D0D0D` 底 + `1px` 顶边 `#1A1A1A` | 每一项均带明确点击态（如点击 `seq` 查看事件流延迟，点击 `设备数` 弹出配对弹窗） |
+
+---
+
+## 七、轮次迷你导航轨（`ConversationNavigationRail`）与工作区标签/恢复机制
+
+### 7.1 对话右侧轮次迷你刻线导航轨（对标 `padu/transcript_view.rs`）
+当对话超过 2 轮时，在主对话滚动容器最右侧贴边浮动一条宽 `20px` 的迷你导航轨（`zIndex.rail = 15`，不挤占 `760px` 阅读列）：
+- **刻度视觉规则**：每个用户+Agent 回合对应一条高 `3px`、宽 `10px`~`14px` 的水平微缩刻度线：
+  - 普通已读轮次：`#383838`；当前可视窗口中的活跃轮次：加宽至 `16px` + **`#FFFFFF`**；
+  - 含 `needs_input` 待审批轮次：琥珀 `#F59E0B`；含 `Checkpoint` 快照轮次：紫罗兰 `#A855F7` 点缀。
+- **悬停气泡与点击跳转**：鼠标悬停任意刻线时，向左侧弹出宽 `240px` 的 `#262626`（`#383838` 边）浮窗，展示轮次号、前 48 字用户提问摘要及 Checkpoint 文件变更统计；点击后平滑滚动定位至该轮顶部。
+- **GPUI 性能约束**：导航轨快照只通过 `Rc::ptr_eq(&self.turns, &other.turns)` 做 `O(1)` 指针相等性比较，禁止每帧深度遍历消息切片。
+
+### 7.2 工作区彩色语义标签（Workspace Labels）与异常恢复卡
+- **彩色标签**：对齐 `paseo` 工作区标签契约，左栏支持为 Worktree 附加精简语义小胶囊（如 `[契约先行]`、`[阻塞]`、`[待合并]`），圆点 `6px` + `11px` 文字，配色复用品牌/语义柔色底。
+- **工作区恢复卡（Workspace Recovery）**：当用户在外部手动删除了 Worktree 目录导致 `path` 不存在或 `.git` 元数据损坏时，不在后台静默崩溃，而是在中栏顶部展示可执行恢复卡：提供 **`[从主仓重建 Worktree]`**（保留原历史聊天时间线，重新挂载对应分支）或 **`[仅以只读归档保留历史]`**。

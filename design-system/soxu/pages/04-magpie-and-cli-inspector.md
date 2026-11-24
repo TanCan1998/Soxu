@@ -62,3 +62,32 @@
    - **双模式打开**：
      - **「原位续接 (Resume Native ID)」**：直接携带原 CLI 的 `--resume / --conversation <id>` 在对应工作目录拉起原生续接，保留 100% 原生上下文；
      - **「分叉至新 Worktree (Fork Context)」**：提取关键历史摘要注入全新隔离 Worktree 会话，保护原会话记录不被改动。
+
+---
+
+## 五、7 大 CLI 线性矢量徽标规范与 Worktree 启动环境透视器
+
+### 5.1 CLI 矢量徽标统一几何纪律
+所有 CLI 驱动图标在会话标签、驱动卡片与消息头中一律以 `16×16px`（或卡片 `20×20px`）`viewBox="0 0 24 24"` 单色/双色线性 SVG 渲染，**绝不引入外链位图或 Emoji**：
+- **Claude / Codex / Pi / OpenCode / Agy / Copilot / Qwen** 各有独立几何徽标轮廓（线宽 `1.75px`），在深/浅主题下跟随 `currentColor`（未选中 `#B4B4B4` / 选中 `#ECECEC`），并可附带 1 枚 `6px` 状态圆点标示连接态。
+
+### 5.2 Worktree 启动环境变量透视器（Launch Env Inspector）
+为消除多 Worktree 并发或 Magpie `Direct` MCP 挂载黑盒感，驱动卡片详情提供 **「启动环境透视（只读）」** 折叠面板：
+1. **自动展示项**：
+   - `CARGO_TARGET_DIR = ../.cargo-target/soxu`（标记 `[共享构建缓存命中]`）；
+   - `MAGPIE_GATEWAY = http://127.0.0.1:3425/v1`（`StandaloneNative` 下显示 `未启用，使用 CLI 原生凭据`）；
+   - `SOXU_MCP_DIRECT = aoci, codegraph`（标示已按当前 Worktree 目录绑定索引根）；
+   - `RuntimeExtensionHook` 槽位挂载列表（当前为空时显示 `NoopExtensionHost · 预留扩展点未激活`）。
+2. **强制脱敏规则**：任何含 `KEY`、`TOKEN`、`SECRET`、`COOKIE`、`PASSWORD` 的环境变量名称仅展示键名并将值强制掩码为 `••••••••`，**严禁读取或打印 `redact.key` 等凭据文件内容**。
+3. **无 Magpie 环境中性降级检查清单**：确认 7 项原生探测目录均采用 `~` 前缀展示且带有「当前仅扫描元数据，写入已锁定关闭」绿锁标识。
+
+---
+
+## 六、组件像素解剖与边界状态处理规则
+
+| 界面区块 | 尺寸与间距 | 视觉表现令牌 | 异常与边界降级 |
+| :--- | :--- | :--- | :--- |
+| **Magpie 拓扑横幅** | `p(16)`, `rounded(14)` | `MagpieManaged` 用翠绿柔描边；`StandaloneNative` 用 `#262626` | 网关 `127.0.0.1:3425` 端口超时时，顶部状态点改为琥珀并给出 `[重启或检查 Magpie]` 操作链接 |
+| **四宫格指标卡** | `min-h(78)`, `p(12)`, `rounded(10)` | `#121212` 内嵌底 + `1px solid #1A1A1A` | 当 `agi`/`pi` 等存在 `not picked` 模型时，展示模型列表微标签 `[原生直连]` |
+| **CLI 驱动健康卡** | 双列 `gap(12)`, `p(14)`, `rounded(12)` | `#171717` 底 + `#262626` 边 | 执行 `claude --version` 超时 `> 2.5s` 时显示 `[探测超时 · 可重试]` 而不阻塞其余驱动渲染 |
+| **历史会话导入抽屉** | 宽 `480px` (桌面) / `76dvh` (移动) | `#171717` 底 + 行高 `52px` 列表 | 解析坏损 JSONL 行自动跳过并计入尾部提示 `已忽略 1 条异常格式历史` |
