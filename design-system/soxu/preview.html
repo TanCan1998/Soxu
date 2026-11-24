@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Soxu 桌面工作台设计预览（Pure Black）</title>
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--soxu-surface-canvas);color:var(--soxu-text-primary);font:14px/1.5 var(--soxu-font-sans)}
+  .bar{display:flex;gap:8px;align-items:center;padding:8px 16px;background:var(--soxu-surface-sidebar);border-bottom:1px solid var(--soxu-border-hairline)}
+  .bar button{background:var(--soxu-surface-control);color:var(--soxu-text-primary);border:1px solid var(--soxu-border-subtle);border-radius:9999px;padding:6px 14px;cursor:pointer;min-height:32px}
+  .ws{display:grid;grid-template-columns:260px 1fr 380px;height:calc(100vh - 50px)}
+  aside{background:var(--soxu-surface-sidebar);padding:12px;overflow:auto}
+  aside.l{border-right:1px solid var(--soxu-border-hairline)}
+  aside.r{border-left:1px solid var(--soxu-border-hairline)}
+  .row{padding:8px 10px;border-radius:8px;display:flex;justify-content:space-between;gap:8px;font-size:13px}
+  .row.sel{background:var(--soxu-interaction-selected)}
+  .row:hover{background:var(--soxu-interaction-hover)}
+  .tag{font-size:11px;padding:1px 8px;border-radius:9999px}
+  .w{background:var(--soxu-semantic-warning-soft);color:var(--soxu-semantic-warning)}
+  .r2{background:var(--soxu-semantic-running-soft);color:var(--soxu-semantic-running)}
+  main{display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:16px;overflow:auto}
+  .col{width:100%;max-width:760px;display:flex;flex-direction:column;gap:20px}
+  .user{align-self:flex-end;background:var(--soxu-surface-raised);padding:10px 16px;border-radius:18px;max-width:78%}
+  .card{background:var(--soxu-surface-card);border:1px solid var(--soxu-border-subtle);border-radius:12px;padding:12px}
+  .perm{border-left:3px solid var(--soxu-semantic-warning);border-color:var(--soxu-semantic-warning-border)}
+  .btns{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
+  .btn{border-radius:10px;padding:8px 14px;border:1px solid var(--soxu-border-subtle);background:var(--soxu-surface-control);color:var(--soxu-text-primary);cursor:pointer}
+  .btn.p{background:var(--soxu-action-inverse);color:var(--soxu-action-on-inverse);font-weight:600}
+  pre{background:var(--soxu-surface-terminal);border:1px solid var(--soxu-border-subtle);border-radius:12px;padding:10px;font:13px var(--soxu-font-mono);margin:8px 0 0;overflow:auto}
+  .cp{text-align:center;color:var(--soxu-semantic-handoff);font:12px var(--soxu-font-mono)}
+  .comp{width:100%;max-width:720px;background:var(--soxu-surface-composer);border:1px solid var(--soxu-border-subtle);border-radius:22px;padding:12px}
+  .comp:focus-within{border-color:var(--soxu-border-strong)}
+  textarea{width:100%;background:transparent;border:0;color:inherit;font:14px var(--soxu-font-sans);resize:none;outline:none}
+  .pill{background:var(--soxu-surface-control);border-radius:9999px;padding:4px 10px;font-size:12px;color:var(--soxu-text-secondary)}
+  .status{position:fixed;bottom:0;left:0;right:0;height:26px;background:var(--soxu-surface-sidebar);border-top:1px solid var(--soxu-border-hairline);font-size:11.5px;color:var(--soxu-text-tertiary);display:flex;gap:16px;align-items:center;padding:0 12px}
+  h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--soxu-text-tertiary)}
+  @media(max-width:1023px){.ws{grid-template-columns:1fr}aside{display:none}}
+</style>
+</head>
+<body>
+<div class="bar"><strong>Soxu</strong><span class="pill">M0.5 桌面预览</span>
+<button onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">切换 Pure Black / Light</button></div>
+<div class="ws">
+<aside class="l"><h4>Soxu (git)</h4>
+<div class="row"><span>⎇ feat/12-native-drivers</span><span class="tag w">待批 1</span></div>
+<div class="row sel"><span>⎇ feat/8-ws-cursor</span><span class="tag r2">运行中</span></div>
+<div class="row"><span>⎇ main</span><span style="color:var(--soxu-text-tertiary)">clean</span></div></aside>
+<main><div class="col">
+<div class="user">补齐 soxu-drivers 的热纠偏能力探测，单测使用 TempDir。</div>
+<div><b>codex</b> <span style="color:var(--soxu-text-tertiary);font-size:12px">gpt-6.2-sol · high</span>
+<p>已补充 <code>supports_live_steer</code> 能力矩阵，现请求运行包级测试。</p>
+<div class="cp">── ⊶ 检查点 #04 · 7c4e91a · 2 files (+28 -3) ──</div></div>
+<div class="card perm"><b>需要人工授权 · PowerShell</b><pre>❯ cargo test -p soxu-drivers</pre>
+<div class="btns"><button class="btn">拒绝并指导</button><button class="btn p">允许一次</button></div></div>
+</div>
+<div class="comp"><textarea rows="2" placeholder="运行中：输入纠偏指令…"></textarea>
+<div style="display:flex;justify-content:space-between"><span><span class="pill">pi</span> <span class="pill">gpt-6.2-sol</span> <span class="pill">medium</span></span><span class="pill">Steer</span></div></div></main>
+<aside class="r"><h4>Diff</h4><pre><span style="color:var(--soxu-semantic-success)">+ pub fn supports_live_steer(self) -> bool {</span>
+<span style="color:var(--soxu-semantic-success)">+   matches!(self, Self::Pi | Self::Codex)</span>
+<span style="color:var(--soxu-semantic-success)">+ }</span></pre></aside></div>
+<div class="status"><span>● Daemon :7698</span><span>Magpie :3425</span><span>seq #1056</span></div>
+</body></html>

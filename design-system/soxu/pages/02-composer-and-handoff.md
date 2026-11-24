@@ -1,0 +1,79 @@
+# 02 · 三态输入舱、模型路由胶囊与 `@agent` 移交规范
+
+> **继承主规范**：[`../MASTER.md`](../MASTER.md)  
+> **目标模块**：`crates/soxu-desktop` & `apps/mobile-web` & `crates/soxu-protocol`（`ActiveTurnBehavior`）  
+> **参考对标**：`paseo`（`queue / steer / interrupt` 活跃轮次投递契约） + `padu`（`composer.rs`、`autocomplete.rs`、`drafts.rs`）
+
+---
+
+## 一、ChatGPT 纯黑悬浮输入舱（Composer）几何与光学规格
+
+```text
+┌─ 待发队列条 (仅当 Queue 队列非空时展开, #171717 底, 顶圆角衔接) ───────────────────────┐
+│ ⏳ 排队中 (1): "跑完单元测试后顺便更新 docs/ops/PROGRESS.md"   [提级为纠偏 ⚡] [编辑] [×] │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│  [@codex ▾] 请检查 crates/soxu-magpie/src/lib.rs 的降级分支边界...                     │
+│                                                                                        │
+│  [＋]  [⌘ pi ▾] [⚡ Magpie · gpt-6.2-sol ▾] [🧠 medium ▾] [🛡️ Ask ▾]    [纠偏 ▾] [ ↑ ] │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **外框容器**：最大宽度 `720px`（`--soxu-layout-composer-max-width`），背景色 `--soxu-surface-composer` (`#212121`)，圆角 `22px`（`--soxu-radius-composer`），常态描边 `1px solid #2E2E2E`，聚焦态描边平滑过渡至 `1px solid #424242`（`150ms`）。
+- **多行文本编辑区**：
+  - 最小高度 `44px`（单行舒适态），随内容自动增高至最大高度 `220px`（桌面端） / `140px`（移动端），超出后内部启用细滚动条；
+  - 桌面字号 `14px`（行高 `21px`），移动 Web 字号强制 `16px`（行高 `22px`）；
+  - UTF-16 光标与选区安全处理，支持直接粘贴剪贴板截图、拖拽代码文件或选择右侧 Diff 行区间作为结构化上下文芯片（Context Chip）挂载在文本区上方。
+
+---
+
+## 二、四态回合投递状态机（Idle / Preparing / Running: Queue · Steer · Interrupt）
+
+在 Agent 正在思考或连续调用工具的几分钟内，**绝不允许锁死或置灰输入框**。Soxu 将 `soxu-protocol::ActiveTurnBehavior` 完整映射为直观的视觉状态机：
+
+| 当前会话运行态 | 输入框内容状态 | 主按钮图标与颜色 | 快捷键绑定 | 语义行为与边界回退保护 |
+| :--- | :--- | :--- | :--- | :--- |
+| **`Idle`（空闲）** | 空 | 禁用上箭头（`#2A2A2A` 底 / `#666666` 标） | — | 不可提交 |
+| **`Idle`（空闲）** | 非空 | **纯白实心圆 + 纯黑上箭头 `↑`** (`#FFFFFF` / `#000000`) | `Enter` 提交<br>`Shift+Enter` 换行 | 开启新对话轮次（`turn_index + 1`） |
+| **`Preparing`（启动工作树/进程中）** | 任意 | 旋转加载环 + 停止方块（优先于 Busy 判定） | `Esc` 取消准备 | 后台正在挂载 Worktree 或拉起 CLI 子进程，防止重复派发 |
+| **`Running`（运行中）** | **空** | **纯白实心圆 + 纯黑停止方块 `■`** | 双击 `Esc` 或点击按钮 | 立即向当前 CLI 驱动发送优雅中断信号（SIGINT / Cancel Turn） |
+| **`Running` · `Queue`（默认排队模式）** | **非空** | 琥珀边框胶囊 `[排队 ▾]` + 纯白上箭头 | `Enter` 入队 | 消息不打断当前推理，立即进入顶部「待发队列条」；当前回合一结束自动发出 |
+| **`Running` · `Steer`（中途纠偏模式）** | **非空** | **电光蓝描边 `#3B82F6`** + 蓝色闪电发送键 `⚡` | `Ctrl/Cmd + Enter` 直接纠偏 | 在当前回合的下一个工具边界实时注入指令。**降级透明原则**：若当前 CLI 驱动不支持热注入（如单次 `--print` 模式），胶囊自动显示微提示 `↻ 将中断并带上下文续接`，且若回合在读取前意外终止，未消费的 Steer 消息自动退回输入框草稿，**绝不静默丢失**！ |
+| **`Running` · `Interrupt`（打断重发模式）** | **非空** | **绯红描边 `#EF4444`** + 红色打断重发键 `⏹↑` | `Alt + Enter` | 立即终止当前正在执行的回合，并用输入框中的新指令开启全新回合 |
+
+### 2.1 待发队列条（Queued Message Strip）交互
+- 当存在 `Queue` 消息时，在输入舱顶部展开高 `34px` 的队列条（底色 `#171717`，描边 `#262626`）。
+- 如果用户发现 Agent 正在往错误方向越走越远，无需重新打字，只需点击队列条右侧的 **`[立即纠偏 ⚡]`**，即可一键把已排队的 `Queue` 消息实时提级为 `Steer` 或 `Interrupt`（避免重发导致消息被读两次）。
+
+---
+
+## 三、底部控制胶囊栏（Runtime Pill Cluster）
+
+位于输入舱左下角，统一采用高 `28px`（移动端 `32px` 满足 `44px` 外扩热区）、圆角 `9999px`、底色 `#2F2F2F`（悬停 `#3A3A3A`）、字号 `12px`：
+
+1. **Agent CLI 驱动选择器 `[⌘ pi ▾]`**：
+   - 列出本机可用驱动：`pi`、`codex`、`claude`、`opencode`、`agy`、`copilot`、`qwen`。
+   - 新会话首轮发送前可自由切换驱动；已有历史上下文的会话切换驱动时，自动转为 **跨 CLI 移交模式（Cross-CLI Handoff）**，不会破坏原 CLI 的原生会话存储。
+2. **模型与路由源选择器 `[⚡ gpt-6.2-sol ▾]`**：
+   - **Magpie 协同态下**：顶部按任务难度分组推荐（`L3 架构攻坚: gpt-6.2-astra / claude-opus-5.5 / gemini-4-carbon`、`L2 主力实现: gpt-6.2-sol / claude-sonnet-5.5`、`L1 极速巡检: deepseek-v4.1-flash / gemini-4-hydrogen`），带收藏星标置顶与模糊搜索（搜索时自动忽略分组 Tab 过滤）。
+   - **Standalone 原生态下**：展示当前选中 CLI 原生可用的模型列表。
+3. **思考等级与特性开关 `[🧠 medium ▾]`**：
+   - 动态读取该 Provider/Model 支持的 `thinkingOptionId`（`low` / `medium` / `high` / `xhigh` / `max`）及专属特性开关（如 Codex 的 `fast_mode` 闪电加速开关），不支持思考调节的模型自动隐藏此胶囊。
+4. **执行权限档位 `[🛡️ Ask ▾]`**：
+   - 三档带语义色点：`Ask / Supervised`（默认，写外围/执行命令需审批）、`Auto-Edit`（工作区内编辑自动放行，高危命令仍拦截）、`Full-Access`（仅在受控 Worktree 中显式开启，配琥珀警示点，**仍受仓库级安全红线正则兜底保护**）。
+
+---
+
+## 四、`@agent` 跨代理移交（Handoff）与自动补全弹层
+
+当用户在输入框键入 `@`、`/` 或 `#` 时，在输入舱正上方 `8px` 处锚定弹出浮层（`--soxu-surface-floating` `#262626`，`1px solid #383838`，最高展示 8 行，每行 `34px`）：
+
+1. **`@` 跨 Agent 提及与上下文移交（Handoff）**：
+   - 输入 `@codex`、`@pi` 或 `@agy` 选择目标 Agent 后，输入框生成紫罗兰色胶囊 `@codex`（`--soxu-semantic-handoff-soft` 底 + `#A855F7` 字），并在右侧浮现移交范围微开关：
+     - `[✓ 附带最近 3 轮结论摘要]`
+     - `[✓ 附带当前工作树未提交 Diff 路径 (3 files)]`
+     - `[○ 在新建独立 Worktree 中启动]`
+   - 发送后，Soxu 自动在目标 Agent 中建立新会话（或投递至同工作区已有目标会话），并在原会话与目标会话的时间线中同时插入可双向点击跳转的 **「⇄ 会话移交锚点卡」**。
+2. **`/` 技能与命令补全（Skills & Slash Commands）**：
+   - 聚合当前工作区 `.agents/skills`、Magpie `routed/direct` 技能及内置快捷动作（`/compact`、`/checkpoint`、`/review`、`/handoff`），全部由后台执行器预热缓存，击键过滤纯内存 `0 I/O` 完成（耗时 `< 1ms`）。
+3. **`#` 工作区文件与符号引用**：
+   - 接入高速文件索引与 CodeGraph 符号检索，选中后插入紧凑文件芯片 `[📄 soxu-magpie/src/lib.rs:12-45]`。

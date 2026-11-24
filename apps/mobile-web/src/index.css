@@ -1,1 +1,91 @@
 @import "tailwindcss";
+@import "./tokens.generated.css";
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--soxu-surface-canvas);
+    color: var(--soxu-text-primary);
+    font-family: var(--soxu-font-sans);
+    font-size: var(--soxu-text-body-mobile);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: clip;
+  }
+
+  ::selection {
+    background-color: var(--soxu-interaction-selection);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--soxu-border-focus-ring);
+    outline-offset: 2px;
+  }
+}
+
+.soxu-mono {
+  font-family: var(--soxu-font-mono);
+}
+
+.soxu-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.soxu-safe-top {
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
+.soxu-safe-bottom {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+.soxu-touch {
+  min-height: 44px;
+  min-width: 44px;
+  cursor: pointer;
+  transition:
+    background-color var(--soxu-motion-hover) var(--soxu-ease-out),
+    border-color var(--soxu-motion-hover) var(--soxu-ease-out),
+    opacity var(--soxu-motion-press) var(--soxu-ease-out);
+}
+
+.soxu-touch:active:not(:disabled) {
+  opacity: 0.84;
+}
+
+.soxu-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.soxu-no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes soxu-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.42;
+  }
+}
+
+.soxu-live-dot {
+  animation: soxu-pulse 1.8s var(--soxu-ease-in-out) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .soxu-live-dot {
+    animation: none;
+  }
+}
