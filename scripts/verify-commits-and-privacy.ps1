@@ -51,14 +51,14 @@ function Invoke-PrivacyAndFileHygieneCheck([bool]$StagedOnly) {
     }
 
     if (Test-Path -LiteralPath $f -PathType Leaf) {
-      $item = Get-Item -LiteralPath $f
+      $item = Get-Item -LiteralPath $f -Force
       if ($item.Length -gt 5MB) {
         Write-Error "❌ [大文件拦截] 文件超过 5MB 上限，请检查是否误提交构建产物或二进制包：$f ($([math]::Round($item.Length / 1MB, 2)) MB)"
         exit 1
       }
 
       if ($f -notin @(".gitleaks.toml", "scripts/verify-commits-and-privacy.ps1") -and $item.Extension -notin @(".png", ".ico", ".woff2", ".pdf", ".zip", ".7z")) {
-        $raw = Get-Content -LiteralPath $f -Raw -ErrorAction SilentlyContinue
+        $raw = Get-Content -LiteralPath $f -Raw -Force -ErrorAction SilentlyContinue
         if ($null -ne $raw -and $raw -match $personalPathRegex) {
           Write-Error "❌ [隐私泄露拦截] 文件 '$f' 中检测到硬编码个人用户目录路径（匹配项：$($Matches[0])），请改用相对路径、环境变量或标准占位符！"
           exit 1
