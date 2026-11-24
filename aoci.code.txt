@@ -1,0 +1,108 @@
+#AOCI-CODE-VOLUME: 1
+
+===F:/workplace/Paseo/work/Soxu/===
+.editorconfig[FC3T]: F:声明仓库统一的字符编码、换行、尾随空白与缩进规则 | R:- | A:- | S:-
+.gitattributes[FC5T]: F:配置 Git 文本换行与二进制文件属性 | R:- | A:text,eol,binary | S:默认自动判定文本并使用 LF；PowerShell 脚本强制使用 LF，CMD 和 BAT 脚本强制使用 CRLF；PNG、ICO 和 WOFF2 按二进制处理。
+.gitignore[FV5T]: F:定义 Git 对构建产物、依赖、本地工作目录、凭据和缓存的忽略规则 | R:- | A:- | S:保留 .env.example、.vscode/extensions.json 和 .vscode/settings.json 的忽略例外；.aoci/ 按规范纳入版本控制。
+.gitleaks.toml[FS7T]: F:扩展 Gitleaks 默认规则，检测硬编码的 Windows、macOS 和 Linux 用户目录路径，并按文件路径匹配 Magpie 或 Paseo 本地凭据及密钥文件 | R:code:scripts/verify-commits-and-privacy.ps1 | A:hardcoded-windows-user-home,hardcoded-unix-user-home,magpie-or-paseo-local-secret-file | S:两条用户目录规则均要求用户名至少两个字符且后接路径分隔符，各有独立的用户名白名单；全局白名单精确排除本配置和校验脚本。
+AGENTS.md[SG9S]: F:定义 Soxu 仓库的多 Agent 协作规范，涵盖安全、工具链、架构边界、并行隔离、提交门禁、会话接手与 AOCI 认知维护 | R:code:scripts/check-all.ps1,code:docs/ops/PROGRESS.md,code:docs/ops/DECISIONS.md | A:Owned Paths,Git Emoji 提交规范,Stateless Handoff,AOCI 仓库认知 | S:并行子任务只写 Issue 声明的 Owned Paths，跨模块公共契约须先经独立 PR 合入 main。Magpie 与原生 CLI 适配测试必须使用临时夹具。已知上下文压缩后须用 context_compaction 和新事件 ID 完整重载 Overview，跟随游标至交付完成，仅依据新正文提交一次 Attestation。受管对象达到最终稳定状态后调用 Maintain，更新须提交机器签发的完整批次并保留来源摘要与候选身份，remaining 非零时在当前批次应用成功后重新调用 Maintain。
+CLAUDE.md[SG5T]: F:要求阅读并严格遵守仓库根目录 AGENTS.md 中的安全红线、架构边界、最新稳定版优先原则、Git Emoji 提交规范与跨对话无损交接协议 | R:code:AGENTS.md | A:- | S:-
+Cargo.lock[FV7L]: F:锁定 Cargo 构建解析出的依赖版本与依赖关系，并记录注册表来源和校验和 | R:- | A:Cargo.lock v4 | S:由 Cargo 自动生成，更新依赖时使用 Cargo。同名包可并存多个版本，依赖引用中用于区分版本的后缀须保留。
+Cargo.toml[FV8T]: F:定义 Soxu 的 Cargo 工作区成员、共享包元数据、依赖版本与特性及 lint 策略 | R:code:crates/soxu-protocol/Cargo.toml,code:crates/soxu-core/Cargo.toml,code:crates/soxu-magpie/Cargo.toml,code:crates/soxu-drivers/Cargo.toml,code:crates/soxu-git/Cargo.toml | A:workspace,workspace.package,workspace.dependencies,workspace.lints | S:显式使用依赖解析器 3，共享包元数据声明 Rust 最低版本为 1.99；继承工作区 lint 的成员禁止 unsafe_code，dbg_macro、todo 和 unwrap_used 触发警告
+README.md[SG6T]: F:介绍 Soxu 桌面工作台与移动遥控端的核心能力，概览仓库结构并提供研发与用户文档入口 | R:code:AGENTS.md,code:Cargo.toml,code:docs/ops/PROGRESS.md,code:docs/ops/DECISIONS.md,code:docs/dev/architecture.md | A:- | S:未安装 Magpie 时自动扫描各 CLI 的原生配置目录，作为发现模型与路由配置的降级路径。
+mise.toml[FC6T]: F:声明仓库开发工具版本并配置 Cargo 构建缓存目录 | R:- | A:tools.rust,tools.node,tools.pnpm,env.CARGO_TARGET_DIR | S:缓存路径以 config_root 为基准指向上级目录的 .cargo-target/soxu，供主工作区与多 Agent Worktree 复用，避免硬编码个人盘符。
+paseo.json[FV5T]: F:声明 Paseo 本地开发命令，启动守护进程、桌面工作台和移动端 Web 开发服务器，并运行全工作区检查 | R:code:scripts/check-all.ps1 | A:daemon-dev,desktop-dev,mobile-dev,check-all | S:所有命令均通过 pwsh -NoProfile 执行，mobile-dev 在 apps/mobile-web 下运行 pnpm run dev。
+
+===F:/workplace/Paseo/work/Soxu/.githooks/===
+commit-msg[OQ5T]: F:在 Git 提交时校验提交消息 | R:code:scripts/verify-commits-and-privacy.ps1 | A:commit-msg | S:以非交互模式启动 PowerShell 并绕过执行策略，脚本通过相对路径定位，第一个钩子参数作为消息文件路径原样传入。
+pre-commit[XQ6T]: F:在 Git 提交前调用 PowerShell 脚本校验提交与隐私 | R:code:scripts/verify-commits-and-privacy.ps1 | A:pre-commit | S:以 PreCommit 模式运行，禁用 PowerShell 配置加载和交互，脚本退出码决定钩子是否通过
+
+===F:/workplace/Paseo/work/Soxu/.github/ISSUE_TEMPLATE/===
+task.yml[FW4T]: F:声明 GitHub 开发任务表单，收集允许修改的路径、建议难度与模型档位、目标与验收标准 | R:- | A:开发任务 (Engineering Task),scope,complexity,goal | S:三个字段均为必填，新议题预填 [Task] 标题前缀并附加 task 标签
+
+===F:/workplace/Paseo/work/Soxu/.github/===
+PULL_REQUEST_TEMPLATE.md[SV5T]: F:规范拉取请求对关联议题、变更归属、核心改动和验证结果的记录，提供必选的提交与工程自检清单 | R:code:docs/ops/PROGRESS.md,code:docs/ops/DECISIONS.md,code:scripts/check-all.ps1 | A:拉取请求模板 | S:PR标题及所有提交信息均须采用 `<emoji> <type>(<scope>): <中文简明描述>`；新增第三方依赖须由包管理器实时解析最新稳定版，因兼容性回退时须在配置注释中说明原因；提交前须在本地通过 `pwsh -NoProfile -File scr
+
+===F:/workplace/Paseo/work/Soxu/.github/workflows/===
+ci.yml[OQ7T]: F:在面向 main 的推送和拉取请求中校验提交与 PR 标题规范、扫描秘密泄露、检查 Rust 格式与 Clippy 并运行测试，以及构建移动端 PWA | R:code:scripts/verify-commits-and-privacy.ps1,code:apps/mobile-web/pnpm-lock.yaml | A:CI,governance-and-privacy,rust-check,mobile-web-check | S:同一工作流和 Git 引用的新运行会取消旧运行；治理扫描检出完整 Git 历史，Gitleaks 固定使用 v8.30.1 并脱敏输出；Rust 检查在 Windows 运行且 Clippy 将警告视为错误；移动 Web 安装依赖时冻结锁文件。
+
+===F:/workplace/Paseo/work/Soxu/apps/mobile-web/===
+index.html[EU6T]: F:提供移动控制台的 HTML 入口，加载应用模块并声明 Web 应用清单 | R:code:apps/mobile-web/src/main.tsx | A:#app | S:视口使用 viewport-fit=cover，页面布局需为刘海等屏幕边缘留出安全区
+package.json[FV5T]: F:声明移动端 Web 应用的软件包元数据、依赖及开发、类型检查、构建和预览脚本 | R:- | A:@soxu/mobile-web,dev,check,build,preview | S:build 仅在 tsc --noEmit 成功后执行 vite build。
+pnpm-lock.yaml[FV6L]: F:锁定移动端 Web 应用的运行与构建依赖，记录直接依赖的版本范围、精确解析版本、传递依赖关系及完整性校验值 | R:- | A:pnpm lockfileVersion 9.0 | S:快照键包含对等依赖的解析上下文，更新引用时须保留完整后缀，例如 vite@8.3.8(jiti@2.7.0)；TypeScript 的平台二进制包以可选依赖记录。
+pnpm-workspace.yaml[FC4T]: F:将 electron-to-chromium 排除在移动 Web 应用的 pnpm 最低发布时长限制之外 | R:- | A:minimumReleaseAgeExclude | S:-
+tsconfig.json[FC6T]: F:配置移动 Web 应用的 TypeScript 类型检查、模块解析和 Preact JSX | R:- | A:- | S:仅将 src 作为入口范围，不输出编译产物。允许显式导入 TypeScript 扩展名，该设置依赖 noEmit 或仅输出声明。
+vite.config.ts[FV6T]: F:声明移动 Web 应用的 Vite 构建配置并集成 Preact 与 Tailwind CSS 插件 | R:- | A:Vite 默认导出配置 | S:构建目标为 ES2022，每次构建前清空 dist 输出目录。
+
+===F:/workplace/Paseo/work/Soxu/apps/mobile-web/public/===
+manifest.webmanifest[FU4T]: F:声明 Soxu Remote 移动 Web 应用的名称、启动路径、独立窗口显示模式和主题配色 | R:- | A:Web App Manifest | S:启动路径固定为站点根路径，部署到子路径时需同步调整 start_url
+
+===F:/workplace/Paseo/work/Soxu/apps/mobile-web/src/===
+index.css[FG5T]: F:为移动端 Web 应用引入 Tailwind CSS | R:- | A:- | S:-
+main.tsx[EU6T]: F:移动遥控端的 Preact 入口，渲染页面骨架与开发进度说明 | R:code:apps/mobile-web/src/index.css | A:#app | S:找不到挂载节点时跳过渲染。
+vite-env.d.ts[FC4T]: F:为移动 Web 应用引入 Vite 客户端的 TypeScript 类型声明 | R:- | A:vite/client | S:-
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-cli/===
+Cargo.toml[FV6T]: F:声明 soxu-cli 包、soxu 命令的构建入口及其依赖 | R:code:crates/soxu-cli/src/main.rs | A:soxu-cli,soxu | S:版本、Rust 版本要求、语言版本、许可证、lint 规则及全部依赖均继承自工作区
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-cli/src/===
+main.rs[EU6T]: F:解析 Soxu 命令行子命令，显示 CLI 与协议版本并诊断 Magpie 环境模式 | R:- | A:soxu version,soxu doctor | S:doctor 优先使用 USERPROFILE，其未设置时才使用 HOME，并在选定目录下查找 .config/magpie；两者均未设置时直接采用 StandaloneNative。
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-core/===
+Cargo.toml[FV5T]: F:声明 soxu-core crate 的包元数据、lint 设置和依赖 | R:code:Cargo.toml | A:soxu-core | S:版本、edition、最低 Rust 版本、许可证、lint 配置及全部依赖声明均继承自工作区
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-core/src/===
+lib.rs[DB7T]: F:定义工作区文件系统隔离模式及 Agent CLI 启动前的环境变量扩展接口 | R:- | A:WorkspaceIsolation,RuntimeExtensionHook,RuntimeExtensionHook::transform_launch_env,NoopExtensionHost | S:隔离模式以 kind 字段标记 local 或 worktree，worktree 必须包含 branch 和 base_ref；扩展钩子要求 Send + Sync，默认实现保留环境变量。
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/===
+Cargo.toml[FV5T]: F:声明 soxu-daemon 包及其工作区依赖，涵盖异步运行、HTTP 服务、资源嵌入和仓库内部组件 | R:code:Cargo.toml | A:soxu-daemon | S:包的版本、Rust edition、最低 Rust 版本、许可证和 lint 规则均继承工作区设置。
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/src/===
+main.rs[EG7T]: F:启动 Soxu 守护进程的 HTTP 服务，提供返回守护进程版本、协议版本和 Magpie 环境检测结果的健康检查 | R:- | A:main,build_router,GET /api/health,SOXU_LISTEN | S:SOXU_LISTEN 缺失或无法解码为 Unicode 时默认监听 127.0.0.1:7698，绑定失败直接返回错误；Magpie 配置目录优先取 USERPROFILE，仅在其未设置时取 HOME，再拼接 .config/magpie
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-desktop/===
+Cargo.toml[FC5T]: F:声明 soxu-desktop 包并通过工作区引入核心、协议、序列化、错误处理和追踪依赖 | R:code:Cargo.toml | A:soxu-desktop | S:包的版本、Rust 版本下限、edition、许可证和 lint 规则均继承工作区配置
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-desktop/src/===
+main.rs[EU4T]: F:Soxu 桌面工作台占位入口，启动时打印应用版本、协议版本和工作台接入提示 | R:- | A:main | S:-
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/===
+Cargo.toml[FV5T]: F:声明驱动 crate 的包信息、工作区 lint 设置和依赖 | R:code:Cargo.toml | A:soxu-drivers | S:-
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/src/===
+lib.rs[IE6T]: F:定义支持进程复用的本机原生 Agent CLI 类型及其在系统 PATH 中的默认可执行文件名 | R:- | A:NativeCliKind,NativeCliKind::binary_name | S:类型以 snake_case 序列化，序列化值与可执行文件名并不总相同，例如 antigravity 对应 agy。
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-git/===
+Cargo.toml[FV5T]: F:声明 soxu-git crate 的包元数据、lint 规则和依赖 | R:code:Cargo.toml | A:soxu-git | S:版本、Rust edition、最低 Rust 版本、许可证、lint 规则和全部依赖均继承自工作区
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/===
+lib.rs[LR5T]: F:定义与对话轮次绑定的 Git 检查点摘要，记录检查点标识、轮次索引、提交对象标识和变更文件数 | R:- | A:CheckpointSummary | S:-
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-magpie/===
+Cargo.toml[FV5T]: F:声明soxu-magpie包及其工作区依赖 | R:code:Cargo.toml | A:soxu-magpie | S:包版本、Rust版本、edition、许可证和lint规则均继承自工作区
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-magpie/src/===
+lib.rs[IE6T]: F:根据配置目录判定 Magpie 协同或原生独立模式，并定义 MCP 与 Skill 的路由模式 | R:- | A:EnvironmentMode,McpRouteMode,SkillRouteMode,detect_mode_from_config_dir | S:library.json 或 gateway.json 任一为文件即启用协同模式，不读取内容；三个模式枚举均以 snake_case 序列化。
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-protocol/===
+Cargo.toml[FN6T]: F:声明 soxu-protocol 协议库包并配置其依赖 | R:code:Cargo.toml | A:soxu-protocol | S:版本、Rust 版本下限、语言版本、许可证、 lint 规则及全部依赖声明均继承自工作区
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-protocol/src/===
+lib.rs[LN8T]: F:定义 Soxu 桌面端、移动端 Web/PWA 与 CLI 共用的版本化守护进程通信协议，涵盖事件信封、活跃轮次消息投递策略和健康状态快照 | R:- | A:PROTOCOL_VERSION,ActiveTurnBehavior,EventEnvelope,EventEnvelope::new,HealthSnapshot | S:投递策略使用 snake_case 序列化，默认值为 Queue。事件序号由调用方提供，构造函数原样保存且不校验单调性，并写入当前协议版本和 UTC 时间。
+
+===F:/workplace/Paseo/work/Soxu/docs/dev/===
+architecture.md[SG7T]: F:说明 Soxu 客户端、共享协议与守护进程核心的分层职责，以及 Magpie 路由感知与原生扫描降级边界 | R:- | A:PROTOCOL_VERSION,RuntimeExtensionHook,MagpieManaged,StandaloneNative | S:会话与审批事件使用单调递增的 u64 游标，重连时按最后已读 seq 增量追平；Magpie 只读非敏感元数据，禁止读取 redact.key 或原始密钥；新建 Git Worktree 时为 direct MCP 工具补齐工作区软链或索引上下文
+contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、多 Agent 并行开发及提交与 PR 流程 | R:code:AGENTS.md,code:scripts/setup-hooks.ps1,code:scripts/check-all.ps1,code:Cargo.toml,code:docs/ops/PROGRESS.md | A:mise trust,setup-hooks.ps1,check-all.ps1,Owned Paths | S:公共契约变更须先单流合入 main；并行上限 2～3，修改限于各 Issue 的 Owned Paths；禁止使用 --no-verify；新增缓存、临时产物或工具配置须在同一 PR 更新 .gitignore 与 docs/ops/PROGRESS.md。
+
+===F:/workplace/Paseo/work/Soxu/docs/ops/===
+DECISIONS.md[SG8T]: F:记录 Soxu 已采纳的架构与工程决策，涵盖双端架构、原生 Agent CLI、Magpie 集成、插件扩展、设计系统及工具链与提交门禁 | R:- | A:ADR-001,ADR-002,ADR-003,ADR-004,ADR-005,ADR-006 | S:移动 PWA 经 rust-embed 内嵌到 soxu-daemon 单一可执行文件；当前直接复用本机已认证 CLI，暂不开发 ACP；新建 Worktree 时为 direct 类目录敏感 MCP 补齐工作区上下文，严禁覆写全局 CLI 配置，缺少 Magpie 时自动降级为 StandaloneNative；插件前期只预留扩展接口；功能编码前须完成双端同源设计系统，初版设计待三个参考项目完成 AOCI 与 CodeGraph 索引后恢复；所有提交须通过本地与云端的 Git Emoji、gitleaks 和个人路径隐私检查
+PROGRESS.md[SW6T]: F:记录 Soxu 研发里程碑、参考项目索引进度、并发与模型调度策略及后续行动，供跨会话交接 | R:code:AGENTS.md | A:- | S:接手时先读根目录 AGENTS.md，再结合里程碑状态与 gh issue list、gh pr list 恢复上下文；行动队列仍列有总体状态已标记完成的索引任务。
+
+===F:/workplace/Paseo/work/Soxu/docs/user/===
+getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
+mobile-remote.md[SU5T]: F:指导用户通过手机浏览器或主屏幕 PWA 远程监控和控制 Soxu 多 Agent 工作区 | R:- | A:移动设备配对,Queue,Steer,Interrupt | S:断网恢复或锁屏唤醒后按事件游标增量追平；设备鉴权令牌通过一次性配对二维码获取
+
+===F:/workplace/Paseo/work/Soxu/scripts/===
+check-all.ps1[TQ7T]: F:依次运行提交历史与隐私校验、Rust 格式检查、Clippy、工作区测试和移动端 Web/PWA 构建 | R:code:scripts/verify-commits-and-privacy.ps1,code:apps/mobile-web/package.json | A:scripts/check-all.ps1 | S:隐私校验使用 CiCheck 模式，Clippy 将警告视为错误。仅当移动端 package.json 存在时才运行构建，构建步骤通过 finally 恢复原工作目录。
+setup-hooks.ps1[XC4T]: F:将当前 Git 仓库的钩子目录配置为 .githooks 并打印启用提示 | R:- | A:core.hooksPath | S:-
+verify-commits-and-privacy.ps1[OS7S]: F:校验提交与 PR 标题的 Git Emoji 和 Conventional Commits 格式，拦截敏感文件、超限文件及硬编码个人目录路径，并在可用时调用 Gitleaks 扫描 | R:- | A:PreCommit,CommitMsg,CiCheck,CommitMsgFile,PR_TITLE | S:预提交按暂存区选取文件名，但大小和路径内容取自工作树；根目录 .env.example 跳过内置检查；Merge 和 Revert 标题免检；CI 校验最近 20 条提交标题；缺少 Gitleaks 时仅预提交告警，两种扫描模式均继续。
