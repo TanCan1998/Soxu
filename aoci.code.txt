@@ -27,7 +27,7 @@ PULL_REQUEST_TEMPLATE.md[SV5T]: F:规范拉取请求对关联议题、变更归�
 ci.yml[OQ7T]: F:在面向 main 的推送和拉取请求中校验提交与 PR 标题规范、扫描秘密泄露、检查 Rust 格式与 Clippy 并运行测试，以及构建移动端 PWA | R:code:scripts/verify-commits-and-privacy.ps1,code:apps/mobile-web/pnpm-lock.yaml | A:CI,governance-and-privacy,rust-check,mobile-web-check | S:同一工作流和 Git 引用的新运行会取消旧运行；治理扫描检出完整 Git 历史，Gitleaks 固定使用 v8.30.1 并脱敏输出；Rust 检查在 Windows 运行且 Clippy 将警告视为错误；移动 Web 安装依赖时冻结锁文件。
 
 ===F:/workplace/Paseo/work/Soxu/apps/mobile-web/===
-index.html[EU6T]: F:提供移动控制台的 HTML 入口，加载应用模块并声明 Web 应用清单 | R:code:apps/mobile-web/src/main.tsx | A:#app | S:视口使用 viewport-fit=cover，页面布局需为刘海等屏幕边缘留出安全区
+index.html[EU6T]: F:提供移动遥控舱的 HTML 入口，默认纯黑深色主题并加载应用模块与 Web 应用清单 | R:code:apps/mobile-web/src/main.tsx,code:apps/mobile-web/public/manifest.webmanifest | A:#app,#soxu-theme-meta | S:data-theme 默认 dark，主题切换时由应用同步更新 theme-color 元标签；视口使用 viewport-fit=cover 以适配安全区
 package.json[FV5T]: F:声明移动端 Web 应用的软件包元数据、依赖及开发、类型检查、构建和预览脚本 | R:- | A:@soxu/mobile-web,dev,check,build,preview | S:build 仅在 tsc --noEmit 成功后执行 vite build。
 pnpm-lock.yaml[FV6L]: F:锁定移动端 Web 应用的运行与构建依赖，记录直接依赖的版本范围、精确解析版本、传递依赖关系及完整性校验值 | R:- | A:pnpm lockfileVersion 9.0 | S:快照键包含对等依赖的解析上下文，更新引用时须保留完整后缀，例如 vite@8.3.8(jiti@2.7.0)；TypeScript 的平台二进制包以可选依赖记录。
 pnpm-workspace.yaml[FC4T]: F:将 electron-to-chromium 排除在移动 Web 应用的 pnpm 最低发布时长限制之外 | R:- | A:minimumReleaseAgeExclude | S:-
@@ -35,12 +35,14 @@ tsconfig.json[FC6T]: F:配置移动 Web 应用的 TypeScript 类型检查、模�
 vite.config.ts[FV6T]: F:声明移动 Web 应用的 Vite 构建配置并集成 Preact 与 Tailwind CSS 插件 | R:- | A:Vite 默认导出配置 | S:构建目标为 ES2022，每次构建前清空 dist 输出目录。
 
 ===F:/workplace/Paseo/work/Soxu/apps/mobile-web/public/===
-manifest.webmanifest[FU4T]: F:声明 Soxu Remote 移动 Web 应用的名称、启动路径、独立窗口显示模式和主题配色 | R:- | A:Web App Manifest | S:启动路径固定为站点根路径，部署到子路径时需同步调整 start_url
+manifest.webmanifest[FU4T]: F:声明 Soxu Remote 移动 Web 应用的名称、启动路径、独立窗口显示模式和纯黑主题配色 | R:- | A:Web App Manifest | S:背景与主题色固定为纯黑 #000000，与深色令牌画布一致；启动路径固定为站点根路径，部署到子路径时需同步调整 start_url
 
 ===F:/workplace/Paseo/work/Soxu/apps/mobile-web/src/===
-index.css[FG5T]: F:为移动端 Web 应用引入 Tailwind CSS | R:- | A:- | S:-
-main.tsx[EU6T]: F:移动遥控端的 Preact 入口，渲染页面骨架与开发进度说明 | R:code:apps/mobile-web/src/index.css | A:#app | S:找不到挂载节点时跳过渲染。
+index.css[FU5S]: F:引入 Tailwind 与生成的设计令牌，定义基础排版、安全区、触控目标、脉冲动画及减弱动效降级 | R:code:apps/mobile-web/src/tokens.generated.css | A:soxu-touch,soxu-safe-top,soxu-safe-bottom,soxu-live-dot,soxu-no-scrollbar | S:触控类保证 44px 最小命中区且按压仅改变透明度不改变布局；prefers-reduced-motion 下关闭脉冲动画
+main.tsx[EU6L]: F:移动遥控舱的 Preact 原型入口，演示窗口宽度自适应布局、待审批队列、三态 Queue/Steer/Interrupt 输入舱、检查点与脚本及 Magpie 双态面板 | R:code:apps/mobile-web/src/icons.tsx,code:apps/mobile-web/src/index.css | A:#app,/api/health | S:布局仅按 window.innerWidth 分为 compact(<640)/regular/wide(>=1024) 三档，不检测设备或方向；颜色一律取自设计令牌变量；数据为内置演示数据，仅 /api/health 为真实探测，失败时保持离线原型态
 vite-env.d.ts[FC4T]: F:为移动 Web 应用引入 Vite 客户端的 TypeScript 类型声明 | R:- | A:vite/client | S:-
+icons.tsx[ES5S]: F:提供移动端统一的 1.75 描边 SVG 图标组件集合 | R:- | A:IconBranch,IconShield,IconBolt,IconArrowUp,IconStop,IconChevron | S:所有图标均为装饰性并带 aria-hidden，仅靠相邻文字或按钮 aria-label 提供语义；禁止以 Emoji 充当结构图标
+tokens.generated.css[FS5S]: F:由设计令牌编译生成的移动端 CSS 变量，含深浅两套调色板、排版、间距、圆角、布局与动效 | R:code:design-system/soxu/tokens.json,code:scripts/sync-design-tokens.mjs | A:--soxu-* 自定义属性 | S:禁止手改，由 sync-design-tokens.mjs --write 生成并经 --check 防漂移；内容须与 design-system/soxu/tokens.css 完全一致
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-cli/===
 Cargo.toml[FV6T]: F:声明 soxu-cli 包、soxu 命令的构建入口及其依赖 | R:code:crates/soxu-cli/src/main.rs | A:soxu-cli,soxu | S:版本、Rust 版本要求、语言版本、许可证、lint 规则及全部依赖均继承自工作区
@@ -96,13 +98,27 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SG8T]: F:记录 Soxu 已采纳的架构与工程决策，涵盖双端架构、原生 Agent CLI、Magpie 集成、插件扩展、设计系统及工具链与提交门禁 | R:- | A:ADR-001,ADR-002,ADR-003,ADR-004,ADR-005,ADR-006 | S:移动 PWA 经 rust-embed 内嵌到 soxu-daemon 单一可执行文件；当前直接复用本机已认证 CLI，暂不开发 ACP；新建 Worktree 时为 direct 类目录敏感 MCP 补齐工作区上下文，严禁覆写全局 CLI 配置，缺少 Magpie 时自动降级为 StandaloneNative；插件前期只预留扩展接口；功能编码前须完成双端同源设计系统，初版设计待三个参考项目完成 AOCI 与 CodeGraph 索引后恢复；所有提交须通过本地与云端的 Git Emoji、gitleaks 和个人路径隐私检查
-PROGRESS.md[SW6T]: F:记录 Soxu 研发里程碑、参考项目索引进度、并发与模型调度策略及后续行动，供跨会话交接 | R:code:AGENTS.md | A:- | S:接手时先读根目录 AGENTS.md，再结合里程碑状态与 gh issue list、gh pr list 恢复上下文；行动队列仍列有总体状态已标记完成的索引任务。
+PROGRESS.md[SW6T]: F:记录 Soxu 研发里程碑、参考项目索引进度、并发与模型调度策略及后续行动，供跨会话交接 | R:code:AGENTS.md | A:- | S:接手时先读根目录 AGENTS.md，再结合里程碑状态与 gh issue list、gh pr list 恢复上下文；M0.5 当前处于评审中，Issue #3 跟踪
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
 mobile-remote.md[SU5T]: F:指导用户通过手机浏览器或主屏幕 PWA 远程监控和控制 Soxu 多 Agent 工作区 | R:- | A:移动设备配对,Queue,Steer,Interrupt | S:断网恢复或锁屏唤醒后按事件游标增量追平；设备鉴权令牌通过一次性配对二维码获取
 
 ===F:/workplace/Paseo/work/Soxu/scripts/===
-check-all.ps1[TQ7T]: F:依次运行提交历史与隐私校验、Rust 格式检查、Clippy、工作区测试和移动端 Web/PWA 构建 | R:code:scripts/verify-commits-and-privacy.ps1,code:apps/mobile-web/package.json | A:scripts/check-all.ps1 | S:隐私校验使用 CiCheck 模式，Clippy 将警告视为错误。仅当移动端 package.json 存在时才运行构建，构建步骤通过 finally 恢复原工作目录。
+check-all.ps1[TQ7T]: F:依次运行提交与隐私校验、设计令牌防漂移检查、Rust 格式、Clippy、工作区测试和移动端构建 | R:code:scripts/verify-commits-and-privacy.ps1,code:scripts/sync-design-tokens.mjs,code:apps/mobile-web/package.json | A:scripts/check-all.ps1 | S:令牌检查失败即终止；Clippy 将警告视为错误；移动端构建仅在 package.json 存在时运行并以 finally 恢复工作目录
 setup-hooks.ps1[XC4T]: F:将当前 Git 仓库的钩子目录配置为 .githooks 并打印启用提示 | R:- | A:core.hooksPath | S:-
 verify-commits-and-privacy.ps1[OS7S]: F:校验提交与 PR 标题的 Git Emoji 和 Conventional Commits 格式，拦截敏感文件、超限文件及硬编码个人目录路径，并在可用时调用 Gitleaks 扫描 | R:- | A:PreCommit,CommitMsg,CiCheck,CommitMsgFile,PR_TITLE | S:预提交按暂存区选取文件名，但大小和路径内容取自工作树；根目录 .env.example 跳过内置检查；Merge 和 Revert 标题免检；CI 校验最近 20 条提交标题；缺少 Gitleaks 时仅预提交告警，两种扫描模式均继续。
+sync-design-tokens.mjs[XS6S]: F:从 tokens.json 生成两份相同的 CSS 令牌文件，并以 --check 校验漂移 | R:code:design-system/soxu/tokens.json,code:design-system/soxu/tokens.css,code:apps/mobile-web/src/tokens.generated.css | A:--write,--check | S:比较前统一换行为 LF；任一目标缺失或内容不同即以非零退出；变量名由分组与键名转 kebab-case 并加 soxu 前缀
+
+===F:/workplace/Paseo/work/Soxu/design-system/soxu/===
+MASTER.md[SG9S]: F:Soxu 双端设计系统主规范，定义对标 ChatGPT 的纯黑表面海拔、对比度矩阵、排版间距圆角、性能红线与分页面索引 | R:code:design-system/soxu/tokens.json,code:design-system/soxu/pages/01-desktop-workbench.md,code:design-system/soxu/pages/05-mobile-remote-pwa.md | A:7级表面海拔,WCAG对比度矩阵,窗口宽度断点 | S:色彩仅表达语义且必须配图标或文字；纯黑下以亮度阶差加描边而非阴影表达层级；text.ghost 不得承载信息；GPUI 渲染线程禁止同步 I/O，流式提交不超过 8.3Hz；布局只按窗口宽度分支
+preview.html[SU5T]: F:自包含的桌面工作台静态预览页，用令牌 CSS 呈现纯黑三栏、审批卡、输入舱与深浅切换 | R:code:design-system/soxu/tokens.css | A:- | S:仅示意布局与层级，数据为静态演示；窗口宽度低于 1024px 时隐藏两侧栏
+tokens.css[FS5S]: F:由设计令牌编译生成的设计系统 CSS 变量，供预览页与文档引用 | R:code:design-system/soxu/tokens.json,code:scripts/sync-design-tokens.mjs | A:--soxu-* 自定义属性 | S:禁止手改，须与移动端 tokens.generated.css 内容一致，由 --check 门禁保证
+tokens.json[MS9S]: F:双端设计令牌唯一真相源，以 DTCG 格式定义深浅调色板、排版、间距、圆角、布局断点与动效 | R:code:scripts/sync-design-tokens.mjs | A:color.dark,color.light,typography,spacing,layout,motion | S:深色灰阶色度为零且画布为纯黑；修改后必须运行 sync-design-tokens.mjs --write，GPUI 桌面端常量须同步映射；语义色须配图标或文字
+
+===F:/workplace/Paseo/work/Soxu/design-system/soxu/pages/===
+01-desktop-workbench.md[SG7S]: F:规定 GPUI 桌面四栏工作台的布局极值、状态桶优先级、Worktree 行为、右栏检视器与焦点上下文及快捷键 | R:code:design-system/soxu/MASTER.md | A:needs_input>failed>running>attention>done,焦点上下文栈 | S:中栏最小 380px 优先保留；Esc 须按模态、面板、补全、重命名的内层优先栈处理并停止传播，避免误停 Agent；文件树遍历仅限后台线程
+02-composer-and-handoff.md[SU6T]: F:规定三态输入舱的几何、Idle/Preparing/Running 状态机、Queue/Steer/Interrupt 投递语义、运行时胶囊与 @agent 移交补全 | R:code:design-system/soxu/MASTER.md | A:ActiveTurnBehavior,Queue,Steer,Interrupt | S:运行中输入框永不置灰；驱动不支持热注入时 Steer 须提示中断续接，未被读取的 Steer 退回草稿不得静默丢失；补全过滤纯内存零 I/O
+03-timeline-tools-and-checkpoints.md[SU6T]: F:规定对话流角色排版、结构化工具卡、风险分级权限审批卡及 Git 轮次检查点与回退确认 | R:code:design-system/soxu/MASTER.md | A:权限审批卡,Checkpoint,Rewind | S:高危命令禁用始终允许且默认聚焦拒绝；多端审批以 approval_id 幂等消解；回退前必须自动创建备份引用并三选一确认；活动卡 Diff 预览上限 400 行
+04-magpie-and-cli-inspector.md[SU6T]: F:规定 Magpie 双态路由诊断面板、七类原生 CLI 驱动矩阵及本地历史会话导入流程 | R:code:design-system/soxu/MASTER.md | A:MagpieManaged,StandaloneNative,NativeCliKind | S:未检测到 Magpie 时以中性提示呈现而非报错；全局配置只读且跳过密钥文件；gemini-4-carbon 仅在 agy 原生可用需标注；未安装 CLI 自动隐藏于新建选择器
+05-mobile-remote-pwa.md[SU6T]: F:规定内嵌移动遥控 PWA 的自适应矩阵、扫码配对、游标增量追平、拇指区审批、快捷指令与脚本巡检 | R:code:design-system/soxu/MASTER.md | A:#offer 配对,seq 追平,底部四栏导航 | S:配对后须清除地址栏 offer 片段；输入框字号不低于 16px；抽屉高度用 dvh 百分比而非固定像素；首屏 gzip 目标小于 35KB
