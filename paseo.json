@@ -1,0 +1,20 @@
+{
+  "scripts": {
+    "daemon-dev": {
+      "command": "pwsh -NoProfile -Command \"cargo run -p soxu-daemon\"",
+      "description": "启动本地 Soxu 守护进程（开发模式）"
+    },
+    "desktop-dev": {
+      "command": "pwsh -NoProfile -Command \"cargo run -p soxu-desktop\"",
+      "description": "启动 Soxu GPUI 桌面工作台（开发模式）"
+    },
+    "mobile-dev": {
+      "command": "pwsh -NoProfile -WorkingDirectory apps/mobile-web -Command \"pnpm run dev\"",
+      "description": "启动移动端 Web/PWA 热更新开发服务器"
+    },
+    "check-all": {
+      "command": "pwsh -NoProfile -File scripts/check-all.ps1",
+      "description": "运行全工作区格式、Clippy、单元测试、前端构建与隐私扫描"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+name: 开发任务 (Engineering Task)
+description: 面向单职责、受控上下文预算（10~25 分钟可闭环）的开发或设计子任务
+title: "[Task] "
+labels: ["task"]
+body:
+  - type: input
+    id: scope
+    attributes:
+      label: 允许修改的路径白名单 (Owned Paths)
+      description: 限定负责的 Crate 或目录，防止多 Agent Worktree 越界冲突
+      placeholder: "crates/soxu-magpie/**"
+    validations:
+      required: true
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: 建议难度与模型档位
+      options:
+        - "L1 · 轻量脚手架/文档 (deepseek-v4.1-flash / gemini-4-hydrogen)"
+        - "L2 · 核心模块/UI 实现 (gpt-6.2-sol / claude-sonnet-5.5 / gemini-4-hydrogen)"
+        - "L3 · 架构/高难并发攻坚 (gpt-6.2-astra / claude-opus-5.5 / gemini-4-carbon)"
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目标与验收标准 (Acceptance Criteria)
+      placeholder: |
+        - [ ] 完成 ...
+        - [ ] 单测覆盖 ...
+    validations:
+      required: true

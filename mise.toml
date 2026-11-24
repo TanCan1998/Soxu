@@ -1,0 +1,8 @@
+[tools]
+rust = "1.99.1"
+node = "26.13.1"
+pnpm = "12.21.0"
+
+[env]
+# 跨主工作区与多 Agent Worktree 复用同一构建缓存目录（避免硬编码个人盘符路径且节省数十 GB 空间）
+CARGO_TARGET_DIR = "{{ config_root }}/../.cargo-target/soxu"

@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+set -eu
+pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "scripts/verify-commits-and-privacy.ps1" -Mode PreCommit

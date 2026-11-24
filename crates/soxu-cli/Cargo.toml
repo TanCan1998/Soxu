@@ -1,0 +1,20 @@
+[package]
+name = "soxu-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "soxu"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+soxu-drivers.workspace = true
+soxu-magpie.workspace = true
+soxu-protocol.workspace = true

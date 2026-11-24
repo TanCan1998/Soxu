@@ -1,0 +1,24 @@
+[package]
+name = "soxu-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+rust-embed.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+soxu-core.workspace = true
+soxu-drivers.workspace = true
+soxu-git.workspace = true
+soxu-magpie.workspace = true
+soxu-protocol.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

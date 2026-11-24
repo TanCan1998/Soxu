@@ -1,0 +1,37 @@
+title = "Soxu Secret & Personal Privacy Scanner Rules"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "hardcoded-windows-user-home"
+description = "禁止硬编码本机 Windows 个人用户目录绝对路径"
+regex = '''(?i)[a-z]:[\\/]+users[\\/]+[a-z0-9._-]{2,}[\\/]+'''
+tags = ["privacy", "path"]
+  [rules.allowlist]
+  regexes = [
+    '''(?i)[a-z]:[\\/]+users[\\/]+(public|default|runneradmin|example)[\\/]+'''
+  ]
+
+[[rules]]
+id = "hardcoded-unix-user-home"
+description = "禁止硬编码本机 macOS/Linux 个人用户目录绝对路径"
+regex = '''(?:/Users/|/home/)[a-zA-Z0-9._-]{2,}/'''
+tags = ["privacy", "path"]
+  [rules.allowlist]
+  regexes = [
+    '''(?:/Users/|/home/)(runner|ubuntu|root|paseo|example|user)/'''
+  ]
+
+[[rules]]
+id = "magpie-or-paseo-local-secret-file"
+description = "禁止提交 Magpie 或 Paseo 本地凭据与密钥内容"
+path = '''(?i)(redact\.key|local-credential|daemon-keypair\.json|caller-keys\.json|logins\.json|push-tokens\.json)$'''
+tags = ["security", "credentials"]
+
+[allowlist]
+description = "允许规则定义文件自身与校验脚本"
+paths = [
+  '''^\.gitleaks\.toml$''',
+  '''^scripts/verify-commits-and-privacy\.ps1$'''
+]

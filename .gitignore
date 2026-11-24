@@ -1,0 +1,48 @@
+# Rust & Cargo 构建产物
+/target/
+**/*.rs.bk
+*.pdb
+
+# 参考源码与本地多工作树隔离目录（严禁提交进主仓库）
+/.refs/
+/.worktrees/
+/.soxu-dev/
+/.paseo-local/
+
+# 前端与移动端 Web/PWA 构建产物及依赖
+node_modules/
+apps/mobile-web/dist/
+apps/mobile-web/.vite/
+dist/
+.pnpm-store/
+
+# 环境变量、密钥与私有本地覆盖配置（防隐私泄露）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+redact.key
+local-credential
+daemon-keypair.json
+push-tokens.json
+mise.local.toml
+*.local.json
+*.local.toml
+
+# CodeGraph 本地符号数据库与运行时缓存（注：.aoci/ 知识索引按规范随 Git 版本化保留）
+.codegraph/
+*.codegraph.db*
+
+# 日志、临时截图与系统/编辑器杂项
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
