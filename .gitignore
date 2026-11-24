@@ -12,8 +12,10 @@
 # 前端与移动端 Web/PWA 构建产物及依赖
 node_modules/
 apps/mobile-web/dist/
+apps/mobile-web/dist-preview/
 apps/mobile-web/.vite/
 dist/
+dist-preview/
 .pnpm-store/
 
 # 环境变量、密钥与私有本地覆盖配置（防隐私泄露）

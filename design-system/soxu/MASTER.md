@@ -53,9 +53,9 @@ Soxu 服务于高频并行操控多个本地编码 Agent（`claude`、`codex`、
 
 ## 三、排版、间距、圆角与图标纪律
 
-### 3.1 双尺度排版系统（GPUI `sp()` vs 定宽 `px()`）
-- **无衬线 UI 与对话字体（`--soxu-font-sans`）**：`Inter, 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif`。数字统计与计时器一律开启 `font-variant-numeric: tabular-nums`，杜绝流式刷新时宽度跳动。
-- **代码、终端与路径字体（`--soxu-font-mono`）**：`'JetBrains Mono', 'Cascadia Mono', 'SF Mono', Consolas, monospace`。
+### 3.1 双尺度排版与开源双字体体系（GPUI `sp()` vs 定宽 `px()`）
+- **全开源免费字体策略（SIL OFL 1.1）**：禁止依赖专有闭源付费字体。提供 5 套界面无衬线/中文字体预设（默认 `Inter + Noto Sans SC`，支持 `IBM Plex Sans`、`Plus Jakarta Sans`、`霞鹜文楷 LXGW WenKai Screen` 等）与 5 套代码等宽预设（默认 `JetBrains Mono`，支持 `Fira Code`、`Maple Mono`、`IBM Plex Mono`、`Cascadia Code`）。
+- **独立 / 跟随双重模式**：设置界面支持单独设定「界面字体」与「代码块字体」，并提供 **「代码块字体跟随界面字体」** 开关（`--soxu-font-code-effective` 与 GPUI `effective_code_family()` 自动联动）。数字统计与计时器一律开启 `font-variant-numeric: tabular-nums`。
 - **GPUI 缩放隔离铁律**：
   - 界面铬层（侧栏、页签、按钮、胶囊微标）统一使用 `sp(px_val)`（以 `14px = 1rem` 随用户 UI 缩放设置等比缩放）；
   - 内容表面（对话 Markdown、代码编辑器、Diff 行、终端网格）保持独立字号配置并以 `px()` 渲染，**严禁二次叠加 `sp()` 缩放**。
@@ -162,3 +162,4 @@ Soxu 服务于高频并行操控多个本地编码 Agent（`claude`、`codex`、
 4. [`pages/04-magpie-and-cli-inspector.md`](pages/04-magpie-and-cli-inspector.md) —— Magpie 双态拓扑、7 大原生 CLI 徽标与能力矩阵、**Worktree 启动环境变量预览器**与本地历史会话无损导入流
 5. [`pages/05-mobile-remote-pwa.md`](pages/05-mobile-remote-pwa.md) —— Daemon 内嵌移动遥控 PWA：**13 组真机窗口矩阵**、Bottom Sheet 规范、`#offer=` 扫码与手填双路径、游标增量追平与大拇指审批流
 6. [`pages/06-modals-onboarding-and-automation.md`](pages/06-modals-onboarding-and-automation.md) —— **首次 3 步 Onboarding 向导、`Cmd+K` 全局命令面板、添加项目三合一弹窗、Git Emoji AI 提交预览弹窗、Schedules & Heartbeats 调度中心**
+7. [`pages/07-settings-fonts-and-motion.md`](pages/07-settings-fonts-and-motion.md) —— **`shadcn/ui` 极简悬停自动展开准则、7 分区独立设置界面、开源双字体独立/跟随架构、纯图标主题切换过渡与 GPUI 1:1 可移植动效矩阵**

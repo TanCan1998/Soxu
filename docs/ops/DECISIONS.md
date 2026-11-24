@@ -5,9 +5,9 @@
 ---
 
 ## ADR-001：采用 GPUI 桌面端 + Rust 独立 Daemon + 内嵌响应式移动 Web/PWA（方案 1）
-- **状态**：已采纳（2026-11-24）
-- **背景**：桌面端需要承载多项目、多 Agent 高频并发流式输出、长上下文虚拟列表与实时代码 Diff；移动端主要用于远程查看状态、权限审批与中途发令（Steer/Queue）。
-- **决策**：核心逻辑下沉至纯 Rust `soxu-daemon` 与版本化 `soxu-protocol`；桌面端使用 **GPUI + `gpui-component`** 获取极致原生性能；移动端采用 **TypeScript + Preact + Tailwind CSS v4** 构建超轻量响应式 PWA，经 `rust-embed` 内嵌进 `soxu-daemon` 单一可执行文件直接提供服务。
+- **状态**：已采纳并修订（2026-11-25）
+- **背景**：桌面端需要承载多项目、多 Agent 高频并发流式输出、长上下文虚拟列表与实时代码 Diff；移动端主要用于远程查看状态、权限审批与中途发令（Steer/Queue），同时需要一套标准组件库确保高保真交互原型与真实客户端无障碍对齐。
+- **决策**：核心逻辑下沉至纯 Rust `soxu-daemon` 与版本化 `soxu-protocol`；桌面端使用 **GPUI + `gpui-component`（shadcn 风格同源）** 获取极致原生性能；移动端与桌面交互设计原型采用 **TypeScript + React 19 + `shadcn/ui`（`radix-ui`）+ Tailwind CSS v4 + `lucide-react`** 构建响应式 PWA，经 `rust-embed` 内嵌进 `soxu-daemon` 单一可执行文件直接提供服务。
 
 ## ADR-002：100% 复用本机已装原生 Agent CLI，暂不引入 ACP
 - **状态**：已采纳（2026-11-24）
@@ -22,8 +22,8 @@
 - **决策**：前期聚焦核心多 Agent 编排、Git Worktree 隔离、桌面与移动协同体验，不建设外部插件运行时或市场；在 `soxu-core` 与协议层预留 `RuntimeExtensionHook` 等零开销扩展接口，确保后续演进无需重构底座。
 
 ## ADR-005：UI/UX 设计系统严格前置（M0.5）、对标 ChatGPT 纯黑主题与双端令牌同源
-- **状态**：已采纳并迭代（2026-11-24）
-- **决策**：在实际功能编码开始前完成全端 UI/UX 设计系统；目前先暂停初版设计，待 `Paseo`、`codeg`、`padu` 三大参考项目完成 `AOCI` 与 `CodeGraph` 索引后，深度提炼真实交互细节，且**深色主题明确对标 ChatGPT 纯黑色（Pure Black `#000000` 画布 + `#0D0D0D` / `#171717` / `#212121` 无色偏中性灰阶分层）**，再同步映射为 GPUI 桌面主题与移动端 CSS 变量。
+- **状态**：已采纳并深度升级（2026-11-25）
+- **决策**：在实际功能编码开始前基于 `Paseo`、`codeg`、`padu` 参考项目完成全端 UI/UX 设计系统：**深色主题明确对标 ChatGPT 纯黑色（Pure Black `#000000` 画布 + `#0D0D0D` / `#171717` / `#212121` 无色偏中性灰阶分层）**，映射为统一 CSS 变量（含 `shadcn/ui` 语义映射与 GPUI 常量）；前端全量使用 **`shadcn/ui` + Tailwind CSS v4 + `lucide-react` 开源图标**；实行极简收敛与悬停自动展开设计，提供独立 7 分区设置界面与开源免费双字体（界面字体 / 代码块字体独立设置或一键跟随），所有动效均提供 GPUI 1:1 可移植规范。
 
 ## ADR-006：全线采用最新稳定版工具链与 Git Emoji + 隐私拦截双重门禁
 - **状态**：已采纳（2026-11-24）

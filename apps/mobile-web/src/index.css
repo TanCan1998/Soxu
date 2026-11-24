@@ -1,11 +1,42 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 @import "./tokens.generated.css";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--soxu-font-ui);
+  --font-mono: var(--soxu-font-code-effective);
+  --radius-sm: var(--soxu-radius-sm);
+  --radius-md: var(--soxu-radius-md);
+  --radius-lg: var(--soxu-radius-lg);
+}
 
 @layer base {
   *,
   *::before,
   *::after {
     box-sizing: border-box;
+    border-color: var(--soxu-border-subtle);
   }
 
   html,
@@ -14,12 +45,27 @@
     padding: 0;
     background-color: var(--soxu-surface-canvas);
     color: var(--soxu-text-primary);
-    font-family: var(--soxu-font-sans);
-    font-size: var(--soxu-text-body-mobile);
+    font-family: var(--soxu-font-ui);
+    font-size: var(--soxu-font-ui-size);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow-x: clip;
+  }
+
+  pre,
+  code,
+  kbd,
+  .soxu-mono {
+    font-family: var(--soxu-font-code-effective);
+    font-variant-ligatures: normal;
+    font-feature-settings: var(--soxu-code-ligatures);
+  }
+
+  .soxu-code-block {
+    font-family: var(--soxu-font-code-effective);
+    font-size: var(--soxu-font-code-size);
+    font-feature-settings: var(--soxu-code-ligatures);
   }
 
   ::selection {
@@ -30,10 +76,6 @@
     outline: 2px solid var(--soxu-border-focus-ring);
     outline-offset: 2px;
   }
-}
-
-.soxu-mono {
-  font-family: var(--soxu-font-mono);
 }
 
 .soxu-tabular {
@@ -51,15 +93,6 @@
 .soxu-touch {
   min-height: 44px;
   min-width: 44px;
-  cursor: pointer;
-  transition:
-    background-color var(--soxu-motion-hover) var(--soxu-ease-out),
-    border-color var(--soxu-motion-hover) var(--soxu-ease-out),
-    opacity var(--soxu-motion-press) var(--soxu-ease-out);
-}
-
-.soxu-touch:active:not(:disabled) {
-  opacity: 0.84;
 }
 
 .soxu-no-scrollbar::-webkit-scrollbar {
@@ -68,6 +101,68 @@
 .soxu-no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* ── GPUI 1:1 可移植缓动与主题径向扩圆过渡 ─────────────────────────────── */
+.soxu-theme-anim,
+.soxu-theme-anim * {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 220ms;
+  transition-timing-function: var(--soxu-ease-out);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 9999;
+  animation: soxu-theme-reveal var(--soxu-motion-theme) var(--soxu-ease-out) both;
+}
+
+@keyframes soxu-theme-reveal {
+  from {
+    clip-path: circle(0px at var(--soxu-vt-x, 50%) var(--soxu-vt-y, 20px));
+  }
+  to {
+    clip-path: circle(var(--soxu-vt-r, 150vmax) at var(--soxu-vt-x, 50%) var(--soxu-vt-y, 20px));
+  }
+}
+
+/* Radix Collapsible 平滑手风琴（对应 GPUI overflow_hidden + max_h 插值） */
+.soxu-collapsible[data-state="open"] {
+  animation: soxu-accordion-down 200ms var(--soxu-ease-out);
+}
+.soxu-collapsible[data-state="closed"] {
+  animation: soxu-accordion-up 150ms var(--soxu-ease-fast);
+}
+
+@keyframes soxu-accordion-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes soxu-accordion-up {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 @keyframes soxu-pulse {
@@ -84,8 +179,44 @@
   animation: soxu-pulse 1.8s var(--soxu-ease-in-out) infinite;
 }
 
+/* 细滚动条与桌面纯黑语法/终端类 */
+.soxu-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.soxu-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.soxu-scroll::-webkit-scrollbar-thumb {
+  background: var(--soxu-border-subtle);
+  border-radius: 9999px;
+}
+.soxu-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--soxu-border-strong);
+}
+
+.syn-kw { color: var(--soxu-syntax-keyword); }
+.syn-fn { color: var(--soxu-syntax-function); }
+.syn-ty { color: var(--soxu-syntax-type); }
+.syn-str { color: var(--soxu-syntax-string); }
+.syn-num { color: var(--soxu-syntax-number); }
+.syn-com { color: var(--soxu-syntax-comment); }
+.syn-prop { color: var(--soxu-syntax-property); }
+.syn-mac { color: var(--soxu-syntax-macro); }
+
 @media (prefers-reduced-motion: reduce) {
-  .soxu-live-dot {
-    animation: none;
+  .soxu-live-dot,
+  .soxu-collapsible[data-state="open"],
+  .soxu-collapsible[data-state="closed"],
+  ::view-transition-new(root) {
+    animation: none !important;
+    transition: none !important;
   }
+}
+
+[data-reduce-motion="true"] *,
+[data-reduce-motion="true"] *::before,
+[data-reduce-motion="true"] *::after {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
 }

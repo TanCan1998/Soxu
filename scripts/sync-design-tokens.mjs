@@ -58,6 +58,12 @@ function buildCssDocument() {
     "  /* Typography */",
     `  --soxu-font-sans: ${raw.typography.family.sans.$value};`,
     `  --soxu-font-mono: ${raw.typography.family.mono.$value};`,
+    "  --soxu-font-ui: var(--soxu-font-sans);",
+    "  --soxu-font-code: var(--soxu-font-mono);",
+    "  --soxu-font-code-effective: var(--soxu-font-code);",
+    `  --soxu-font-ui-size: ${raw.typography.defaults?.uiFontSizePx ?? 14}px;`,
+    `  --soxu-font-code-size: ${raw.typography.defaults?.codeFontSizePx ?? 13}px;`,
+    `  --soxu-code-ligatures: ${raw.typography.defaults?.codeLigatures === false ? "0" : '"liga" 1, "calt" 1'};`,
   ];
 
   for (const [k, v] of Object.entries(raw.typography.scale)) {
@@ -93,16 +99,50 @@ function buildCssDocument() {
     }
   }
 
-  lines.push("", "  /* Motion */");
+  lines.push("", "  /* Motion (1:1 GPUI Portable) */");
   lines.push(`  --soxu-motion-press: ${raw.motion.pressDuration.$value};`);
   lines.push(`  --soxu-motion-hover: ${raw.motion.hoverDuration.$value};`);
   lines.push(`  --soxu-motion-panel: ${raw.motion.panelDuration.$value};`);
   lines.push(`  --soxu-motion-sheet: ${raw.motion.sheetDuration.$value};`);
+  if (raw.motion.enterDuration) lines.push(`  --soxu-motion-enter: ${raw.motion.enterDuration.$value};`);
+  if (raw.motion.exitDuration) lines.push(`  --soxu-motion-exit: ${raw.motion.exitDuration.$value};`);
+  if (raw.motion.hoverExpandDelay) lines.push(`  --soxu-motion-hover-expand-delay: ${raw.motion.hoverExpandDelay.$value};`);
+  if (raw.motion.hoverCollapseDelay) lines.push(`  --soxu-motion-hover-collapse-delay: ${raw.motion.hoverCollapseDelay.$value};`);
+  if (raw.motion.themeTransitionDuration) lines.push(`  --soxu-motion-theme: ${raw.motion.themeTransitionDuration.$value};`);
+  if (raw.motion.themeIconDuration) lines.push(`  --soxu-motion-theme-icon: ${raw.motion.themeIconDuration.$value};`);
   lines.push(`  --soxu-ease-out: cubic-bezier(${raw.motion.easeOut.$value.join(", ")});`);
   lines.push(`  --soxu-ease-in-out: cubic-bezier(${raw.motion.easeInOut.$value.join(", ")});`);
-  lines.push("}", "");
+  if (raw.motion.easeInOutCubic) lines.push(`  --soxu-ease-in-out-cubic: cubic-bezier(${raw.motion.easeInOutCubic.$value.join(", ")});`);
+  if (raw.motion.easeFast) lines.push(`  --soxu-ease-fast: cubic-bezier(${raw.motion.easeFast.$value.join(", ")});`);
 
-  lines.push('[data-theme="light"] {', "  color-scheme: light;", ...emitPaletteVars(raw.color.light), "}", "");
+  const emitShadcnMapping = () => [
+    "",
+    "  /* shadcn/ui Semantic Variable Bridge */",
+    "  --background: var(--soxu-surface-canvas);",
+    "  --foreground: var(--soxu-text-primary);",
+    "  --card: var(--soxu-surface-card);",
+    "  --card-foreground: var(--soxu-text-primary);",
+    "  --popover: var(--soxu-surface-floating);",
+    "  --popover-foreground: var(--soxu-text-primary);",
+    "  --primary: var(--soxu-action-inverse);",
+    "  --primary-foreground: var(--soxu-action-on-inverse);",
+    "  --secondary: var(--soxu-surface-control);",
+    "  --secondary-foreground: var(--soxu-text-primary);",
+    "  --muted: var(--soxu-surface-card-muted);",
+    "  --muted-foreground: var(--soxu-text-secondary);",
+    "  --accent: var(--soxu-interaction-selected);",
+    "  --accent-foreground: var(--soxu-text-primary);",
+    "  --destructive: var(--soxu-semantic-danger);",
+    "  --destructive-foreground: #ffffff;",
+    "  --border: var(--soxu-border-subtle);",
+    "  --input: var(--soxu-border-strong);",
+    "  --ring: var(--soxu-border-focus-ring);",
+    "  --radius: var(--soxu-radius-md);",
+  ];
+
+  lines.push(...emitShadcnMapping(), "}", "");
+
+  lines.push('[data-theme="light"] {', "  color-scheme: light;", ...emitPaletteVars(raw.color.light), ...emitShadcnMapping(), "}", "");
 
   lines.push(
     "@media (prefers-reduced-motion: reduce) {",
@@ -111,6 +151,10 @@ function buildCssDocument() {
     "    --soxu-motion-hover: 0ms;",
     "    --soxu-motion-panel: 0ms;",
     "    --soxu-motion-sheet: 0ms;",
+    "    --soxu-motion-enter: 0ms;",
+    "    --soxu-motion-exit: 0ms;",
+    "    --soxu-motion-theme: 0ms;",
+    "    --soxu-motion-theme-icon: 0ms;",
     "  }",
     "}",
     ""

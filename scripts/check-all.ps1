@@ -36,8 +36,10 @@ Invoke-Step "[6/7] 运行 Rust 全工作区测试..." {
 if (Test-Path "apps/mobile-web/package.json") {
   Push-Location "apps/mobile-web"
   try {
-    Invoke-Step "[7/7] 检查并构建移动端 Web/PWA..." {
+    Invoke-Step "[7/7] 检查并构建移动端 Web/PWA 与单文件桌面预览..." {
       pnpm run build
+      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      pnpm run build:preview
     }
   } finally {
     Pop-Location
