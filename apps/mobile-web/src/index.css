@@ -47,7 +47,7 @@
     color: var(--soxu-text-primary);
     font-family: var(--soxu-font-ui);
     font-size: var(--soxu-font-ui-size);
-    line-height: 1.5;
+    line-height: var(--soxu-ui-line-height, 1.5);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow-x: clip;

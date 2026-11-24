@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 interface HoverExpandDockProps {
   triggerIcon: React.ReactNode;
   triggerLabel: string;
-  dotColor?: string;
   locked?: boolean;
   expandDirection?: "left" | "right";
   children: React.ReactNode;
@@ -15,14 +14,13 @@ interface HoverExpandDockProps {
 
 /**
  * 极简悬停自动展开收纳容器：
- * - 常态仅展示单一极简图标（可带 6px 状态点）；
- * - 鼠标划过 40ms 或键盘 focus-within 时平滑展开子工具栏；
- * - 移开 160ms 防抖收起；若子浮层（Popover/Dropdown/Modal）打开则锁定展开态。
+ * - 常态仅展示单一纯净线性图标，不附加角标；
+ * - 鼠标划过 40ms 或键盘聚焦时平滑展开子工具栏；
+ * - 移开 160ms 防抖收起；若子浮层激活则保持锁定展开态。
  */
 export function HoverExpandDock({
   triggerIcon,
   triggerLabel,
-  dotColor,
   locked = false,
   expandDirection = "left",
   children,
@@ -103,13 +101,6 @@ export function HoverExpandDock({
             )}
           >
             {triggerIcon}
-            {dotColor && (
-              <span
-                className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: dotColor }}
-                aria-hidden="true"
-              />
-            )}
           </button>
         </TooltipTrigger>
         <TooltipContent>{triggerLabel}</TooltipContent>

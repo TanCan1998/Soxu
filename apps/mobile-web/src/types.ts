@@ -2,7 +2,7 @@ export type TurnBehavior = "queue" | "steer" | "interrupt";
 export type MobileTab = "session" | "workspaces" | "approvals" | "scripts";
 export type SizeClass = "compact" | "regular" | "wide";
 export type WorkspaceBucket = "needs_input" | "failed" | "running" | "attention" | "done";
-export type PermissionLevel = "ask" | "auto-edit" | "full-access";
+export type PermissionLevel = "plan" | "read-only" | "ask" | "auto-edit" | "full-access" | "turbo";
 
 export type SheetKind =
   | null
@@ -15,11 +15,13 @@ export type SheetKind =
   | "rewind"
   | "history"
   | "new-worktree"
+  | "new-quick-chat"
   | { kind: "script-log"; name: string };
 
 export interface WorkspaceItem {
   id: string;
   project: string;
+  projectPath: string;
   branch: string;
   isolation: "local" | "worktree";
   agent: string;
@@ -28,6 +30,18 @@ export interface WorkspaceItem {
   summary: string;
   diffStat: string;
   label?: string;
+  archived?: boolean;
+}
+
+export interface QuickChatItem {
+  id: string;
+  title: string;
+  agent: string;
+  model: string;
+  bucket: WorkspaceBucket;
+  updatedAt: string;
+  archived?: boolean;
+  messages: TurnMessage[];
 }
 
 export interface ToolCardItem {

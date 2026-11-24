@@ -88,8 +88,12 @@ const requiredFiles = [
   "src/desktop/DesktopWorkbench.tsx",
   "src/lib/utils.ts",
   "src/lib/preferences.ts",
+  "src/lib/agent-capabilities.ts",
   "src/components/ThemeToggle.tsx",
   "src/components/HoverExpandDock.tsx",
+  "src/components/ContextUsageRing.tsx",
+  "src/components/CodeBlockView.tsx",
+  "src/components/GitCommitDialog.tsx",
   "src/components/SettingsDialog.tsx",
   "src/components/UtilityModals.tsx",
   ...[

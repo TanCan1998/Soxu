@@ -1,5 +1,6 @@
-import { Check, Clock, Cpu, GitCommit, QrCode, RotateCcw, Search, Sparkles } from "lucide-react";
+import { Clock, Cpu, QrCode, RotateCcw, Search, Sparkles } from "lucide-react";
 import { useState } from "react";
+import { GitCommitDialog } from "@/components/GitCommitDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,6 +15,7 @@ interface UtilityModalsProps {
   onOpenModal: (m: WorkbenchModalKind) => void;
   onOpenSettings: () => void;
   onToggleTheme: () => void;
+  branch?: string;
   schedules: ScheduleItem[];
   onToggleSchedule: (id: string) => void;
   onFlashToast: (msg: string) => void;
@@ -25,6 +27,7 @@ export function UtilityModals({
   onOpenModal,
   onOpenSettings,
   onToggleTheme,
+  branch,
   schedules,
   onToggleSchedule,
   onFlashToast,
@@ -35,16 +38,16 @@ export function UtilityModals({
   const cmdItems = [
     { sec: "会话", title: "feat/12-native-drivers · codex", run: () => onClose() },
     { sec: "文件", title: "crates/soxu-drivers/src/lib.rs", run: () => onClose() },
-    { sec: "设置", title: "打开独立设置界面 (Ctrl+,)", run: () => { onClose(); onOpenSettings(); } },
-    { sec: "工具", title: "打开手机扫码配对 (#offer=)", run: () => onOpenModal("pair") },
-    { sec: "工具", title: "打开 Git Emoji AI 提交预览", run: () => onOpenModal("commit") },
-    { sec: "调度", title: "管理 Schedules & Heartbeats 定时任务", run: () => onOpenModal("schedules") },
-    { sec: "外观", title: "切换 Pure Black / Clean Light 主题", run: () => { onToggleTheme(); onClose(); } },
+    { sec: "设置", title: "打开独立系统设置面板 (Ctrl+,)", run: () => { onClose(); onOpenSettings(); } },
+    { sec: "工具", title: "打开手机扫码遥控配对", run: () => onOpenModal("pair") },
+    { sec: "工具", title: "打开结构化 Git 提交编辑框", run: () => onOpenModal("commit") },
+    { sec: "调度", title: "管理定时任务与周期巡检中心", run: () => onOpenModal("schedules") },
+    { sec: "外观", title: "切换纯黑深色与纯净浅色主题", run: () => { onToggleTheme(); onClose(); } },
   ].filter((x) => !cmdkQuery.trim() || x.title.toLowerCase().includes(cmdkQuery.toLowerCase()));
 
   return (
     <>
-      {/* Cmd+K 全局命令面板 */}
+      {/* 全局命令与检索面板 */}
       <Dialog
         open={modal === "cmdk"}
         onOpenChange={(o) => {
@@ -74,7 +77,7 @@ export function UtilityModals({
                   cmdItems[0].run();
                 }
               }}
-              placeholder="搜索工作区会话、代码文件、历史记录或命令..."
+              placeholder="搜索工作区会话、代码文件、历史记录或系统指令..."
               className="flex-1 bg-transparent border-0 outline-none text-sm text-[var(--soxu-text-primary)] placeholder:text-[var(--soxu-text-ghost)]"
             />
             <kbd className="soxu-mono text-[10.5px] px-1.5 py-0.5 rounded bg-[var(--soxu-surface-control)] text-[var(--soxu-text-tertiary)]">
@@ -84,7 +87,7 @@ export function UtilityModals({
           <div className="max-h-[340px] overflow-y-auto p-2 flex flex-col gap-0.5 soxu-scroll">
             {cmdItems.length === 0 ? (
               <div className="py-10 text-center text-xs text-[var(--soxu-text-tertiary)]">
-                未找到与 &ldquo;{cmdkQuery}&rdquo; 匹配的命令或会话
+                未找到匹配的命令或会话条目
               </div>
             ) : (
               cmdItems.map((it) => (
@@ -109,13 +112,13 @@ export function UtilityModals({
 
       {/* 手机扫码配对 */}
       <Dialog open={modal === "pair"} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent>
+        <DialogContent className="p-6 flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <QrCode className="h-4 w-4 text-[var(--soxu-semantic-accent)]" strokeWidth={1.75} />
-              <span>手机遥控扫码配对（一次性 #offer= 令牌）</span>
+              <span>移动遥控扫码配对（一次性凭据）</span>
             </DialogTitle>
-            <DialogDescription>手机浏览器打开后立刻清除地址栏片段，防止截屏泄露访问凭证。</DialogDescription>
+            <DialogDescription>手机浏览器打开后立即清除地址栏令牌片段，防止截屏泄露访问权限。</DialogDescription>
           </DialogHeader>
           <div className="flex flex-wrap items-center gap-4 py-1">
             <div className="bg-white p-3.5 rounded-xl text-black">
@@ -132,21 +135,21 @@ export function UtilityModals({
         </DialogContent>
       </Dialog>
 
-      {/* Checkpoint 安全回退 */}
+      {/* 检查点安全回退 */}
       <Dialog open={modal === "rewind"} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent className="w-[min(480px,94vw)]">
+        <DialogContent className="w-[min(480px,94vw)] p-6 flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <RotateCcw className="h-4 w-4 text-[var(--soxu-semantic-handoff)]" strokeWidth={1.75} />
               <span>检查点 #04 安全回退</span>
             </DialogTitle>
-            <DialogDescription>所有代码回退动作均会先自动创建 Safety Stash 备份点，随时可恢复。</DialogDescription>
+            <DialogDescription>所有代码回退均会自动创建隐藏暂存备份，随时可一键撤销还原。</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2">
             {[
-              { label: "1. 仅分叉对话（保留当前磁盘代码不变 · 默认安全）", danger: false },
-              { label: "2. 仅回退工作树代码至 commit 7c4e91a", danger: false },
-              { label: "3. 代码与对话同步完整回退至 #04", danger: true },
+              { label: "1. 仅分叉当前对话（保留工作区代码不变 · 默认推荐）", danger: false },
+              { label: "2. 仅回退工作树代码至检查点 7c4e91a", danger: false },
+              { label: "3. 代码与对话上下文同步回退至 #04", danger: true },
             ].map((opt) => (
               <button
                 key={opt.label}
@@ -165,56 +168,23 @@ export function UtilityModals({
         </DialogContent>
       </Dialog>
 
-      {/* Git Emoji AI 提交预览 */}
-      <Dialog open={modal === "commit"} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <GitCommit className="h-4 w-4 text-[var(--soxu-semantic-accent)]" strokeWidth={1.75} />
-              <span>Git Emoji AI 提交与隐私门禁预检</span>
-            </DialogTitle>
-            <DialogDescription>使用轻量模型按仓库规范生成提交信息，并在提交前预检个人路径与密钥。</DialogDescription>
-          </DialogHeader>
-          <div className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-terminal)] p-3 text-xs soxu-code-block">
-            {`${"\u2728"} feat(drivers): 补齐原生 CLI 热纠偏能力探测与 TempDir 单测`}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="accent">
-              <Check className="h-3 w-3" strokeWidth={2} /> Git Emoji 合规
-            </Badge>
-            <Badge variant="accent">
-              <Check className="h-3 w-3" strokeWidth={2} /> 无个人路径泄露
-            </Badge>
-            <Badge variant="accent">
-              <Check className="h-3 w-3" strokeWidth={2} /> Gitleaks 通过
-            </Badge>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={onClose}>
-              取消
-            </Button>
-            <Button
-              variant="default"
-              onClick={() => {
-                onClose();
-                onFlashToast("已完成 Git Emoji 提交预演");
-              }}
-            >
-              确认提交
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* 结构化拆分式 Git 提交弹窗 */}
+      <GitCommitDialog
+        open={modal === "commit"}
+        onOpenChange={(o) => !o && onClose()}
+        branch={branch}
+        onFlashToast={onFlashToast}
+      />
 
-      {/* Schedules & Heartbeats */}
+      {/* 定时任务与周期巡检 */}
       <Dialog open={modal === "schedules"} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent className="w-[min(640px,94vw)]">
+        <DialogContent className="w-[min(640px,94vw)] p-6 flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-[var(--soxu-semantic-running)]" strokeWidth={1.75} />
-              <span>Schedules &amp; Heartbeats 自动化调度中心</span>
+              <span>定时任务与周期巡检调度中心</span>
             </DialogTitle>
-            <DialogDescription>Cron 定时新建隔离 Worktree 代理或周期唤醒活跃会话巡检</DialogDescription>
+            <DialogDescription>按定时计划自动新建隔离工作树代理或周期唤醒活跃会话巡检</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2.5 max-h-[55vh] overflow-y-auto soxu-scroll">
             {schedules.map((s) => (
@@ -225,7 +195,9 @@ export function UtilityModals({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold truncate">{s.name}</span>
-                    <Badge variant={s.kind === "Heartbeat" ? "handoff" : "running"}>{s.kind}</Badge>
+                    <Badge variant={s.kind === "Heartbeat" ? "handoff" : "running"}>
+                      {s.kind === "Heartbeat" ? "周期巡检" : "定时任务"}
+                    </Badge>
                     {s.unreadFail && <Badge variant="danger">未读失败</Badge>}
                   </div>
                   <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] mt-1">
@@ -241,15 +213,15 @@ export function UtilityModals({
         </DialogContent>
       </Dialog>
 
-      {/* 本地 CLI 历史导入 */}
+      {/* 本地原生历史会话导入 */}
       <Dialog open={modal === "history"} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent>
+        <DialogContent className="p-6 flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Cpu className="h-4 w-4 text-[var(--soxu-semantic-accent)]" strokeWidth={1.75} />
-              <span>导入本机 CLI 原生历史会话</span>
+              <span>导入本机原生代理历史会话</span>
             </DialogTitle>
-            <DialogDescription>支持原位续接 Native ID 或分叉注入全新 Worktree 上下文。</DialogDescription>
+            <DialogDescription>支持原位续接原始编号或分叉注入全新隔离工作树上下文。</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2">
             {NATIVE_HISTORY.map((h) => (
@@ -275,27 +247,27 @@ export function UtilityModals({
         </DialogContent>
       </Dialog>
 
-      {/* 首次 3 步引导 */}
+      {/* 首次三步引导（仅首次或在设置中手动重开，不常驻） */}
       <Dialog open={modal === "onboarding"} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent>
+        <DialogContent className="p-6 flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-[var(--soxu-semantic-accent)]" strokeWidth={1.75} />
               <span>
-                Step {onboardingStep}/3 ·{" "}
+                第 {onboardingStep} / 3 步 ·{" "}
                 {onboardingStep === 1
-                  ? "本机 Magpie 与原生 CLI 只读自检"
+                  ? "本机路由与原生驱动只读自检"
                   : onboardingStep === 2
-                    ? "绑定首个 Git 项目与共享构建缓存"
-                    : "极简布局、手机遥控与快捷键速览"}
+                    ? "绑定首个项目目录与共享编译缓存"
+                    : "无项目对话、手机遥控与快捷键速览"}
               </span>
             </DialogTitle>
             <DialogDescription>
               {onboardingStep === 1
-                ? "已自动探测 6 个可用原生 CLI 与本地 Magpie 网关，所有全局配置目录保持只读无侵入。"
+                ? "已自动探测 6 个可用原生命令行驱动与本地模型路由器，全部全局目录保持只读无侵入。"
                 : onboardingStep === 2
-                  ? "已启用外置共享 target 缓存目录（CARGO_TARGET_DIR），新增 Worktree 秒级启动。"
-                  : "非高频工具已默认折叠在顶部悬停收纳区；按 Ctrl+, 随时打开 7 分区独立设置。"}
+                  ? "已启用跨工作树共享构建产物缓存目录，新增隔离工作树秒级启动。"
+                  : "支持直接开启无项目快速对话或按项目工作树并行编排；按 Ctrl+, 随时打开七分区设置面板。"}
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center justify-between pt-2">
@@ -313,11 +285,11 @@ export function UtilityModals({
                 else {
                   setOnboardingStep(1);
                   onClose();
-                  onFlashToast("欢迎开始使用 Soxu 工作台");
+                  onFlashToast("欢迎开始使用索序工作台");
                 }
               }}
             >
-              {onboardingStep === 3 ? "开始使用 Soxu" : "下一步"}
+              {onboardingStep === 3 ? "开始使用索序" : "下一步"}
             </Button>
           </div>
         </DialogContent>

@@ -1,7 +1,12 @@
+import type { PermissionLevel } from "@/types";
+
 export type ThemeMode = "dark" | "light" | "system";
 export type DensityMode = "compact" | "comfortable";
 export type UiFontPresetId = "inter-noto" | "ibm-plex-noto" | "jakarta-noto" | "lxgw-wenkai" | "system-sans";
 export type CodeFontPresetId = "jetbrains-mono" | "fira-code" | "maple-mono" | "ibm-plex-mono" | "cascadia-code";
+export type LineHeightMode = "compact" | "normal" | "relaxed";
+export type TimestampFormatMode = "relative" | "absolute";
+export type WorktreeLocationMode = "sibling" | "central";
 
 export interface FontPreset<T extends string> {
   id: T;
@@ -13,32 +18,32 @@ export interface FontPreset<T extends string> {
 export const UI_FONT_PRESETS: FontPreset<UiFontPresetId>[] = [
   {
     id: "inter-noto",
-    name: "Inter + 思源黑体 (Noto Sans SC)",
+    name: "Inter 与思源黑体 (默认无衬线)",
     license: "SIL OFL 1.1",
     stack: "'Inter', 'Noto Sans SC', 'HarmonyOS Sans SC', system-ui, sans-serif",
   },
   {
     id: "ibm-plex-noto",
-    name: "IBM Plex Sans + 思源黑体",
+    name: "IBM Plex Sans 与思源黑体",
     license: "SIL OFL 1.1",
     stack: "'IBM Plex Sans', 'Noto Sans SC', 'HarmonyOS Sans SC', system-ui, sans-serif",
   },
   {
     id: "jakarta-noto",
-    name: "Plus Jakarta Sans + 思源黑体",
+    name: "Plus Jakarta Sans 与思源黑体",
     license: "SIL OFL 1.1",
     stack: "'Plus Jakarta Sans', 'Noto Sans SC', 'HarmonyOS Sans SC', system-ui, sans-serif",
   },
   {
     id: "lxgw-wenkai",
-    name: "霞鹜文楷 (LXGW WenKai) + Inter",
+    name: "霞鹜文楷 (清晰手写风格)",
     license: "SIL OFL 1.1",
     stack: "'Inter', 'LXGW WenKai Screen', 'LXGW WenKai', 'Noto Sans SC', sans-serif",
   },
   {
     id: "system-sans",
-    name: "系统原生无衬线回退",
-    license: "OS Default",
+    name: "系统原生无衬线字体",
+    license: "系统内置",
     stack: "system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei UI', sans-serif",
   },
 ];
@@ -58,7 +63,7 @@ export const CODE_FONT_PRESETS: FontPreset<CodeFontPresetId>[] = [
   },
   {
     id: "maple-mono",
-    name: "Maple Mono (中英 2:1 对齐)",
+    name: "Maple Mono (中英文严格等宽)",
     license: "SIL OFL 1.1",
     stack: "'Maple Mono NF CN', 'Maple Mono', 'JetBrains Mono', 'Noto Sans SC', monospace",
   },
@@ -79,32 +84,66 @@ export const CODE_FONT_PRESETS: FontPreset<CodeFontPresetId>[] = [
 export interface SoxuPreferences {
   themeMode: ThemeMode;
   density: DensityMode;
+  uiLineHeight: LineHeightMode;
+  timestampFormat: TimestampFormatMode;
+  leftSidebarWidth: number;
+  rightInspectorWidth: number;
   uiFontPreset: UiFontPresetId;
   codeFollowsUi: boolean;
   codeFontPreset: CodeFontPresetId;
   uiFontSize: number;
   codeFontSize: number;
+  tabSize: 2 | 4;
+  showLineNumbers: boolean;
+  codeWordWrap: boolean;
   codeLigatures: boolean;
   reduceMotion: boolean;
+  probeIntervalSec: 15 | 30 | 60;
   autoCheckpoint: boolean;
+  sharedCargoTarget: boolean;
+  warnUncommittedOnClose: boolean;
+  commitEmojiPrefix: boolean;
+  worktreeLocation: WorktreeLocationMode;
   defaultBranch: string;
+  defaultPermMode: PermissionLevel;
+  commandTimeoutSec: 30 | 120 | 300 | 0;
+  redactHomePath: boolean;
+  lanRemoteEnabled: boolean;
+  remoteIdleLockMin: 5 | 15 | 30 | 0;
 }
 
 export const DEFAULT_PREFERENCES: SoxuPreferences = {
   themeMode: "dark",
   density: "compact",
+  uiLineHeight: "normal",
+  timestampFormat: "relative",
+  leftSidebarWidth: 264,
+  rightInspectorWidth: 380,
   uiFontPreset: "inter-noto",
   codeFollowsUi: false,
   codeFontPreset: "jetbrains-mono",
   uiFontSize: 14,
   codeFontSize: 13,
+  tabSize: 2,
+  showLineNumbers: true,
+  codeWordWrap: false,
   codeLigatures: true,
   reduceMotion: false,
+  probeIntervalSec: 30,
   autoCheckpoint: true,
+  sharedCargoTarget: true,
+  warnUncommittedOnClose: true,
+  commitEmojiPrefix: true,
+  worktreeLocation: "sibling",
   defaultBranch: "origin/main",
+  defaultPermMode: "ask",
+  commandTimeoutSec: 120,
+  redactHomePath: true,
+  lanRemoteEnabled: true,
+  remoteIdleLockMin: 15,
 };
 
-const STORAGE_KEY = "soxu.preferences.v1";
+const STORAGE_KEY = "soxu.preferences.v2";
 
 export function loadPreferences(): SoxuPreferences {
   if (typeof window === "undefined") return DEFAULT_PREFERENCES;
@@ -122,7 +161,7 @@ export function savePreferences(prefs: SoxuPreferences): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
   } catch {
-    // 静态 preview 或隐私模式下忽略存储异常
+    // 隐私模式或静态预览环境下忽略持久化异常
   }
 }
 
@@ -151,6 +190,11 @@ export function applyPreferencesToDom(prefs: SoxuPreferences): "dark" | "light" 
   root.style.setProperty("--soxu-font-ui-size", `${prefs.uiFontSize}px`);
   root.style.setProperty("--soxu-font-code-size", `${prefs.codeFontSize}px`);
   root.style.setProperty("--soxu-code-ligatures", prefs.codeLigatures ? '"liga" 1, "calt" 1' : '"liga" 0, "calt" 0');
+  root.style.setProperty(
+    "--soxu-ui-line-height",
+    prefs.uiLineHeight === "compact" ? "1.38" : prefs.uiLineHeight === "relaxed" ? "1.68" : "1.5",
+  );
+  root.style.setProperty("tab-size", String(prefs.tabSize));
 
   const meta = document.getElementById("soxu-theme-meta");
   if (meta) {
@@ -200,7 +244,7 @@ export function toggleThemeWithTransition(
       });
       return;
     } catch {
-      // 回退至色彩插值过渡
+      // 回退至全局色彩过渡
     }
   }
 
