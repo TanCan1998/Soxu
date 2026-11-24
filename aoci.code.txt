@@ -28,8 +28,8 @@ ci.yml[OQ7T]: F:在面向 main 的推送和 PR 中执行提交 Emoji 与隐私/g
 
 ===F:/workplace/Paseo/work/Soxu/apps/mobile-web/===
 index.html[EU6T]: F:提供移动遥控 PWA 的 HTML 入口，挂载 manifest、安全区视口、开源字体表与主题元标签 | R:code:apps/mobile-web/src/main.tsx,code:apps/mobile-web/public/manifest.webmanifest | A:#app,#soxu-theme-meta | S:视口必须带 viewport-fit=cover 适配刘海与底部安全区；主题切换由应用同步改写 theme-color 元标签
-package.json[FV6T]: F:定义 @soxu/mobile-web 包元信息、React 19 + Radix UI + Lucide + Tailwind v4 依赖及开发、类型检查与单文件预览构建脚本 | R:code:apps/mobile-web/vite.config.ts,code:apps/mobile-web/vite.preview.config.ts | A:dev,dev:desktop,check,build,build:preview | S:build 与 build:preview 均强制先执行 tsc --noEmit，零报错才允许产出 dist 或覆盖 preview.html
-pnpm-lock.yaml[FV6L]: F:锁定 @soxu/mobile-web 的 React 19、Radix UI、Lucide React、Tailwind v4 与 vite-plugin-singlefile 依赖解析与哈希 | R:code:apps/mobile-web/package.json | A:lockfileVersion 9.0 | S:CI 中以 --frozen-lockfile 安装，修改 package.json 依赖后必须同步重新生成该锁文件
+package.json[FV6T]: F:定义 @soxu/mobile-web 包元信息、React 19 + Radix UI + Lucide + Tailwind v4 依赖及开发、类型检查与单文件预览构建脚本 | R:code:apps/mobile-web/vite.config.ts,code:apps/mobile-web/vite.preview.config.ts | A:dev,dev:desktop,check,build,build:preview | S:build 与 build:preview 均强制先执行 tsc --noEmit；lucide-react 1.78.0 与 @types/react 19.3.0 精确锁定以满足 pnpm v12 24h 最小发布期策略
+pnpm-lock.yaml[FV6L]: F:锁定 @soxu/mobile-web 的 React 19、Radix UI、Lucide React、Tailwind v4 与 vite-plugin-singlefile 依赖解析与哈希 | R:code:apps/mobile-web/package.json | A:lockfileVersion 9.0 | S:CI 中以 --frozen-lockfile 安装并校验 24h 最小发布期（lucide-react 1.78.0 / @types/react 19.3.0）；修改依赖须同步更新该文件
 pnpm-workspace.yaml[FC4T]: F:将 electron-to-chromium 排除在移动 Web 应用的 pnpm 最低发布时长限制之外 | R:- | A:minimumReleaseAgeExclude | S:-
 tsconfig.json[FC5T]: F:配置 TypeScript 7 react-jsx 与 @/* -> ./src/* 路径映射及严格模式检查规则 | R:code:apps/mobile-web/package.json | A:@/* | S:TypeScript 7 已移除 baseUrl 选项，禁止再写回 baseUrl 以免触发 TS5102 编译阻断
 vite.config.ts[FV5T]: F:配置常规移动端 PWA Vite 8 构建，挂载 React、Tailwind CSS v4 与 @ 别名并输出至 dist | R:code:apps/mobile-web/index.html,code:apps/mobile-web/package.json | A:build.outDir=dist | S:仅处理移动遥控入口；离线单文件桌面预览须使用 vite.preview.config.ts

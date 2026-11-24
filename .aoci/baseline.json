@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-24T22:50:40Z",
+  "updated_at": "2026-11-24T22:55:38Z",
   "files": {
     ".editorconfig": {
       "role": "index",
@@ -89,9 +89,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "e779b89ec7a32eb2440d99d6a10cbda296a962ea0af694785d72710854512f47",
-      "size": 34494,
-      "normalized_sha256": "e779b89ec7a32eb2440d99d6a10cbda296a962ea0af694785d72710854512f47"
+      "sha256": "58f2b760705f8fc30229b9d34d976b56f135ff6a2973f8a85840c8984b6f56e7",
+      "size": 34589,
+      "normalized_sha256": "58f2b760705f8fc30229b9d34d976b56f135ff6a2973f8a85840c8984b6f56e7"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -125,15 +125,15 @@
     },
     "apps/mobile-web/package.json": {
       "role": "index",
-      "sha256": "47401938921a15ed6f7fec3afd3f1e06298248f30eccc2e2a68a409e87bba481",
-      "size": 911,
-      "normalized_sha256": "47401938921a15ed6f7fec3afd3f1e06298248f30eccc2e2a68a409e87bba481"
+      "sha256": "4a96e727e2d3c10d3000aa53ad06ce924957fe6a571683f24df9ac10185bf6a3",
+      "size": 909,
+      "normalized_sha256": "4a96e727e2d3c10d3000aa53ad06ce924957fe6a571683f24df9ac10185bf6a3"
     },
     "apps/mobile-web/pnpm-lock.yaml": {
       "role": "index",
-      "sha256": "b36be0259136490ad978286609208d42fa429297e6d2debb26ceced361cf225b",
-      "size": 124176,
-      "normalized_sha256": "b36be0259136490ad978286609208d42fa429297e6d2debb26ceced361cf225b"
+      "sha256": "521099cf48791facf3283bc85bb7268b745a15e33cacc56f2526249666d0db79",
+      "size": 124174,
+      "normalized_sha256": "521099cf48791facf3283bc85bb7268b745a15e33cacc56f2526249666d0db79"
     },
     "apps/mobile-web/pnpm-workspace.yaml": {
       "role": "index",
