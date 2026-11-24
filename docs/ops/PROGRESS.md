@@ -7,9 +7,10 @@
 ## 1. 当前总体状态
 
 - **当前所处阶段**：`M0: Bootstrap & Engineering Governance` 已完成；**`M0.5: UI/UX Design System & Prototypes` 已按指令暂停**（初版留存于 `draft/ui-v0-initial` 草稿分支，待参考项目完成 `AOCI` + `CodeGraph` 索引后，对标 **ChatGPT 纯黑色主题** 深化细节设计）。
-- **参考项目与索引进度**：
-  - [x] 拉取参考项目至 `.refs/`：`paseo`（7,818 文件）、`codeg`（3,324 文件）、`padu`（1,157 文件）均已就位
-  - [ ] 并行初始化 `AOCI`（等待用户拍板所选模型）→ 随后初始化 `CodeGraph`（`codegraph init -y --local-only`）
+- **参考项目与索引进度（已全部完成）**：
+  - [x] 拉取参考项目至 `.refs/`：`paseo`（7,818 文件）、`codeg`（3,324 文件）、`padu`（1,157 文件）
+  - [x] **AOCI 认知索引已全部原子入库**：`padu`（方案 A 全量 **1,086** 条）、`paseo`（方案 B 宏观核心 **202** 条）、`codeg`（方案 B 宏观核心 **177** 条）、`Soxu` 主仓（全量 **55+** 条）
+  - [x] **CodeGraph 符号图已全部构建（`--local-only`）**：`padu`（17,171 节点 / 61,175 边）、`paseo`（148,292 节点 / 427,706 边）、`codeg`（84,541 节点 / 336,448 边）、`Soxu`（87 节点 / 129 边）
 
 ---
 

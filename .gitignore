@@ -35,6 +35,7 @@ mise.local.toml
 # CodeGraph 本地符号数据库与运行时缓存（注：.aoci/ 知识索引按规范随 Git 版本化保留）
 .codegraph/
 *.codegraph.db*
+*.backup.*
 
 # 日志、临时截图与系统/编辑器杂项
 *.log
@@ -46,3 +47,7 @@ Desktop.ini
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# AOCI agent host integration (machine-bound; do not commit)
+.codex/config.toml
+.codex/config.toml.backup.*
