@@ -74,7 +74,7 @@
 | :--- | :--- | :--- |
 | [#38](https://github.com/TanCan1998/Soxu/issues/38) 波次交接 | `docs/38-wave-handoff` | `docs/ops/PROGRESS.md` 与必要 AOCI 托管资产，交接波次由主控审查。 |
 | [#42](https://github.com/TanCan1998/Soxu/issues/42) M3c Worktree 清单 | `feat/42-worktree-inventory` / 当前 Pi | 基于 `7cea1c4` 的构建快照：只写 `soxu-git` lib/worktrees/测试/README、本看板及 AOCI；独立 `soxu-42-inventory-independent` target 完整七项门禁通过，Git 专项 35 项（清单 10 项）通过；主控独立 `host-review` 七项亦通过。AOCI 对齐后提交 PR 待主控审查，不自行合入或归档。 |
-| [#43](https://github.com/TanCan1998/Soxu/issues/43) 只读 Diff 文档审查 | `docs/43-readonly-diff` / `wks_6ff9d4c0ca4c6895` / `e91d521c-7688-4234-8aac-340993eedd31` | 独立文档设计审查工作区快照，不代表 Diff 功能已实现或交付；不写本单 lib/README/PROGRESS。 |
+| [#43](https://github.com/TanCan1998/Soxu/issues/43) 只读 Diff 文档审查 | 原 `docs/43-readonly-diff` / `wks_6ff9d4c0ca4c6895` / `e91d521c-7688-4234-8aac-340993eedd31` | PR #44 已由主控合入 `main`（`63acf15`）；文档 `docs/dev/git-readonly-diff.md` 及其 AOCI Entry 已吸收，不代表 Diff 功能已实现。 |
 
 Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0f5e2e5`（`main`）。执行代理完成各自验证、推送和建 PR，主控负责审查、合入与归档。
 
@@ -113,7 +113,7 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 主控审查 #42 Worktree 只读清单 PR；合入后再对齐 AOCI 和回收工作区。本单不扩展创建/删除/repair/prune。#43 仅独立只读 Diff 文档设计审查，未提交与 `baseRef` 的 Diff 功能仍待单独实现；显式 Init/Clone 另走独立 Owned Paths 和明确请求。
+1. 主控审查 #42 Worktree 只读清单 PR；合入后再对齐 AOCI 和回收工作区。本单不扩展创建/删除/repair/prune。#43 / PR #44 只读 Diff 文档设计已合入 `63acf15`，未提交与 `baseRef` 的 Diff 功能仍待单独实现；显式 Init/Clone 另走独立 Owned Paths 和明确请求。
 2. Worktree 清单稳定后推进受控创建与诊断恢复，创建后再接入工作区 `direct` MCP。Checkpoint 快照模型稳定后接入 Checkpoint 基准 Diff。执行回退前先保存可恢复快照。
 3. 结构化提交先实现预检，再接入提交执行。根依赖、协议或其他跨模块公共契约如需变更，单独排契约 PR，合入后再联调。
 4. `#26` 继续开放并延期，Daemon 路由保持关闭。恢复验收时覆盖原生入口、配置来源、启动竞态、运行期保护和取消边界。Copilot 项目钩子安全、遥测、历史导入、附件、移交、更高权限及移动端投递另排验收。M2 和 M3 均仍有未交付范围。
