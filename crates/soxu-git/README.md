@@ -1,11 +1,13 @@
-# soxu-git：M3a 只读探测底座
+# soxu-git：本地项目身份与 Git 只读探测
 
-本阶段仅探测现有本地工作树，不创建、克隆、初始化或回退用户仓库。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
+M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
 
 ## 消费接口
 
 - `GitProbe::new(absolute_git_executable)`：绑定调用方信任的原生 Git 绝对路径，Windows 拒绝脚本 shim。
 - `GitProbe::discover()`：从 PATH 的绝对目录查找原生入口；发现不代表签名或可信性证明，安全敏感宿主应使用 `new`。
+- `GitProbe::open_local_project(absolute_directory).await`：返回 `LocalProject::Directory { root }` 或 `LocalProject::GitWorktree(WorktreeIdentity { root, git_dir, common_dir })`。路径均规范化为绝对路径。同一工作树的根与子目录返回相同身份，linked worktree 保留自己的根和 `git_dir`，并与主工作树共享 `common_dir`。
+- `ProjectOpenError`：分别报告 bare 仓库、元数据目录和可识别的损坏。输入错误、访问失败、其他 Git 运行错误和无法确定的探测结果保留在 `Git` 分支中。
 - `GitProbe::probe(absolute_directory).await`：接受工作树根或其子目录，返回 `RepositorySnapshot` 的绝对 `root`、独立 `git_dir`、共享 `common_dir`、`head` 与 `status`。linked worktree 的两个 Git 目录分开返回。
 - `HeadState::{Attached, Detached, Unborn}`：分支名保留原始字节；对象标识为完整 SHA-1 或 SHA-256，unborn 不伪造 HEAD。
 - `parse_status(&[u8])`：纯函数，解析 `git status --porcelain=v2 -z`。`StatusEntry` 区分普通变更、重命名/复制、冲突、未跟踪与忽略文件；保留 XY、子模块四位状态、模式、对象标识与相似度。未知记录类型、非法字段或截断均返回 `ParseError`，不返回部分快照；同一流的头部、记录间及记录内 OID 长度必须一致，不能混用 SHA-1/SHA-256，零 OID 同样校验。未来头部字段保留原始键值。
@@ -15,6 +17,8 @@
 ## 只读与限制
 
 所有子进程直接传参数并设置独立 `current_dir`，不启动 shell，不改变全局 cwd 或环境。子进程清除继承的 `GIT_*`，忽略系统/全局 Git 配置，保留仓库自身的语义配置；禁用 optional locks、fsmonitor、untracked cache、自动维护、子模块摘要和按需 fetch，关闭交互。仅执行 `rev-parse`、只读 `config`、`ls-files` 和 `status`。单命令超时 15 秒，stdout/stderr 各上限 16 MiB；任一流读到上限加一字节立即返回 `OutputLimit`，不等待 EOF 或自然退出而退化成 `Timeout`。超限、超时或读取失败会终止并等待回收直接子进程，不承诺回收恶意入口派生的整个进程树。
+
+`open_local_project` 只运行 `rev-parse`。只有 Git 明确报告没有仓库，并且沿途没有发现疑似被跳过的 Git 元数据，才返回普通目录。现存的 `.git` 文件、目录或链接，以及 `objects`、`refs` 与 `HEAD`、`config` 形成的独立 Git 目录特征，或成对出现的 `commondir` 和 `gitdir` 文件，都按疑似损坏保守拒绝。若 Git 跳过损坏的内层 `.git` 并找到外层工作树，入口也会拒绝打开。损坏判定限于发现身份所需的元数据。索引、对象库和引用完整性不在此检查范围内。已观察到的访问失败和文件系统边界等无法确定归属的诊断直接返回错误。
 
 `status` 可能经 clean/process 过滤器或子模块配置执行外部程序，因此遇到仓库外部内容过滤器或索引 gitlink 时提前失败关闭。未初始化子模块也明确不支持；纯解析器仍完整支持子模块标记。过滤器查询显式使用 `config --includes`，覆盖本地配置、已启用 `extensions.worktreeConfig` 的 linked worktree 配置及其 include/生效的 includeIf；系统/用户配置不参与。配置查询失败会拒绝探测，不自动降级为忽略配置继续运行。探测没有 OS 级沙箱，不承诺面对恶意 Git 可执行文件、配置读取与启动之间的篡改竞态或并发 Git 变更时提供原子快照；调用方应串行化更改，并信任所绑定原生入口。
 
@@ -26,4 +30,6 @@ bare 仓库和 `.git` 元数据目录暂不支持。忽略文件只在纯解析�
 
 副作用夹具在临时根中放置可写 marker 脚本，逐一验证 clean/process/fsmonitor 的本地、include、条件 include、linked worktree 与 worktree include 共 15 种组合：探测后 marker 不存在且仓库字节不变；原生 Git diff（过滤器）或 status（fsmonitor）正向对照必须写出 marker，避免以不存在的命令冒充安全证据。输出夹具复用原生 Rust 测试二进制，以较小限额验证 stdout/stderr 超限后仍存活的进程返回 `OutputLimit` 而非 `Timeout`、精确上限合法、空闲进程超时，均检查直接子进程已被等待回收。
 
-剩余 M3：三合一接入、Worktree 池/损坏恢复、direct MCP 上下文挂载、三基准 Diff、Checkpoint 与 Safety Stash、拆分式提交及预检；Daemon/协议消费接线需独立契约协调。本阶段不宣称这些任务已完成。
+`mise exec -- cargo test -p soxu-git --locked --test project` 使用真实 Git 临时夹具验证项目身份、错误分类与只读边界。打开前后比较目录项、文件字节和修改时间。损坏索引与外部过滤器分别验证身份读取独立于状态查询。Windows 用独占文件句柄复现访问失败，Unix 在文件权限实际受限时断言拒绝。
+
+剩余 M3 包括显式初始化与克隆、Worktree 池与损坏恢复、direct MCP 上下文挂载、三基准 Diff、Checkpoint 与 Safety Stash、拆分式提交及预检。Daemon 与协议接线另行协调。

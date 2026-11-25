@@ -1,7 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{ExitStatus, Stdio};
+use std::process::{ExitStatus, Output, Stdio};
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -195,7 +195,11 @@ impl GitProbe {
         })
     }
 
-    async fn read_path(&self, directory: &Path, option: &'static str) -> Result<PathBuf, GitError> {
+    pub(super) async fn read_path(
+        &self,
+        directory: &Path,
+        option: &'static str,
+    ) -> Result<PathBuf, GitError> {
         let output = self
             .run(directory, "rev-parse", &["--path-format=absolute", option])
             .await?;
@@ -215,11 +219,11 @@ impl GitProbe {
         operation: &'static str,
         arguments: &[&str],
     ) -> Result<Vec<u8>, GitError> {
-        let mut command = self.command(directory);
-        command.arg(operation).args(arguments);
-        let mut child = command.spawn()?;
-        let (stdout, stderr, status) =
-            collect_output(&mut child, OUTPUT_LIMIT, COMMAND_TIMEOUT).await?;
+        let Output {
+            stdout,
+            stderr,
+            status,
+        } = self.run_command(directory, operation, arguments).await?;
         if !status.success() {
             if operation == "config" && status.code() == Some(1) && stderr.is_empty() {
                 return Ok(Vec::new());
@@ -234,6 +238,24 @@ impl GitProbe {
             });
         }
         Ok(stdout)
+    }
+
+    pub(super) async fn run_command(
+        &self,
+        directory: &Path,
+        operation: &'static str,
+        arguments: &[&str],
+    ) -> Result<Output, GitError> {
+        let mut command = self.command(directory);
+        command.arg(operation).args(arguments);
+        let mut child = command.spawn()?;
+        let (stdout, stderr, status) =
+            collect_output(&mut child, OUTPUT_LIMIT, COMMAND_TIMEOUT).await?;
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+        })
     }
 
     fn command(&self, directory: &Path) -> Command {
