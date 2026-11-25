@@ -172,6 +172,75 @@ fn configure_copilot(config_dir: PathBuf) -> Result<NativeDriver, DriverError> {
         .with_env("COPILOT_SKILLS_DIRS", None))
 }
 
+async fn configure_opencode(config_dir: PathBuf) -> Result<NativeDriver, DriverError> {
+    let program = std::env::var_os("SOXU_OPENCODE_EXE").ok_or(DriverError::BinaryNotFound)?;
+    let mut driver =
+        NativeDriver::with_program(NativeCliKind::OpenCode, program.into(), ["--pure".into()])?;
+    if !driver.program().is_file() {
+        return Err(DriverError::BinaryNotFound);
+    }
+    if cfg!(windows) && driver.program().with_extension("shim").is_file() {
+        return Err(DriverError::Unsupported(
+            "Windows OpenCode 入口为 Scoop 包装器",
+        ));
+    }
+    let input = std::env::var("OPENCODE_CONFIG_CONTENT")
+        .map_err(|_| DriverError::InvalidRequest("OPENCODE_CONFIG_CONTENT"))?;
+    let mut config: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&input)
+        .map_err(|_| DriverError::InvalidRequest("OPENCODE_CONFIG_CONTENT"))?;
+    config.retain(|key, _| matches!(key.as_str(), "provider" | "model"));
+    if !config
+        .get("model")
+        .is_some_and(serde_json::Value::is_string)
+    {
+        return Err(DriverError::InvalidRequest("OPENCODE_CONFIG_CONTENT.model"));
+    }
+    let deny = serde_json::json!({"*": "deny"});
+    config.insert("permission".to_owned(), deny.clone());
+    config.insert("autoupdate".to_owned(), false.into());
+    config.insert("share".to_owned(), "disabled".into());
+
+    let mut probe = tokio::process::Command::new(driver.program());
+    probe
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    for (key, subdir) in [
+        ("XDG_CONFIG_HOME", "config"),
+        ("XDG_DATA_HOME", "data"),
+        ("XDG_CACHE_HOME", "cache"),
+        ("XDG_STATE_HOME", "state"),
+        ("OPENCODE_TEST_HOME", "home"),
+    ] {
+        let path = config_dir.join(subdir);
+        probe.env(key, &path);
+        driver = driver.with_env(key, Some(path.into_os_string()));
+    }
+    let version = tokio::time::timeout(std::time::Duration::from_secs(5), probe.output())
+        .await
+        .ok()
+        .and_then(Result::ok);
+    if !version.is_some_and(|output| {
+        output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "1.19.6"
+    }) {
+        return Err(DriverError::Unsupported("OpenCode 只读已验证范围为 1.19.6"));
+    }
+    Ok(driver
+        .with_env("OPENCODE_CONFIG", None)
+        .with_env("OPENCODE_CONFIG_DIR", None)
+        .with_env("OPENCODE_DB", None)
+        .with_env("OPENCODE_WORKSPACE_ID", None)
+        .with_env("OPENCODE_PERMISSION", Some(deny.to_string().into()))
+        .with_env(
+            "OPENCODE_CONFIG_CONTENT",
+            Some(serde_json::Value::Object(config).to_string().into()),
+        )
+        .with_env("OPENCODE_DISABLE_PROJECT_CONFIG", Some("1".into()))
+        .with_env("OPENCODE_DISABLE_AUTOUPDATE", Some("1".into()))
+        .with_env("OPENCODE_DISABLE_MODELS_FETCH", Some("1".into())))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -212,6 +281,10 @@ async fn main() -> anyhow::Result<()> {
             (
                 NativeCliKind::Copilot,
                 configure_copilot(native_root.join("copilot")),
+            ),
+            (
+                NativeCliKind::OpenCode,
+                configure_opencode(native_root.join("opencode")).await,
             ),
         ],
     )?);

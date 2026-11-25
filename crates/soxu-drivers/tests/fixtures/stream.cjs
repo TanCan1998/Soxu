@@ -39,11 +39,10 @@ if (kind === "pi") {
     }
   });
 } else {
-  if (["codex", "claude", "qwen", "copilot"].includes(kind)) {
+  if (["codex", "claude", "qwen", "copilot", "opencode"].includes(kind)) {
     assert.equal(fs.readFileSync(0, "utf8"), prompt);
   } else {
-    const expected = { agy: `--print=${prompt}`, opencode: prompt }[kind];
-    assert.equal(args.at(-1), expected);
+    assert.equal(args.at(-1), `--print=${prompt}`);
   }
   switch (kind) {
     case "codex":
@@ -91,6 +90,7 @@ if (kind === "pi") {
       emit({ type: "session.shutdown", data: {} });
       break;
     case "opencode":
+      assert.deepEqual(args, ["run", "--format", "json"]);
       emit({ type: "step_start", sessionID: session, part: { type: "step-start" } });
       emit({ type: "text", sessionID: session, part: { type: "text", text: prompt } });
       emit({ type: "step_finish", sessionID: session, part: { type: "step-finish", reason: "stop", tokens: { input: 10, output: 3 } } });
