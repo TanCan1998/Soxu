@@ -167,6 +167,19 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn get_project(&self, project_id: &str) -> Result<Option<ProjectSummary>> {
+        let conn = self.lock_conn()?;
+        let raw = conn
+            .query_row(
+                "SELECT json FROM projects WHERE id = ?1",
+                params![project_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        raw.map(|json| serde_json::from_str(&json).map_err(anyhow::Error::from))
+            .transpose()
+    }
+
     pub fn upsert_workspace(&self, workspace: &WorkspaceSummary) -> Result<()> {
         let conn = self.lock_conn()?;
         let json = serde_json::to_string(workspace)?;
@@ -226,6 +239,10 @@ impl SqliteStore {
 
     pub fn upsert_session(&self, session: &SessionSummary) -> Result<()> {
         let conn = self.lock_conn()?;
+        Self::write_session(&conn, session)
+    }
+
+    fn write_session(conn: &Connection, session: &SessionSummary) -> Result<()> {
         let (target_kind, target_id) = match &session.target {
             soxu_protocol::SessionTarget::Workspace { workspace_id } => {
                 ("workspace", workspace_id.as_str())
@@ -269,6 +286,10 @@ impl SqliteStore {
 
     pub fn upsert_message(&self, msg: &TurnMessageSnapshot) -> Result<()> {
         let conn = self.lock_conn()?;
+        Self::write_message(&conn, msg)
+    }
+
+    fn write_message(conn: &Connection, msg: &TurnMessageSnapshot) -> Result<()> {
         let json = serde_json::to_string(msg)?;
         conn.execute(
             "INSERT INTO messages (id, session_id, turn_index, created_at, json)
@@ -285,6 +306,32 @@ impl SqliteStore {
             ],
         )?;
         Ok(())
+    }
+
+    pub(crate) fn begin_native_turn(
+        &self,
+        session: &SessionSummary,
+        user: &TurnMessageSnapshot,
+        assistant: &TurnMessageSnapshot,
+    ) -> Result<()> {
+        let mut conn = self.lock_conn()?;
+        let transaction = conn.transaction()?;
+        Self::write_session(&transaction, session)?;
+        Self::write_message(&transaction, user)?;
+        Self::write_message(&transaction, assistant)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn interrupted_native_sessions(&self) -> Result<Vec<SessionSummary>> {
+        let conn = self.lock_conn()?;
+        load_table_json(
+            &conn,
+            "SELECT json FROM sessions
+             WHERE json_extract(json, '$.agent_id') = 'codex'
+               AND json_extract(json, '$.permission') = 'read-only'
+               AND json_extract(json, '$.lifecycle') = 'running'",
+        )
     }
 
     pub fn list_session_messages(&self, session_id: &str) -> Result<Vec<TurnMessageSnapshot>> {

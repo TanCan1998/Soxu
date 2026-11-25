@@ -5,12 +5,11 @@ mod client;
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use client::DaemonHttpClient;
-use soxu_magpie::{EnvironmentMode, detect_mode_from_config_dir};
+use soxu_magpie::discover_environment;
 use soxu_protocol::{
-    HealthSnapshot, PROTOCOL_VERSION, PairingTransportMode, RpcCommand, RpcRequest, RpcResponse,
-    RpcResultData, StateSnapshot,
+    ActiveTurnBehavior, HealthSnapshot, PROTOCOL_VERSION, PairingTransportMode, PermissionLevel,
+    RpcCommand, RpcRequest, RpcResponse, RpcResultData, SessionTarget, StateSnapshot,
 };
-use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "soxu", version, about = "Soxu 多 Agent 协同工作台命令行工具")]
@@ -65,7 +64,14 @@ enum ChatCommands {
         model: Option<String>,
         #[arg(long)]
         title: Option<String>,
+        /// 使用当前原生对话接线所支持的只读权限
+        #[arg(long)]
+        read_only: bool,
     },
+    /// 向快速对话或已有会话提交只读原生回合
+    Send { target_id: String, text: String },
+    /// 停止已有会话的当前原生回合
+    Stop { target_id: String },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -108,13 +114,44 @@ fn resolve_daemon_addr(explicit: Option<&str>) -> String {
         .unwrap_or_else(|| "127.0.0.1:7698".to_owned())
 }
 
-fn detect_magpie_mode() -> EnvironmentMode {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(|h| PathBuf::from(h).join(".config").join("magpie"))
-        .map_or(EnvironmentMode::StandaloneNative, |dir| {
-            detect_mode_from_config_dir(&dir)
+async fn resolve_session_id(client: &DaemonHttpClient, target_id: String) -> Result<String> {
+    if !target_id.starts_with("qc_") {
+        return Ok(target_id);
+    }
+    let snapshot: StateSnapshot = client.get_json("/api/snapshot").await?;
+    snapshot
+        .sessions
+        .into_iter()
+        .filter(|session| {
+            !session.archived
+                && matches!(&session.target, SessionTarget::QuickChat { chat_id } if chat_id == &target_id)
         })
+        .min_by_key(|session| session.created_at)
+        .map(|session| session.session_id)
+        .ok_or_else(|| anyhow::anyhow!("快速对话没有可用会话"))
+}
+
+async fn chat_rpc(
+    client: &DaemonHttpClient,
+    request_id: &str,
+    command: RpcCommand,
+) -> Result<RpcResultData> {
+    let response: RpcResponse = client
+        .post_json(
+            "/api/rpc",
+            &RpcRequest {
+                request_id: request_id.to_owned(),
+                command,
+            },
+        )
+        .await?;
+    if let Some(error) = response.error {
+        return Err(error.into());
+    }
+    response
+        .result
+        .filter(|_| response.ok)
+        .ok_or_else(|| anyhow::anyhow!("守护进程未返回对话操作结果"))
 }
 
 async fn run_cli(cli: Cli) -> Result<()> {
@@ -130,13 +167,15 @@ async fn run_cli(cli: Cli) -> Result<()> {
             );
         }
         Commands::Doctor { json } => {
-            let mode = detect_magpie_mode();
+            let discovery = discover_environment();
+            let mode = &discovery.mode;
             let daemon_health = client.get_json::<HealthSnapshot>("/api/health").await.ok();
             if json {
                 let out = serde_json::json!({
                     "cli_version": env!("CARGO_PKG_VERSION"),
                     "protocol_version": PROTOCOL_VERSION,
                     "environment_mode": mode,
+                    "environment_discovery": discovery,
                     "daemon_addr": addr,
                     "daemon_online": daemon_health.is_some(),
                     "daemon_health": daemon_health,
@@ -144,6 +183,20 @@ async fn run_cli(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&out)?);
             } else {
                 println!("环境发现模式: {mode:?}");
+                println!(
+                    "Magpie 网关登记 {:?}，MCP 路由默认 {:?}，Skill 路由默认 {:?}",
+                    discovery.magpie.gateway_marker,
+                    discovery.magpie.mcp_config.default_mode,
+                    discovery.magpie.skill_config.default_mode
+                );
+                for cli in discovery.native_clis {
+                    println!(
+                        "{} | PATH 入口 {:?} | 配置目录 {:?}",
+                        cli.agent.command(),
+                        cli.executable,
+                        cli.config_dir
+                    );
+                }
                 match daemon_health {
                     Some(h) => println!(
                         "守护进程状态: 在线 ({addr} / v{} / protocol v{})",
@@ -186,6 +239,7 @@ async fn run_cli(cli: Cli) -> Result<()> {
                     agent,
                     model,
                     title,
+                    read_only,
                 },
         } => {
             let req = RpcRequest {
@@ -194,7 +248,7 @@ async fn run_cli(cli: Cli) -> Result<()> {
                     title,
                     agent_id: agent,
                     model_id: model,
-                    permission: None,
+                    permission: read_only.then_some(PermissionLevel::ReadOnly),
                     thinking: None,
                 },
             };
@@ -211,6 +265,36 @@ async fn run_cli(cli: Cli) -> Result<()> {
                     qc.chat_id, qc.title, qc.agent_id, qc.model_id
                 );
             }
+        }
+        Commands::Chat {
+            subcommand: ChatCommands::Send { target_id, text },
+        } => {
+            let session_id = resolve_session_id(&client, target_id).await?;
+            let result = chat_rpc(
+                &client,
+                "cli-chat-send",
+                RpcCommand::SubmitTurn {
+                    session_id,
+                    text,
+                    chips: Vec::new(),
+                    behavior: ActiveTurnBehavior::Queue,
+                    handoff: None,
+                    handoff_scope: None,
+                },
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        Commands::Chat {
+            subcommand: ChatCommands::Stop { target_id },
+        } => {
+            let session_id = resolve_session_id(&client, target_id).await?;
+            chat_rpc(
+                &client,
+                "cli-chat-stop",
+                RpcCommand::StopTurn { session_id },
+            )
+            .await?;
         }
         Commands::Pair { subcommand } => match subcommand {
             PairCommands::Create { transport } => {
@@ -297,17 +381,20 @@ mod tests {
         .expect("parse pair create command");
         assert_eq!(resolve_daemon_addr(cli.addr.as_deref()), "127.0.0.1:9000");
 
-        let chat_cli = Cli::try_parse_from([
-            "soxu",
-            "chat",
-            "new",
-            "--agent",
-            "pi",
-            "--title",
-            "设计评审",
-        ])
-        .expect("parse chat new");
-        assert!(matches!(chat_cli.command, Commands::Chat { .. }));
+        let chat_cli =
+            Cli::try_parse_from(["soxu", "chat", "new", "--read-only", "--title", "设计评审"])
+                .expect("parse chat new");
+        assert!(matches!(
+            chat_cli.command,
+            Commands::Chat {
+                subcommand: ChatCommands::New {
+                    read_only: true,
+                    ..
+                }
+            }
+        ));
+        assert!(Cli::try_parse_from(["soxu", "chat", "send", "sess_fixture", "你好"]).is_ok());
+        assert!(Cli::try_parse_from(["soxu", "chat", "stop", "sess_fixture"]).is_ok());
     }
 
     #[test]

@@ -53,7 +53,7 @@ desktop-main.tsx[EU5T]: F:桌面工作台预览原型与单文件构建的 React
 Cargo.toml[FV6T]: F:声明 soxu-cli 包、soxu 二进制入口及 clap/serde/tokio/内部协议与发现工作区依赖 | R:code:crates/soxu-cli/src/main.rs | A:soxu-cli,soxu | S:版本、Rust 版本要求、语言版本、许可证、lint 规则及全部依赖均继承自工作区
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-cli/src/===
-main.rs[EU7M]: F:解析 Soxu CLI 子命令（version/doctor/status/chat/pair/events），诊断 Magpie 状态并远程控制守护进程 | R:code:crates/soxu-cli/src/client.rs,code:crates/soxu-protocol/src/rpc.rs,code:crates/soxu-magpie/src/lib.rs | A:soxu version,soxu doctor,soxu status,soxu chat new,soxu pair,soxu events | S:监听地址按 --addr -> SOXU_LISTEN -> 127.0.0.1:7698 解析；doctor 探测守护进程离线时不报错失败，友好输出离线提示
+main.rs[EU7L]: F:提供 Soxu 命令行诊断、守护进程控制、设备配对与增量事件查询，并提交和停止本机只读对话 | R:code:crates/soxu-cli/src/client.rs,code:crates/soxu-protocol/src/rpc.rs,code:crates/soxu-magpie/src/lib.rs | A:soxu doctor,soxu status,soxu chat new,soxu chat send,soxu chat stop,soxu events | S:daemon 地址按 --addr、SOXU_LISTEN、默认回环选择。doctor 在 Daemon 离线时仍返回脱敏发现并保留旧 JSON 字段。chat send/stop 接受会话 ID 或通过快照解析快聊 ID。
 client.rs[EN6S]: F:实现基于 tokio TcpStream 的轻量异步 HTTP/1.1 JSON 客户端与响应解码器，供 soxu-cli 与守护进程通信 | R:code:crates/soxu-cli/src/main.rs | A:DaemonHttpClient,parse_http_response | S:每次请求发送 Connection: close 并兼容 Content-Length 与 chunked 分块传输解码；非 2xx 状态码直接返回错误
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-core/===
@@ -72,12 +72,12 @@ redline.rs[DS8S]: F:实现高危破坏性命令拦截、全局 CLI/Magpie 配置
 Cargo.toml[FV5T]: F:声明 soxu-daemon 包及其工作区依赖（axum、rusqlite、sha2、base64、rand）与 WS 端到端测试依赖 | R:code:Cargo.toml,code:crates/soxu-daemon/src/lib.rs | A:soxu-daemon,dependencies,dev-dependencies | S:全部生产与 dev 依赖均继承根工作区版本锁定；集成测试通过 tempfile 与 tokio-tungstenite 驱动
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/src/===
-main.rs[EG7T]: F:启动持久化 Soxu 守护进程 HTTP/WS 服务，依据监听地址决定全接口远程鉴权策略 | R:code:crates/soxu-daemon/src/lib.rs,code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/server.rs | A:main,SOXU_LISTEN,SOXU_DATA_DIR | S:SOXU_DATA_DIR 缺省时取 USERPROFILE/HOME 下 .soxu；绑定非回环地址时自动开启全量接口强制鉴权
+main.rs[EG7T]: F:启动持久化 Soxu HTTP/WS 守护进程，独占数据目录并注入可信 Codex 原生入口 | R:code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-daemon/src/server.rs,code:crates/soxu-drivers/src/process.rs | A:SOXU_LISTEN,SOXU_DATA_DIR,SOXU_CODEX_EXE | S:按实际绑定 IP 区分回环与强制鉴权。SOXU_DATA_DIR 缺省取用户目录下 .soxu。Windows 识别带 .shim 的 Scoop 包装器并要求指定真实 EXE，避免取消时只结束包装进程。
 lib.rs[CG7T]: F:重导出 soxu-daemon 核心模块（pairing、server、state、store），供可执行入口与集成测试共用 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/server.rs,code:crates/soxu-daemon/src/store.rs,code:crates/soxu-daemon/src/pairing.rs | A:DaemonState,SqliteStore,build_router | S:所有外部集成测试通过本库入口直接构建无端口硬编码的临时守护实例
 pairing.rs[AI7S]: F:管理移动遥控一次性扫码 #offer= 载荷、6 位动态配对码、防重放认领、Token SHA-256 哈希及空闲锁定 | R:code:crates/soxu-protocol/src/pairing.rs,code:crates/soxu-protocol/src/error.rs | A:PairingManager,PairingManager::hash_token,PairingManager::create_offer,PairingManager::claim,PairingManager::is_idle_locked | S:认领后立即标记 used=true 阻断重放且仅将 Bearer 令牌的 SHA-256 哈希落盘，不持久化明文令牌；默认有效期 300 秒
-server.rs[EN8M]: F:实现 Axum HTTP（/api/health/snapshot/events/rpc）与 WebSocket（/ws）协议握手、after_seq 追平及鉴权路由 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-protocol/src/rpc.rs,code:crates/soxu-protocol/src/events.rs | A:build_router,health_handler,snapshot_handler,events_handler,rpc_handler,ws_handler | S:WS 先订阅 broadcast 再读快照与 after_seq 补发并按 seq 去重防漏；ClaimPairing 允许匿名认领，其余携带 Bearer 须校验未吊销
-state.rs[AB9L]: F:维护守护进程运行态，协调 SqliteStore/CoreOrchestrator/PairingManager 处理全量 RPC 命令并广播单调事件流 | R:code:crates/soxu-daemon/src/store.rs,code:crates/soxu-daemon/src/pairing.rs,code:crates/soxu-core/src/orchestrator.rs,code:crates/soxu-magpie/src/lib.rs | A:DaemonState,DaemonState::open,DaemonState::handle_rpc,DaemonState::authenticate_bearer,DaemonState::register_pending_approval | S:open(None) 使用内存库供隔离测试；审批注册自动经红线评估强锁高危态，每次状态变更先落盘分配 seq 再发 broadcast
-store.rs[PD8L]: F:基于 SQLite WAL 实现项目/工作区/快速对话/消息/草稿/审批/偏好/设备与单调 seq 事件日志持久化 | R:code:crates/soxu-core/src/buckets.rs,code:crates/soxu-core/src/drafts.rs,code:crates/soxu-protocol/src/domain.rs | A:SqliteStore,SqliteStore::open,SqliteStore::append_event,SqliteStore::query_events_after,SqliteStore::save_draft_if_newer | S:开启 WAL 与 NORMAL 同步；paired_devices 仅存 token_sha256；save_draft_if_newer 在库层拦截 <= 已存代次的过期草稿写入
+server.rs[EN8M]: F:提供 Axum 健康、快照、事件与 RPC 端点，完成 WS 握手及按 after_seq 追平，并将请求派发至 Daemon 传输层 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-protocol/src/rpc.rs | A:build_router,/api/health,/api/snapshot,/api/events,/api/rpc,/ws | S:WS 先订阅再读取快照与补发游标，并按 seq 去重。启用本机原生对话时快照、事件和 RPC 拒绝非回环 Host，存在 Origin 时要求同源。ClaimPairing 可匿名认领。
+state.rs[AB9L]: F:编排 SQLite、领域核心和设备配对，维护 Daemon 会话、审批与能力状态并广播持久增量 | R:code:crates/soxu-daemon/src/store.rs,code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-daemon/src/pairing.rs,code:crates/soxu-core/src/orchestrator.rs,code:crates/soxu-magpie/src/lib.rs | A:DaemonState::open,DaemonState::handle_rpc,DaemonState::authenticate_bearer,DaemonState::register_pending_approval | S:open(None) 提供内存库且默认沿用嵌入式调度；服务传输层可启用原生回合。事件锁串行化持久 seq 分配与广播。切换代理清除旧原生会话 ID；审批注册应用高危红线。
+store.rs[PD8L]: F:以 SQLite WAL 持久化项目、工作区、快聊、会话、消息、草稿、审批、偏好、配对设备和单调事件 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-core/src/buckets.rs,code:crates/soxu-protocol/src/domain.rs | A:SqliteStore,append_event,query_events_after,save_draft_if_newer,begin_native_turn | S:启动原生回合在同一事务写入会话和两条轮次消息。WAL 使用 NORMAL；设备仅存 token_sha256；拒绝代次不递增的草稿。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-desktop/===
 Cargo.toml[FC5T]: F:声明 soxu-desktop 包并通过工作区引入核心、协议、序列化、错误处理和追踪依赖 | R:code:Cargo.toml | A:soxu-desktop | S:包的版本、Rust 版本下限、edition、许可证和 lint 规则均继承工作区配置
@@ -131,7 +131,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录项目核心架构决策（ADR-001~006），包含 GPUI + Daemon、Native CLI 复用、Magpie 发现及 React 19 + shadcn/ui M0.5 决策 | R:code:AGENTS.md,code:design-system/soxu/MASTER.md | A:ADR-001,ADR-002,ADR-003,ADR-005,ADR-006 | S:已拍板方案不可无故推翻；明确全局 CLI 目录只读、M0.5 强制使用 shadcn/ui + Tailwind v4 与开源双字体
-PROGRESS.md[SW6T]: F:记录 Soxu M0–M6 里程碑路线图、Paseo 串并行开发顺序、活跃工作区和跨会话接手队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:M2 双态发现和原生驱动已合入，下一步接入 Daemon 和 soxu doctor；Codex 已验证真实对话与回环续接，逐驱动验证范围见驱动说明。
+PROGRESS.md[SW6T]: F:记录 Soxu 里程碑、Paseo 串并行顺序、活跃工作区、验证证据与跨会话待办 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:记录 #15 的本机 Codex 只读接线与 CLI 用法。区分实际 EXE 连本机夹具的 Daemon 验证及 #12 的在线登录推理验证。
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
@@ -196,4 +196,7 @@ i18n.ts[CL7L]: F:可扩展前端国际化注册表与 React 上下文，覆盖 z
 
 ===F:/workplace/Paseo/work/Soxu/.agents/skills/paseo-orchestrator/===
 SKILL.md[SW7S]: F:定义跨 AGY 与 Codex 桌面端自动发现的 Paseo 协同编排技能、隔离共享矩阵及 30 秒切换流程 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:paseo.json,code:docs/ops/PROGRESS.md | A:paseo-orchestrator,Control Plane,Worktree Isolation | S:要求双端统一通过 paseo-ctl.ps1 调用 Paseo 并隔离宿主全局配置，禁止双端同时在主检出目录并发写业务源码
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/src/state/===
+native.rs[AW8L]: F:经现有 HTTP/WS RPC 调度本机回环 Codex 只读回合，管理原生续接、停止、FIFO 队列与流式回复持久化 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/store.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-protocol/src/rpc.rs | A:DaemonState::with_native_turns,handle_transport_rpc,SubmitTurn,StopTurn | S:只接受未归档的只读会话及纯文本，快聊目录与绑定目录分开解析。回复先写 SQLite 再广播。停止或失败暂停内存队列，后续投递先执行旧队首。启动把遗留 Running 只读 Codex 会话标记失败并保留已写内容。
 

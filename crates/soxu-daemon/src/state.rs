@@ -5,7 +5,7 @@ use crate::store::SqliteStore;
 use anyhow::Result;
 use chrono::Utc;
 use soxu_core::{CoreOrchestrator, DraftSaveOutcome, ReconcileRequest};
-use soxu_magpie::{EnvironmentMode, detect_mode_from_config_dir};
+use soxu_magpie::{EnvironmentMode, discover_environment};
 use soxu_protocol::{
     ActionableError, ActiveTurnBehavior, ApprovalAuditRecord, ApprovalItemSnapshot, DaemonEvent,
     ErrorCode, EventEnvelope, HandoffAnchorCard, HealthSnapshot, PROTOCOL_VERSION,
@@ -20,6 +20,8 @@ use std::sync::Mutex;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+mod native;
+
 /// 默认本机 Magpie 配置目录探测（优先 `USERPROFILE`，未设置时取 `HOME`）。
 #[must_use]
 pub fn default_magpie_config_dir() -> Option<PathBuf> {
@@ -31,8 +33,7 @@ pub fn default_magpie_config_dir() -> Option<PathBuf> {
 /// 检测本机是否启用 Magpie 协同模式。
 #[must_use]
 pub fn detect_local_magpie() -> bool {
-    default_magpie_config_dir()
-        .is_some_and(|dir| detect_mode_from_config_dir(&dir) == EnvironmentMode::MagpieManaged)
+    discover_environment().mode == EnvironmentMode::MagpieManaged
 }
 
 /// 守护进程共享运行时核心。
@@ -43,6 +44,8 @@ pub struct DaemonState {
     subagents: Mutex<BTreeMap<String, SubagentSummary>>,
     pending_inputs: Mutex<BTreeMap<String, PendingUserInputRequest>>,
     events_tx: broadcast::Sender<EventEnvelope<DaemonEvent>>,
+    event_order: Mutex<()>,
+    native_turns: Option<native::NativeTurns>,
     daemon_fingerprint: String,
     magpie_detected: bool,
     require_auth_for_all: bool,
@@ -71,6 +74,8 @@ impl DaemonState {
             subagents: Mutex::new(BTreeMap::new()),
             pending_inputs: Mutex::new(BTreeMap::new()),
             events_tx,
+            event_order: Mutex::new(()),
+            native_turns: None,
             daemon_fingerprint,
             magpie_detected,
             require_auth_for_all,
@@ -318,6 +323,7 @@ impl DaemonState {
     }
 
     fn emit(&self, event: DaemonEvent) -> Result<EventEnvelope<DaemonEvent>, ActionableError> {
+        let _order = self.event_order.lock().map_err(|_| lock_err("events"))?;
         let env = self.store.append_event(&event).map_err(internal_err)?;
         let _ = self.events_tx.send(env.clone());
         Ok(env)
@@ -615,6 +621,9 @@ impl DaemonState {
                         current_behavior: behavior,
                     })
                 };
+                if session.agent_id != outcome.agent_id {
+                    session.native_session_id = None;
+                }
                 session.agent_id = outcome.agent_id;
                 session.model_id = outcome.model;
                 session.permission = outcome.permission;

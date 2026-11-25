@@ -2,16 +2,20 @@
 
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
-use soxu_daemon::{DaemonState, build_router};
+use soxu_daemon::{DaemonState, SqliteStore, build_router};
+use soxu_drivers::{NativeCliKind, NativeDriver};
 use soxu_protocol::{
     ActiveTurnBehavior, ApprovalItemSnapshot, ApprovalResolutionKind, AskQuestionOption,
     ClaimPairingRequest, ClientHello, ClientKind, DaemonEvent, DraftSnapshot, ErrorCode,
     EventEnvelope, PairingCredentialInput, PairingTransportMode, PendingUserInputAnswer,
     PendingUserInputAnswerItem, PendingUserInputQuestion, PendingUserInputRequest, PermissionLevel,
-    RpcCommand, RpcRequest, RpcResponse, RpcResultData, ServerHello, SessionTarget, SubagentStatus,
-    SubagentSummary, ThinkingEffort,
+    ProjectSummary, RpcCommand, RpcRequest, RpcResponse, RpcResultData, ServerHello, SessionTarget,
+    SubagentStatus, SubagentSummary, ThinkingEffort, TurnLifecycleState, TurnMessageRole,
+    WorkspaceBucket, WorkspaceIsolation, WorkspaceSummary,
 };
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -27,18 +31,421 @@ async fn spawn_test_daemon(
     Arc<DaemonState>,
     tokio::task::JoinHandle<()>,
 ) {
+    spawn_daemon(dir, None).await
+}
+
+async fn spawn_daemon(
+    dir: &TempDir,
+    driver: Option<NativeDriver>,
+) -> (
+    std::net::SocketAddr,
+    Arc<DaemonState>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind ephemeral test port");
     let addr = listener.local_addr().expect("read local addr");
     let endpoint = format!("http://{addr}");
-    let state =
-        Arc::new(DaemonState::open(Some(dir.path()), &endpoint, false).expect("open daemon state"));
+    let state = DaemonState::open(Some(dir.path()), &endpoint, false).expect("open daemon state");
+    let state = Arc::new(match driver {
+        Some(driver) => state
+            .with_native_turns(dir.path().join("quick-chats"), Ok(driver))
+            .expect("recover previous native turns"),
+        None => state,
+    });
     let router = build_router(Arc::clone(&state));
     let handle = tokio::spawn(async move {
         let _ = axum::serve(listener, router).await;
     });
     (addr, state, handle)
+}
+
+fn codex_fixture() -> NativeDriver {
+    let output = std::process::Command::new("node")
+        .args(["-p", "process.execPath"])
+        .output()
+        .expect("find real Node executable");
+    assert!(output.status.success());
+    let program = String::from_utf8(output.stdout).expect("Node executable path");
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex.cjs");
+    NativeDriver::with_program(
+        NativeCliKind::Codex,
+        PathBuf::from(program.trim()),
+        [script.into_os_string()],
+    )
+    .expect("set Codex fixture")
+}
+
+fn submit_native(session_id: &str, text: &str) -> RpcCommand {
+    RpcCommand::SubmitTurn {
+        session_id: session_id.to_owned(),
+        text: text.to_owned(),
+        chips: Vec::new(),
+        behavior: ActiveTurnBehavior::Queue,
+        handoff: None,
+        handoff_scope: None,
+    }
+}
+
+async fn post_rpc(addr: std::net::SocketAddr, command: RpcCommand) -> RpcResponse {
+    let request = serde_json::to_string(&RpcRequest {
+        request_id: "http-test".to_owned(),
+        command,
+    })
+    .expect("serialize HTTP RPC");
+    let (status, body) = http_request(addr, "POST", "/api/rpc", None, Some(&request)).await;
+    assert_eq!(status, 200);
+    serde_json::from_str(&body).expect("decode HTTP RPC")
+}
+
+async fn wait_for_ws_event(
+    ws: &mut WsClient,
+    mut matches: impl FnMut(&DaemonEvent) -> bool,
+) -> u64 {
+    tokio::time::timeout(Duration::from_secs(45), async {
+        loop {
+            let envelope: EventEnvelope<DaemonEvent> =
+                serde_json::from_str(&next_text_frame(ws).await).expect("decode native event");
+            if matches(&envelope.payload) {
+                return envelope.seq;
+            }
+        }
+    })
+    .await
+    .expect("receive matching native event")
+}
+
+#[tokio::test]
+async fn native_codex_http_ws_fifo_stop_failure_and_persistence() {
+    let dir = TempDir::new().expect("create test data dir");
+    let (addr, state, handle) = spawn_daemon(&dir, Some(codex_fixture())).await;
+    let created = post_rpc(
+        addr,
+        RpcCommand::CreateQuickChat {
+            title: None,
+            agent_id: "codex".to_owned(),
+            model_id: None,
+            permission: Some(PermissionLevel::ReadOnly),
+            thinking: None,
+        },
+    )
+    .await;
+    assert!(created.ok);
+    let mut handshake =
+        tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(format!(
+            "ws://{addr}/ws"
+        ))
+        .expect("construct WS request");
+    handshake
+        .headers_mut()
+        .insert("origin", "https://example.invalid".parse().expect("origin"));
+    let denied = tokio_tungstenite::connect_async(handshake)
+        .await
+        .expect_err("deny foreign origin");
+    assert!(matches!(
+        denied,
+        tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == 403
+    ));
+    let (mut ws, hello) = connect_ws(
+        addr,
+        ClientHello {
+            client_kind: ClientKind::Desktop,
+            client_version: "test".to_owned(),
+            protocol_version: soxu_protocol::PROTOCOL_VERSION,
+            after_seq: None,
+            device_id: None,
+        },
+    )
+    .await;
+    let session_id = hello.snapshot.sessions[0].session_id.clone();
+    let (first, _) = rpc_via_ws(&mut ws, "native-1", submit_native(&session_id, "hold")).await;
+    assert!(first.ok);
+    let first_seq = wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta {text_delta,..} if text_delta == "回复 hold")
+    })
+    .await;
+    let queued = post_rpc(addr, submit_native(&session_id, "queued")).await;
+    assert!(matches!(
+        queued.result,
+        Some(RpcResultData::TurnSubmitted {
+            queued_id: Some(_),
+            ..
+        })
+    ));
+    assert!(
+        post_rpc(
+            addr,
+            RpcCommand::StopTurn {
+                session_id: session_id.clone()
+            }
+        )
+        .await
+        .ok
+    );
+    let stop_seq = wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::SessionUpdated(session) if session.lifecycle == TurnLifecycleState::Idle)
+    })
+    .await;
+    assert!(stop_seq > first_seq);
+    assert_eq!(
+        state
+            .list_session_messages(&session_id)
+            .expect("stored partial turn")
+            .len(),
+        2
+    );
+
+    let after_stop = post_rpc(addr, submit_native(&session_id, "after-stop")).await;
+    assert!(matches!(
+        after_stop.result,
+        Some(RpcResultData::TurnSubmitted {
+            queued_id: Some(_),
+            ..
+        })
+    ));
+    let queued_seq = wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta {text_delta,..} if text_delta == "回复 queued")
+    }).await;
+    let latest_seq = wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta {text_delta,..} if text_delta == "回复 after-stop")
+    }).await;
+    assert!(stop_seq < queued_seq && queued_seq < latest_seq);
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::SessionUpdated(session) if session.lifecycle == TurnLifecycleState::Idle)
+    }).await;
+
+    assert!(post_rpc(addr, submit_native(&session_id, "fail")).await.ok);
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::ErrorRaised {error,..} if error.code == ErrorCode::DriverUnavailable && error.summary_zh == "Codex 原生回合失败")
+    }).await;
+    handle.abort();
+    let _ = handle.await;
+    drop(state);
+    let restored = DaemonState::open(Some(dir.path()), &format!("http://{addr}"), false)
+        .expect("reopen database");
+    let snapshot = restored.snapshot().expect("reopen snapshot");
+    let session = &snapshot.sessions[0];
+    assert_eq!(session.bucket, WorkspaceBucket::Failed);
+    assert_eq!(session.lifecycle, TurnLifecycleState::Idle);
+    assert_eq!(
+        session.native_session_id.as_deref(),
+        Some("aabbccdd-1234-4234-8234-aabbccddeeff")
+    );
+    let messages = restored
+        .list_session_messages(&session_id)
+        .expect("reopen turn history");
+    assert_eq!(messages.len(), 8);
+    let replies: Vec<_> = messages
+        .iter()
+        .filter(|msg| msg.role == TurnMessageRole::Assistant)
+        .map(|msg| msg.text.as_str())
+        .collect();
+    assert_eq!(replies, ["回复 hold", "回复 queued", "回复 after-stop", ""]);
+}
+
+fn bind_local_fixture(dir: &TempDir, state: &DaemonState) -> SessionTarget {
+    let project_dir = dir.path().join("project-fixture");
+    std::fs::create_dir(&project_dir).expect("create existing project dir");
+    state
+        .upsert_project(ProjectSummary {
+            project_id: "project-fixture".to_owned(),
+            name: "测试项目".to_owned(),
+            display_path: "~/project-fixture".to_owned(),
+            root_path: project_dir.to_string_lossy().into_owned(),
+            is_git_repo: false,
+            default_branch: None,
+            aggregated_bucket: WorkspaceBucket::Done,
+            workspace_count: 1,
+        })
+        .expect("bind test project");
+    state
+        .upsert_workspace(WorkspaceSummary {
+            workspace_id: "workspace-fixture".to_owned(),
+            project_id: "project-fixture".to_owned(),
+            project_name: "测试项目".to_owned(),
+            display_path: "~/project-fixture".to_owned(),
+            branch: String::new(),
+            isolation: WorkspaceIsolation::Local,
+            agent_id: "codex".to_owned(),
+            model_id: String::new(),
+            bucket: WorkspaceBucket::Done,
+            summary: String::new(),
+            diff_stat: String::new(),
+            label: None,
+            archived: false,
+            needs_recovery: false,
+            recovery_reason: None,
+            updated_at: Utc::now(),
+        })
+        .expect("bind local workspace");
+    SessionTarget::Workspace {
+        workspace_id: "workspace-fixture".to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn native_codex_uses_bound_directory_and_requires_read_only() {
+    let dir = TempDir::new().expect("create test data dir");
+    let (addr, state, handle) = spawn_daemon(&dir, Some(codex_fixture())).await;
+    let target = bind_local_fixture(&dir, &state);
+    let create = |permission| RpcCommand::CreateSession {
+        target: target.clone(),
+        title: None,
+        agent_id: "codex".to_owned(),
+        model_id: None,
+        permission: Some(permission),
+        thinking: None,
+    };
+    let RpcResultData::SessionCreated(writable) = post_rpc(addr, create(PermissionLevel::Ask))
+        .await
+        .result
+        .expect("create default session")
+    else {
+        panic!("expected session");
+    };
+    let denied = post_rpc(addr, submit_native(&writable.session_id, "directory")).await;
+    assert_eq!(
+        denied.error.expect("permission error").code,
+        ErrorCode::DriverUnavailable
+    );
+    assert!(
+        state
+            .list_session_messages(&writable.session_id)
+            .expect("load denied session history")
+            .is_empty()
+    );
+
+    let RpcResultData::SessionCreated(session) = post_rpc(addr, create(PermissionLevel::ReadOnly))
+        .await
+        .result
+        .expect("create read-only session")
+    else {
+        panic!("expected session");
+    };
+    let (mut ws, _) = connect_ws(
+        addr,
+        ClientHello {
+            client_kind: ClientKind::Desktop,
+            client_version: "test".to_owned(),
+            protocol_version: soxu_protocol::PROTOCOL_VERSION,
+            after_seq: None,
+            device_id: None,
+        },
+    )
+    .await;
+    assert!(
+        post_rpc(addr, submit_native(&session.session_id, "directory"))
+            .await
+            .ok
+    );
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::SessionUpdated(updated) if updated.lifecycle == TurnLifecycleState::Idle && updated.bucket == WorkspaceBucket::Done)
+    }).await;
+    let messages = state
+        .list_session_messages(&session.session_id)
+        .expect("load bound directory history");
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[1].text, "回复 directory");
+    handle.abort();
+    let _ = handle.await;
+    let mut interrupted = state
+        .snapshot()
+        .expect("read session before restart")
+        .sessions
+        .into_iter()
+        .find(|item| item.session_id == session.session_id)
+        .expect("completed session");
+    interrupted.bucket = WorkspaceBucket::Running;
+    interrupted.lifecycle = TurnLifecycleState::Running;
+    SqliteStore::open(&dir.path().join("soxu-daemon.db"))
+        .expect("open fixture database")
+        .upsert_session(&interrupted)
+        .expect("simulate interrupted session");
+    drop(state);
+    let (_, reopened, reopened_handle) = spawn_daemon(&dir, Some(codex_fixture())).await;
+    let restored = reopened.snapshot().expect("snapshot after interruption");
+    let recovered = restored
+        .sessions
+        .iter()
+        .find(|item| item.session_id == session.session_id)
+        .expect("interrupted session");
+    assert_eq!(recovered.lifecycle, TurnLifecycleState::Idle);
+    assert_eq!(recovered.bucket, WorkspaceBucket::Failed);
+    assert_eq!(recovered.native_session_id, interrupted.native_session_id);
+    assert_eq!(restored.workspaces[0].bucket, WorkspaceBucket::Failed);
+    reopened_handle.abort();
+}
+
+#[tokio::test]
+#[ignore = "需本机 Codex EXE 与可用的隔离 CODEX_HOME"]
+async fn native_codex_executable_smoke() {
+    let program = PathBuf::from(std::env::var_os("SOXU_CODEX_EXE").expect("real Codex executable"));
+    let codex_home = std::env::var_os("SOXU_TEST_CODEX_HOME").expect("isolated Codex home");
+    let driver = NativeDriver::with_program(NativeCliKind::Codex, program, [])
+        .expect("configure real Codex")
+        .with_env("CODEX_HOME", Some(codex_home));
+    let dir = TempDir::new().expect("create isolated daemon state");
+    let (addr, state, handle) = spawn_daemon(&dir, Some(driver)).await;
+    let target = bind_local_fixture(&dir, &state);
+    for command in [
+        RpcCommand::CreateQuickChat {
+            title: None,
+            agent_id: "codex".to_owned(),
+            model_id: None,
+            permission: Some(PermissionLevel::ReadOnly),
+            thinking: None,
+        },
+        RpcCommand::CreateSession {
+            target,
+            title: None,
+            agent_id: "codex".to_owned(),
+            model_id: None,
+            permission: Some(PermissionLevel::ReadOnly),
+            thinking: None,
+        },
+    ] {
+        assert!(post_rpc(addr, command).await.ok);
+    }
+    let (mut ws, hello) = connect_ws(
+        addr,
+        ClientHello {
+            client_kind: ClientKind::Desktop,
+            client_version: "test".to_owned(),
+            protocol_version: soxu_protocol::PROTOCOL_VERSION,
+            after_seq: None,
+            device_id: None,
+        },
+    )
+    .await;
+    assert_eq!(hello.snapshot.sessions.len(), 2);
+    for session in hello.snapshot.sessions {
+        let session_id = session.session_id;
+        let prompt = "Reply only SOXU_NATIVE_CODEX_OK. Do not use tools.";
+        assert!(post_rpc(addr, submit_native(&session_id, prompt)).await.ok);
+        wait_for_ws_event(&mut ws, |event| {
+            matches!(event, DaemonEvent::SessionUpdated(updated) if updated.session_id == session_id && updated.lifecycle == TurnLifecycleState::Idle)
+        }).await;
+        let snapshot = state.snapshot().expect("load completed real session");
+        let completed = snapshot
+            .sessions
+            .iter()
+            .find(|item| item.session_id == session_id)
+            .expect("find completed real session");
+        assert_eq!(
+            completed.bucket,
+            WorkspaceBucket::Done,
+            "{:?}",
+            completed.target
+        );
+        assert!(completed.native_session_id.is_some());
+        let messages = state
+            .list_session_messages(&session_id)
+            .expect("load real messages");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].text.trim(), "SOXU_NATIVE_CODEX_OK");
+    }
+    handle.abort();
 }
 
 async fn http_request(
