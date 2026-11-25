@@ -99,13 +99,14 @@ process.rs[IW8L]: F:用Tokio启动可信原生CLI，转发有界JSONL与Pi控制
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/===
 Cargo.toml[FV5T]: F:声明 soxu-git crate 的包元数据、lint 规则和依赖 | R:code:Cargo.toml | A:soxu-git | S:版本、Rust edition、最低 Rust 版本、许可证、lint 规则和全部依赖均继承自工作区
-README.md[SD6T]: F:说明M3a状态探测及M3b本地项目只读接入、身份类型、安全边界和临时夹具验证 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/project.rs,code:crates/soxu-git/tests/project.rs | A:GitProbe,open_local_project,只读与限制,验证与后续 | S:打开只查身份不扫描status；普通目录仅接受Git明确非仓库结果，bare、元数据和损坏不降级；后续Init/Clone需显式请求
+README.md[SD6T]: F:说明M3a状态探测、M3b项目身份及M3cWorktree只读清单契约、原始字节边界和临时夹具验证 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/project.rs,code:crates/soxu-git/src/worktrees.rs,code:crates/soxu-git/tests/worktrees.rs | A:GitProbe,list_worktrees,parse_worktrees,WorktreeHead,只读与限制 | S:Git自身检查注册路径，Soxu不额外遍历；清单不推断健康或提交存在性，零OID无branch为Unavailable；probe/open拒绝bare而list可报告bare
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/===
-lib.rs[LD6T]: F:公开Git探测、结构化状态与本地项目身份类型，保留轮次检查点摘要及兼容测试 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/project.rs,code:crates/soxu-git/src/status.rs | A:GitProbe,LocalProject,WorktreeIdentity,ProjectOpenError,parse_status,CheckpointSummary | S:CheckpointSummary原有四字段及serde契约不变，项目身份未扩展根协议
+lib.rs[LD6T]: F:公开Git探测、状态、项目身份与Worktree清单类型及解析入口，保留轮次检查点摘要 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/project.rs,code:crates/soxu-git/src/status.rs,code:crates/soxu-git/src/worktrees.rs | A:GitProbe,WorktreeInventory,WorktreeInventoryError,WorktreeHead,parse_worktrees,CheckpointSummary | S:CheckpointSummary既有四字段及serde契约不变；清单错误独立包装GitError，不扩展根协议
 probe.rs[ID8M]: F:经可信原生Git入口异步探测工作树、Git目录、分支HEAD与状态，并为项目接入复用受限身份命令 | R:code:crates/soxu-git/src/status.rs,code:crates/soxu-git/src/project.rs,code:crates/soxu-git/src/probe/tests.rs | A:GitProbe::new,discover,probe,read_path,run_command,GitError | S:清除继承GIT环境并屏蔽全局配置；禁用可选锁、fsmonitor及按需fetch。状态探测提前拒绝外部过滤器与gitlink。限时15秒、每流16MiB，超限与超时回收直接子进程；run_command保留退出码和stderr供身份判定，run既有错误语义不变，非原子快照且无配置竞态保护
 status.rs[KD8M]: F:纯字节解析porcelain v2 NUL记录，结构化保留XY、子模块、模式OID、重命名评分与原始路径 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/status.rs | A:parse_status,GitPath,StatusSnapshot,StatusEntry,ParseError | S:重命名下一NUL段为源路径；OID含零占位与头部须同为40或64位。仅未跟踪和忽略路径允许单个尾斜线，原字节保留；跟踪路径及内部空分量拒绝。Windows转换拒绝非UTF8及风险名；serde路径为字节数组
 project.rs[ID8S]: F:只读打开规范化绝对目录，区分普通目录和Git工作树，返回工作树根及独立与共享Git目录 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/project.rs | A:GitProbe::open_local_project,LocalProject,WorktreeIdentity,ProjectOpenError | S:仅退出128且空stdout及精确非仓库stderr可降级普通目录；检查被Git跳过的祖先元数据防损坏误判。bare和元数据目录拒绝，linked保留独立根及Git目录；不扫描status、不执行初始化克隆或写入
+worktrees.rs[ID8M]: F:复用GitProbe运行原生Worktree只读清单并全批解析NUL属性为注册路径、HEAD状态与锁定及可清理原因 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/worktrees.rs | A:GitProbe::list_worktrees,parse_worktrees,WorktreeInventory,WorktreeHead,WorktreePath,WorktreeAnnotation | S:复用run_command配置隔离及15秒每流16MiB边界；首条Main其余Linked。路径及原因保留字节，不裁剪解引号，不额外访问注册路径。未知字段、重复截断、非法ref路径及混合OID宽度整批拒绝；零OID无branch为Unavailable不推断健康。Unix路径无损，Windows拒绝非UTF8及归一化风险；无创建删除repair/prune
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-magpie/===
 Cargo.toml[FV5T]: F:声明soxu-magpie包及其工作区依赖 | R:code:Cargo.toml | A:soxu-magpie | S:包版本、Rust版本、edition、许可证和lint规则均继承自工作区
@@ -136,7 +137,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录Soxu架构与工程决策，新增主控只编排审查、AGY延期及Pi/Git正交并行的ADR-007 | R:code:AGENTS.md,code:docs/ops/PROGRESS.md,code:design-system/soxu/MASTER.md | A:ADR-001..007,Owned Paths,Queue/Steer/Stop | S:#26开放但路由关闭，延期不等于M2七代理验收；PiDeck仅参考原生Pi，不引入ACP。Issue#34的PR#35先合流，再串行合入Issue#32/#33业务PR；后续分支吸收main并保留前序AOCI认知，执行代理不得合并或回收。
-PROGRESS.md[SW6S]: F:记录里程碑交付边界、Pi与Git证据及M3b本PR交付API、验收边界和后续M3队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-git/README.md | A:M0..M6,#26,#32/#37,#33/#36,#38/#39/#40,open_local_project | S:M3b区分普通目录与GitWorktree并拒绝bare、损坏、元数据和权限错误，25项专项通过；Agent表是PR构建快照，永久队列从Init/Clone及Worktree清单开始。根依赖协议冻结，#26延期且Daemon路由关闭
+PROGRESS.md[SW6S]: F:记录里程碑事实、M3b主线合入及M3c清单构建验收、正交文档工作区快照和后续审查队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-git/README.md | A:M0..M6,#39/#41,#42,#43,list_worktrees,Unavailable | S:#39已合入7cea1c4；#42独立target七项和35项Git专项通过，主控host-review七项通过，PR待审不自行合入归档；#43仅文档设计快照不代表Diff实现，Unix真实特殊路径未在Windows执行，根协议依赖冻结
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
