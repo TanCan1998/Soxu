@@ -298,6 +298,17 @@ async fn native_claude_read_only_rpc_resume_cancel_fifo_and_restart() {
     .await;
 }
 
+#[tokio::test]
+async fn native_qwen_read_only_rpc_resume_cancel_fifo_and_restart() {
+    assert_read_only_rpc_flow(
+        NativeCliKind::QwenCode,
+        "Qwen Code",
+        "qwen.cjs",
+        "3344aabb-1234-4234-8234-3344aabbccdd",
+    )
+    .await;
+}
+
 async fn assert_read_only_rpc_flow(
     kind: NativeCliKind,
     label: &str,

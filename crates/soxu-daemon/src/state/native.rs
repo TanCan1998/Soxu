@@ -33,6 +33,7 @@ enum ReadOnlyAgent {
     Codex,
     Pi,
     Claude,
+    Qwen,
 }
 
 impl ReadOnlyAgent {
@@ -42,12 +43,13 @@ impl ReadOnlyAgent {
                 "codex" => return Ok(Self::Codex),
                 "pi" => return Ok(Self::Pi),
                 "claude" => return Ok(Self::Claude),
+                "qwen" => return Ok(Self::Qwen),
                 _ => {}
             }
         }
         Err(turn_error(
             ErrorCode::DriverUnavailable,
-            "当前只接通未归档的 Codex、Pi 和 Claude Code 只读会话",
+            "当前只接通未归档的 Codex、Pi、Claude Code 和 Qwen Code 只读会话",
             "请选择已配置的代理与只读权限，或新建只读快速对话",
         ))
     }
@@ -57,6 +59,7 @@ impl ReadOnlyAgent {
             Self::Codex => "Codex",
             Self::Pi => "Pi",
             Self::Claude => "Claude Code",
+            Self::Qwen => "Qwen Code",
         }
     }
 
@@ -65,6 +68,7 @@ impl ReadOnlyAgent {
             Self::Codex => NativeCliKind::Codex,
             Self::Pi => NativeCliKind::Pi,
             Self::Claude => NativeCliKind::ClaudeCode,
+            Self::Qwen => NativeCliKind::QwenCode,
         }
     }
 
@@ -82,6 +86,7 @@ impl ReadOnlyAgent {
             Self::Codex => "请检查本机 Codex，或通过 SOXU_CODEX_EXE 指定原生可执行文件",
             Self::Pi => "请通过 SOXU_PI_EXE 指定可信可执行文件，使用 Node 时同时设置 SOXU_PI_ENTRY",
             Self::Claude => "请通过 SOXU_CLAUDE_EXE 指定可信 Claude Code 可执行文件",
+            Self::Qwen => "请通过 SOXU_QWEN_NODE 和 SOXU_QWEN_ENTRY 指定可信 Node 和 Qwen JS 入口",
         };
         turn_error(ErrorCode::DriverUnavailable, error.to_string(), advice)
     }
@@ -135,7 +140,11 @@ impl DaemonState {
                 .get_mut()
                 .map_err(|_| lock_err("orchestrator"))?;
             let mut agents = orchestrator.agents().to_vec();
-            for kind in [NativeCliKind::Pi, NativeCliKind::ClaudeCode] {
+            for kind in [
+                NativeCliKind::Pi,
+                NativeCliKind::ClaudeCode,
+                NativeCliKind::QwenCode,
+            ] {
                 let (Some(driver), Some(agent)) = (
                     drivers.get(&kind),
                     agents
@@ -458,7 +467,9 @@ impl DaemonState {
                         ReadOnlyAgent::Codex => self
                             .record_native_session_id(&assistant.session_id, id)
                             .map_err(|_| "原生会话标识无法落盘".to_owned())?,
-                        ReadOnlyAgent::Pi | ReadOnlyAgent::Claude => pending_id = Some(id),
+                        ReadOnlyAgent::Pi | ReadOnlyAgent::Claude | ReadOnlyAgent::Qwen => {
+                            pending_id = Some(id)
+                        }
                     },
                     DriverEvent::Text(text_delta) => {
                         if assistant.text.len().saturating_add(text_delta.len()) > MAX_REPLY_BYTES {
