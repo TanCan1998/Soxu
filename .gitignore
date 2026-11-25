@@ -53,3 +53,9 @@ Desktop.ini
 # AOCI agent host integration (machine-bound; do not commit)
 .codex/config.toml
 .codex/config.toml.backup.*
+
+# AGY 与 Codex 桌面端本地私有状态隔离（共享技能 .agents/skills/ 随仓库版本化）
+.agents/local/
+.agents/*.local.*
+.gemini/
+.antigravity/

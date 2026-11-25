@@ -1,4 +1,7 @@
 {
+  "worktree": {
+    "setup": "pwsh -NoProfile -File scripts/setup-hooks.ps1"
+  },
   "scripts": {
     "daemon-dev": {
       "command": "pwsh -NoProfile -Command \"cargo run -p soxu-daemon\"",

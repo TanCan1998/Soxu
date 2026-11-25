@@ -31,6 +31,7 @@
 ## 3. 活跃工作区与智能调度策略
 
 - **当前并发上限**：参考库索引阶段采用 `3~4` 路独立仓库并行初始化；后续进入 M0.5 顶层规范时回归 `1` 路串行，M1~M5 接口冻结后的正交模块实现采用 `2~3` 路 Paseo Worktree 并行。
+- **双桌面端主控协同（AGY ⇄ Codex 随时切换）**：本机 AGY 桌面端与 Codex 桌面端已同时导入 `Soxu` 项目，宿主配置与工作树写操作相互隔离，仓库认知（`AGENTS.md` / `aoci.txt` / `.agents/skills/paseo-orchestrator`）与 Paseo 守护进程状态池全面共享；任意时刻均可使用 `pwsh -NoProfile -File scripts/paseo-ctl.ps1` 在两端之间无损切换控制 Paseo。
 - **主力 Agent 与模型路由池**（通过 Paseo 调度，经 Magpie 网关路由）：
   - **L3 架构/并发攻坚**：`codex` / `pi` / `agy` · `group/gpt-6.2-astra` / `group/claude-opus-5.5` / `gemini-4-carbon` (`high`)
   - **L2 核心模块/UI 实现**：`codex` / `pi` / `agy` · `group/gpt-6.2-sol` / `group/claude-sonnet-5.5` / `auto/gemini-4-hydrogen` (`medium`)
