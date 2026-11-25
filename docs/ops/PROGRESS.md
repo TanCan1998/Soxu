@@ -6,7 +6,7 @@
 
 ## 1. 当前总体状态
 
-- **当前所处阶段**：`M0` 与 **`M0.5: Pure Black Design System & Dual Prototypes`（PR `#4`）均已合入 `main` 并关闭收口**，仓库已开启合并自动删支（`delete_branch_on_merge = true`）并清理全部遗留历史分支；当前正在推进 **M1 Wave 1.1（Issue `#5`：`Cargo.toml` 公共依赖与 `soxu-protocol` v1 全量契约冻结）**，合入 `main` 后立即双路并行启动 **Wave 1.2**。
+- **当前所处阶段**：`M0`、`M0.5`（PR `#4`）与 **`M1: Protocol v1, Domain Core & Daemon Spine`（`#5` / `#6` / `#7`）已全部完成并合入 `main`**；仓库已全面启用合并自动删支（`delete_branch_on_merge = true`）与 Paseo Worktree 自动回收。下一步基于最新 `main` 双路并行启动 **`M2: Magpie Discovery & 7 Native CLI Drivers`**。
 - **参考项目与索引进度（已全部完成）**：
   - [x] 拉取参考项目至 `.refs/`：`paseo`（7,818 文件）、`codeg`（3,324 文件）、`padu`（1,157 文件）
   - [x] **AOCI 认知索引已全部原子入库**：`padu`（方案 A 全量 **1,086** 条）、`paseo`（方案 B 宏观核心 **202** 条）、`codeg`（方案 B 宏观核心 **177** 条）、`Soxu` 主仓（全量对齐）
@@ -20,7 +20,7 @@
 | :--- | :--- | :--- | :--- |
 | **M0** | Bootstrap & Engineering Governance | ✅ 已完成 | 仓库骨架（Rust 2024 + PWA）、`.githooks` + `gitleaks` 隐私与 Emoji 门禁、最新 Actions CI、三层文档、Paseo `git` 项目绑定 |
 | **M0.5** | Pure Black Design System & Dual Prototypes | ✅ 已完成 | 纯黑 7 级海拔 `tokens.json` + `shadcn/ui` 变量、MASTER + 7 份分页面规范、React 19 + `shadcn/ui` + Tailwind v4 双端原型与 7 分区独立设置、单文件桌面预览 `preview.html`、移动遥控 PWA 原型（PR `#4`） |
-| **M1** | Protocol v1, Domain Core & Daemon Spine | 🚧 进行中（Wave 1.1 `#5`） | `soxu-protocol` 全量 RPC/WS `seq` 契约、快速对话与项目二级树模型、6 档权限与高危红线审批 / `PendingUserInput` 状态机、7 代理能力协商、本地持久化与 `#offer=` / 6 位码配对鉴权 |
+| **M1** | Protocol v1, Domain Core & Daemon Spine | ✅ 已完成 | `soxu-protocol` 全量 RPC/WS `seq` 契约、`soxu-core` 状态桶/能力协商/安全红线/队列草稿、`soxu-daemon` SQLite WAL 持久化 + WS 增量追平 + `#offer=`/6 位码鉴权、`soxu-cli` 闭环（`#5` / `#6` / `#7`） |
 | **M2** | Magpie Discovery & 7 Native CLI Drivers | ⏳ 待启动 | `soxu-magpie` 双态只读拓扑 + 原生降级扫描 + 启动环境脱敏透视；`soxu-drivers` 7 大原生 CLI 流式驱动、`Queue`/`Steer`/`Interrupt`、11 项遥测采集、本地历史 Resume/Fork 导入（无项目与本地对话率先跑通） |
 | **M3** | Git Worktree Pool, Checkpoints & Commit Engine | ⏳ 待启动 | `soxu-git` 三合一项目接入、Worktree 隔离池 + `direct` MCP 上下文挂载 + 工作区损坏恢复、三基准 Diff、Checkpoint 三选一安全回退（含 Safety Stash）、拆分式 Git Emoji 提交与门禁预检 |
 | **M4** | Live Mobile PWA & GPUI Workbench Foundation | ⏳ 待启动 | **双轨 100% 正交并行**：`apps/mobile-web` 去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对与 13 组视口验收；`soxu-desktop` GPUI 令牌编译器、双开源字体联动、可扩展 `i18n`、7 层焦点栈与四栏自适应壳层 |
@@ -61,6 +61,8 @@
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 完成 **M1 Wave 1.1（Issue `#5`）** 门禁校验、自动删支 Squash 合入 `main` 并回收 Paseo Worktree。
-2. 基于最新 `main` 双路并行拉起 **M1 Wave 1.2a（Issue `#6`：`soxu-core` 状态桶、能力协商与红线状态机）** 与 **M1 Wave 1.2b（Issue `#7`：`soxu-daemon` + `soxu-cli` 持久化、WS `seq` 增量追平与配对鉴权）**。
+1. 基于最新 `main` 创建 **M2（Magpie Discovery & 7 Native CLI Drivers）** 任务议题，并双路并行拉起 Paseo 隔离 Worktree：
+   - **M2a（`crates/soxu-magpie/**`）**：Magpie 双态只读拓扑、原生降级扫描与启动环境脱敏透视；
+   - **M2b（`crates/soxu-drivers/**`）**：7 大原生 CLI 流式驱动、`Queue`/`Steer`/`Interrupt`、11 项遥测采集与本地历史 Resume/Fork 导入。
+2. 合流接入 `soxu-daemon` 与 `soxu doctor`，率先跑通无项目与本地目录真实 CLI 对话。
 

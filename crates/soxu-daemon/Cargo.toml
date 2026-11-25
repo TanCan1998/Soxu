@@ -11,9 +11,15 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+base64.workspace = true
+chrono.workspace = true
+futures-util.workspace = true
+rand.workspace = true
+rusqlite.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 soxu-core.workspace = true
 soxu-drivers.workspace = true
 soxu-git.workspace = true
@@ -22,3 +28,8 @@ soxu-protocol.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio-tungstenite.workspace = true
