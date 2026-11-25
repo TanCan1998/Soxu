@@ -3,7 +3,7 @@
 use crate::state::DaemonState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header, uri::Authority};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -12,7 +12,7 @@ use soxu_protocol::{
     ActionableError, ClientHello, DaemonEvent, ErrorCode, EventEnvelope, HealthSnapshot,
     PROTOCOL_VERSION, RpcCommand, RpcRequest, RpcResponse, RpcResultData, ServerHello,
 };
-use std::sync::Arc;
+use std::{net::IpAddr, sync::Arc};
 use tokio::sync::broadcast::error::RecvError;
 
 #[derive(Debug, Deserialize)]
@@ -75,11 +75,43 @@ fn authorize_request(
     }
 }
 
+fn local_origin_allowed(state: &DaemonState, headers: &HeaderMap) -> bool {
+    if !state.has_local_native_turns() {
+        return true;
+    }
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<Authority>().ok())
+    else {
+        return false;
+    };
+    let name = host.host().trim_matches(['[', ']']);
+    let loopback = name.eq_ignore_ascii_case("localhost")
+        || name.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
+    loopback
+        && headers
+            .get(header::ORIGIN)
+            .is_none_or(|origin| origin.as_bytes() == format!("http://{host}").as_bytes())
+}
+
+fn origin_error() -> ActionableError {
+    ActionableError::new(
+        ErrorCode::Unauthorized,
+        "请求来源与本机回环地址不匹配",
+        "已拒绝此连接",
+        "请使用本机 Soxu 客户端或从同一回环地址连接",
+    )
+}
+
 async fn health_handler(State(state): State<Arc<DaemonState>>) -> Json<HealthSnapshot> {
     Json(state.health())
 }
 
 async fn snapshot_handler(State(state): State<Arc<DaemonState>>, headers: HeaderMap) -> Response {
+    if !local_origin_allowed(&state, &headers) {
+        return (StatusCode::FORBIDDEN, Json(origin_error())).into_response();
+    }
     if let Err((status, err)) = authorize_request(&state, &headers, None, true) {
         return (status, err).into_response();
     }
@@ -94,6 +126,9 @@ async fn events_handler(
     headers: HeaderMap,
     Query(query): Query<EventsQuery>,
 ) -> Response {
+    if !local_origin_allowed(&state, &headers) {
+        return (StatusCode::FORBIDDEN, Json(origin_error())).into_response();
+    }
     if let Err((status, err)) = authorize_request(&state, &headers, None, true) {
         return (status, err).into_response();
     }
@@ -114,13 +149,20 @@ async fn rpc_handler(
     headers: HeaderMap,
     Json(req): Json<RpcRequest>,
 ) -> Response {
+    if !local_origin_allowed(&state, &headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(RpcResponse::err(req.request_id, origin_error())),
+        )
+            .into_response();
+    }
     let is_claim = matches!(req.command, RpcCommand::ClaimPairing(_));
     if let Err((status, err)) = authorize_request(&state, &headers, None, true)
         && !is_claim
     {
         return (status, Json(RpcResponse::err(req.request_id, err.0))).into_response();
     }
-    let resp = state.handle_rpc(req);
+    let resp = state.handle_transport_rpc(req);
     (StatusCode::OK, Json(resp)).into_response()
 }
 
@@ -130,6 +172,9 @@ async fn ws_handler(
     Query(query): Query<WsQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    if !local_origin_allowed(&state, &headers) {
+        return (StatusCode::FORBIDDEN, Json(origin_error())).into_response();
+    }
     let bearer_opt = extract_bearer(&headers, query.token.as_deref());
     let authed_device = if let Some(ref token) = bearer_opt {
         match state.authenticate_bearer(token) {
@@ -258,7 +303,7 @@ async fn handle_ws_socket(
                     Some(Ok(Message::Text(raw))) => {
                         match serde_json::from_str::<RpcRequest>(raw.as_str()) {
                             Ok(req) => {
-                                let resp = state.handle_rpc(req);
+                                let resp = state.handle_transport_rpc(req);
                                 if !send_json(&mut socket, &resp).await {
                                     break;
                                 }
