@@ -74,15 +74,17 @@ async function main() {
   delete env.GOOGLE_API_KEY;
   delete env.GOOGLE_APPLICATION_CREDENTIALS;
   delete env.GOOGLE_CLOUD_PROJECT;
-  async function run(label, options = []) {
+  async function run(label, options = [], directory = work) {
     const firstRequest = requests.length;
     const hookAudit = path.join(root, "hook-invoked.jsonl");
     const previousHookBytes = fs.existsSync(hookAudit) ? fs.statSync(hookAudit).size : 0;
+    const projectAudit = path.join(root, "project-hook-invoked.txt");
+    const previousProjectBytes = fs.existsSync(projectAudit) ? fs.statSync(projectAudit).size : 0;
     const child = spawn(program, [
       "--print", `仅回复验证标记，阶段 ${label}`, "--output-format", "stream-json",
       "--disable-slash-commands", "--model", "gemini-3.8-flash", "--print-timeout", "30s",
       "--settings", JSON.stringify(settings), ...options,
-    ], { cwd: work, env });
+    ], { cwd: directory, env });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -123,7 +125,8 @@ async function main() {
       zeroToolBoundary: modelRequests.every((request) => request.names.length === 0),
       hookDenied: writeErrors.some((error) => error.message.includes("SOXU_HOOK_DENY")),
       hookExecuted: fs.existsSync(hookAudit) && fs.statSync(hookAudit).size > previousHookBytes,
-      projectHookExecuted: fs.existsSync(path.join(root, "project-hook-invoked.txt")),
+      projectHookExecuted: fs.existsSync(projectAudit) && fs.statSync(projectAudit).size > previousProjectBytes,
+      toolCompletedWithoutError: events.some((event) => event.step_update?.state === "DONE" && event.step_update.tool_info?.name === injectedTool && !event.step_update.tool_info.error),
     };
     if (label.startsWith("empty-tools")) {
       assert(modelRequests.every((request) => request.names.length === 1 && request.names[0] === "manage_task"), "空工具代理只能保留已实测的任务管理工具");
@@ -140,6 +143,14 @@ async function main() {
       assert(result.projectHookExecuted, "必须实际执行隔离项目的启动钩子，不能把未加载当成隔离证明");
       assert(result.declaredTools.includes("write_file"), "必须实际加载项目代理覆盖");
       assert(result.hookDenied, "项目覆盖后可信全局钩子仍须拒绝工具");
+    }
+    if (label.startsWith("hook-failure-")) {
+      assert(writeErrors.some((error) => /hook/i.test(error.message)), "钩子运行故障必须拒绝工具");
+      assert.equal(result.toolCompletedWithoutError, false, "钩子故障不得回退为工具执行成功");
+    }
+    if (["empty-hook-config", "missing-hook-config", "tampered-hook-allow"].includes(label)) {
+      assert(result.toolCompletedWithoutError, "必须观察残留工具真正执行，不能把未加载或参数错误当作安全阻断");
+      assert.equal(result.hookDenied, false, "缺失或放行配置没有可信拒绝证明");
     }
     fs.writeFileSync(path.join(root, `${label}.json`), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
@@ -195,7 +206,7 @@ async function main() {
     injected = false;
     await run("empty-tools-project-hook", ["--agent", "soxu-no-tools"]);
     const projectStart = path.join(root, "project-start.cjs");
-    fs.writeFileSync(projectStart, `require("node:fs").writeFileSync(${JSON.stringify(path.join(root, "project-hook-invoked.txt"))}, "PROJECT_HOOK");\n`);
+    fs.writeFileSync(projectStart, `require("node:fs").appendFileSync(${JSON.stringify(path.join(root, "project-hook-invoked.txt"))}, "PROJECT_HOOK\\n");\n`);
     fs.writeFileSync(path.join(projectHooks, "hooks.json"), JSON.stringify({
       "soxu-project-start": { enabled: true, SessionStart: [{ type: "command", command: `"${process.execPath}" "${projectStart}"`, timeout: 5 }] },
     }));
@@ -207,6 +218,39 @@ async function main() {
     injected = false;
     injectedTool = "write_file";
     await run("project-agent-override", ["--agent", "soxu-no-tools"]);
+    const isolatedWork = path.join(root, "asset-check-work");
+    fs.mkdirSync(isolatedWork);
+    const hooksPath = path.join(home, ".gemini", "config", "hooks.json");
+    injectedTool = "manage_task";
+    for (const [label, script] of [
+      ["nonzero", "process.exit(1);"],
+      ["invalid-json", 'console.log("not-json");'],
+      ["timeout", "setInterval(() => {}, 1000);"],
+    ]) {
+      const failedHook = path.join(root, `${label}-hook.cjs`);
+      fs.writeFileSync(failedHook, script);
+      fs.writeFileSync(hooksPath, JSON.stringify({
+        "soxu-test-deny": { enabled: true, PreToolUse: [{ matcher: "*", hooks: [{ command: `"${process.execPath}" "${failedHook}"`, timeout: 1 }] }] },
+      }));
+      injected = false;
+      await run(`hook-failure-${label}`, ["--agent", "soxu-no-tools"], isolatedWork);
+    }
+    fs.writeFileSync(hooksPath, JSON.stringify({
+      "soxu-test-deny": { enabled: true, PreToolUse: [{ matcher: "*", hooks: [{ command: `"${process.execPath}" "${path.join(root, "missing-hook.cjs")}"`, timeout: 1 }] }] },
+    }));
+    injected = false;
+    await run("hook-failure-missing-script", ["--agent", "soxu-no-tools"], isolatedWork);
+    fs.writeFileSync(hooksPath, "{}");
+    injected = false;
+    await run("empty-hook-config", ["--agent", "soxu-no-tools"], isolatedWork);
+    fs.renameSync(hooksPath, path.join(root, "saved-empty-hooks.json"));
+    injected = false;
+    await run("missing-hook-config", ["--agent", "soxu-no-tools"], isolatedWork);
+    fs.writeFileSync(hooksPath, JSON.stringify({
+      "soxu-test-deny": { enabled: true, PreToolUse: [{ matcher: "*", hooks: [{ command: `"${process.execPath}" "${allowHook}"`, timeout: 1 }] }] },
+    }));
+    injected = false;
+    await run("tampered-hook-allow", ["--agent", "soxu-no-tools"], isolatedWork);
     hold = true;
     const heldRequest = new Promise((resolve) => { onHeldRequest = resolve; });
     const heldClose = new Promise((resolve) => { onHeldClose = resolve; });
