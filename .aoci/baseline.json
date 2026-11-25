@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-25T12:48:58Z",
+  "updated_at": "2026-11-25T12:58:49Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -95,9 +95,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "c316e5df0f61683be6f76a33767c0ccf7ec8c0f40c1ac99d73ba3ab9e13ccfe5",
-      "size": 55841,
-      "normalized_sha256": "c316e5df0f61683be6f76a33767c0ccf7ec8c0f40c1ac99d73ba3ab9e13ccfe5"
+      "sha256": "52fd032bb56faaf9ad4605e25c04f787d42495aebf7830f2524420b161e06bfe",
+      "size": 55874,
+      "normalized_sha256": "52fd032bb56faaf9ad4605e25c04f787d42495aebf7830f2524420b161e06bfe"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -815,9 +815,9 @@
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "c35b4b145a3a7fe81b169fda0d483c282d7c8ae136ff0a47b79949a4cc6ac9a2",
-      "size": 19501,
-      "normalized_sha256": "c35b4b145a3a7fe81b169fda0d483c282d7c8ae136ff0a47b79949a4cc6ac9a2"
+      "sha256": "d3d0bc7c5b99c0ed1e681c16b99a3a5586f22cc13f20ead8dbd64b742df1b370",
+      "size": 18114,
+      "normalized_sha256": "d3d0bc7c5b99c0ed1e681c16b99a3a5586f22cc13f20ead8dbd64b742df1b370"
     },
     "docs/user/getting-started.md": {
       "role": "index",
