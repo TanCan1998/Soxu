@@ -2,11 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
+mod diff;
 mod probe;
 mod project;
 mod status;
 mod worktrees;
 
+pub use diff::{
+    DiffBaseline, DiffChange, DiffError, DiffFileMode, DiffKind, DiffObservation, DiffOutput,
+    DiffRequest, DiffResult, DiffReview,
+};
 pub use probe::{GitError, GitProbe, HeadState, RepositorySnapshot};
 pub use project::{LocalProject, ProjectOpenError, WorktreeIdentity};
 pub use status::{

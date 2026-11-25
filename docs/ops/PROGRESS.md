@@ -24,7 +24,7 @@
 | **M0.5** | Pure Black Design System & Dual Prototypes | ✅ 已完成 | 纯黑 7 级海拔 `tokens.json` + `shadcn/ui` 变量、MASTER + 7 份分页面规范、React 19 + `shadcn/ui` + Tailwind v4 双端原型与 7 分区独立设置、单文件桌面预览 `preview.html`、移动遥控 PWA 原型（PR `#4`） |
 | **M1** | Protocol v1, Domain Core & Daemon Spine | ✅ 已完成 | `soxu-protocol` 全量 RPC/WS `seq` 契约、`soxu-core` 状态桶/能力协商/安全红线/队列草稿、`soxu-daemon` SQLite WAL 持久化 + WS 增量追平 + `#offer=`/6 位码鉴权、`soxu-cli` 闭环（`#5` / `#6` / `#7`） |
 | **M2** | Magpie Discovery & 7 Native CLI Drivers | M2h、M2j 已完成，M2i 延期 | 已接通六种原生只读 CLI，Pi 原生 `Queue` / `Steer` / `Stop` 已验证。Antigravity 路由保持关闭，七代理全验收仍待完成。 |
-| **M3** | Git Worktree Pool, Checkpoints & Commit Engine | M3a/M3b 已完成，M3c（#42）为本 PR 交付范围 | 仓库身份与结构化状态只读探测；`#39` 的 `open_local_project` 规范化绝对目录并返回普通目录 / `GitWorktree` 身份，保留 linked worktree 的独立根及共享 common dir，拒绝 bare、损坏、元数据和权限错误。`#42` 提供 Worktree 只读注册清单。显式 Init/Clone、Worktree 池、`direct` MCP 挂载、诊断恢复、三基准 Diff、安全回退与提交执行待交付。 |
+| **M3** | Git Worktree Pool, Checkpoints & Commit Engine | M3a–M3c 已合入，M3d（#46）进入审查，M3e（#47）设计已合入 | 仓库身份与结构化状态只读探测、本地项目身份、Worktree 只读注册清单已合入。`#46` 实现四基准已跟踪只读 Diff。`#47` 审定注册、检出、接入三阶段，实施从受控注册和只读诊断开始。显式 Init/Clone、Worktree 池、`direct` MCP 挂载、诊断恢复、Checkpoint Diff、安全回退与提交执行待交付。 |
 | **M4** | Live Mobile PWA & GPUI Workbench Foundation | ⏳ 待启动 | **双轨 100% 正交并行**：`apps/mobile-web` 去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对与 13 组视口验收；`soxu-desktop` GPUI 令牌编译器、双开源字体联动、可扩展 `i18n`、7 层焦点栈与四栏自适应壳层 |
 | **M5** | GPUI Core Views: Transcript, Composer & Inspector | ⏳ 待启动 | `soxu-desktop` 三路并行落地：`<=8.3Hz` 虚拟对话流 + 5 类工具卡/审批卡/提问卡 + 20px 轮次导航轨、760px 同步宽输入舱 + `@agent` 移交 + 三色圆环统计、右栏 Diff/Files、7 分区设置与核心业务模态框 |
 | **M6** | Scripts, PTY Terminal, Search & Automation | ⏳ 待启动 | `paseo.json` 受管脚本遥控、`#050505` 多窗格受控 PTY 终端、`Cmd+K` 五分区检索 + CodeGraph 符号补全 + 按需三步 Onboarding、Schedules & Heartbeats 定时调度中心、50,000 行 Diff 压测与跨平台打包 |
@@ -41,8 +41,10 @@
 3. **M3 — Git 隔离池、轮次检查点与结构化提交**：
    - **M3a（`#33`，已合入）**：通过本机 Git 只读获取工作树根、独立与共享 Git 目录、HEAD/分支及 `status --porcelain=v2 -z`。
    - **M3b（`#39` / PR `#41`，已合入 `7cea1c4`）**：只读项目身份已交付。
-   - **M3c（`#42`，本 PR 交付）**：提供 Worktree 只读注册清单，保留原始路径、locked/prunable 原因及 `Unavailable` HEAD 状态。
-   - **后续依赖**：本地身份稳定后推进显式 Init/Clone、Worktree 清单与只读 Diff。受控创建和诊断恢复承接 Worktree 清单及身份模型。Checkpoint 基准 Diff 依赖快照模型，回退必须先留可恢复快照，提交执行必须经过结构化预检。公共契约单独排期，先冻结再接入跨模块实现。
+   - **M3c（`#42` / PR `#45`，已合入 `4c5d706`）**：提供 Worktree 只读注册清单，保留原始路径、locked/prunable 原因及 `Unavailable` HEAD 状态。
+   - **M3d（`#46`）**：交付 `soxu-git` 内四基准只读 Diff、精确已跟踪路径授权、有界元数据及单文件审阅。
+   - **M3e（`#47` / PR `#48`，设计已合入 `12ea672`）**：先做显式新分支注册与只读诊断，阶段终态为「已注册，待检出」。第二阶段安全检出固定提交，第三阶段核验就绪后由宿主登记、开放 Agent 并挂载 `direct` MCP。三个实施阶段均待交付。详见 [Worktree 生命周期设计](../dev/git-worktree-lifecycle.md)。
+   - **后续依赖**：受控创建和诊断恢复承接 Worktree 清单及身份模型。Checkpoint 基准 Diff 依赖快照模型，回退必须先留可恢复快照，提交执行必须经过结构化预检。公共契约单独排期，先冻结再接入跨模块实现。
    - **合流联动**：新建 Worktree 时联动 `soxu-magpie` 自动补齐 `direct` MCP（AOCI / CodeGraph）工作区上下文。
 4. **M4 — 移动遥控 PWA 真机闭环 + GPUI 桌面底座（双轨 100% 正交并行）**：
    - **Wave 4.1（单流准备 PR）**：在根 `Cargo.toml` 引入 `gpui` / `gpui-component` 并配置开发编译优化，扩展 `scripts/sync-design-tokens.mjs` 生成零漂移 Rust 主题常量并接入 `--check`。
@@ -68,13 +70,11 @@
 
 三项 Issue 均已关闭，表中三个工作区均已归档，对应的本地和远端分支均已回收，三次合入后的 `main` CI 均通过。
 
-下表为本 PR 构建时的待审 Agent / 工作区快照，不代表合入后的永久待办；#38 交接已由 PR #40 合入。
+`#38` 交接已由 PR `#40` 合入。`#42` 的 Worktree 清单已由 PR `#45` 合入 `main`（`4c5d706`）。`#43` 的只读 Diff 设计已由 PR `#44` 合入（`63acf15`）。`#47` 的 Worktree 受控创建与只读诊断设计已由 PR `#48` 合入（`12ea672`）。
 
 | Issue | 工作区 / Agent | 写入范围与合入顺序 |
 | :--- | :--- | :--- |
-| [#38](https://github.com/TanCan1998/Soxu/issues/38) 波次交接 | `docs/38-wave-handoff` | `docs/ops/PROGRESS.md` 与必要 AOCI 托管资产，交接波次由主控审查。 |
-| [#42](https://github.com/TanCan1998/Soxu/issues/42) M3c Worktree 清单 | `feat/42-worktree-inventory` / 当前 Pi | 基于 `7cea1c4` 的构建快照：只写 `soxu-git` lib/worktrees/测试/README、本看板及 AOCI；独立 `soxu-42-inventory-independent` target 完整七项门禁通过，Git 专项 35 项（清单 10 项）通过；主控独立 `host-review` 七项亦通过。AOCI 已对齐，PR #45 已提交，合入由主控执行。 |
-| [#43](https://github.com/TanCan1998/Soxu/issues/43) 只读 Diff 文档审查 | 原 `docs/43-readonly-diff` / `wks_6ff9d4c0ca4c6895` / `e91d521c-7688-4234-8aac-340993eedd31` | PR #44 已由主控合入 `main`（`63acf15`）；文档 `docs/dev/git-readonly-diff.md` 及其 AOCI Entry 已吸收，不代表 Diff 功能已实现。 |
+| [#46](https://github.com/TanCan1998/Soxu/issues/46) M3d 四基准只读 Diff | `feat/46-readonly-diff` | `soxu-git` Diff、runner 复用、测试、crate README、本看板及 AOCI。主控审查合流。 |
 
 Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0f5e2e5`（`main`）。执行代理完成各自验证、推送和建 PR，主控负责审查、合入与归档。
 
@@ -82,7 +82,9 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 - M3b（`#39` / PR `#41`）已合入 `7cea1c4`，交付 `GitProbe::open_local_project`，规范化显式绝对目录，返回 `LocalProject::Directory` 或 `LocalProject::GitWorktree(WorktreeIdentity)`。根与子目录归于同一工作树；linked worktree 保留独立工作树根、Git 目录及共享 common dir。bare、损坏仓库、Git 元数据目录和权限错误不得降级普通目录。打开仅查身份，不扫描完整 status，不初始化、克隆、创建工作树或写入。`cargo test -p soxu-git` 25 项专项通过（其中本地项目夹具 5 项），根依赖、协议和 M3a 公开契约保持不变。
 
-- M3c（`#42`）清单全批解析 NUL 分隔记录，校验 ref 和路径，保留注解原始字节。临时夹具验证缺失 HEAD 时报告零 OID 和 detached 的 `Unavailable` 状态，并在验证后恢复 HEAD。Git 自身检查注册路径以判断 prunable，Soxu 不额外遍历/打开。Windows Git `2.56.0.windows.4` 已实测；Unix 专属真实换行/非 UTF-8 测试已编写但本机不执行。未引入新依赖，不修改 probe/project/status、根协议或依赖。
+- M3c（`#42` / PR `#45`，已合入 `4c5d706`）清单全批解析 NUL 分隔记录，校验 ref 和路径，保留注解原始字节。缺失 HEAD 时返回零 OID 与 `Unavailable`。Git 自身检查注册路径以判断 prunable。该波 Git 专项 35 项及执行端、主控各自的七项门禁均通过。
+
+- M3d（`#46`）在 Windows Git `2.56.0.windows.4` 上专项 `cargo test -p soxu-git --locked` 通过 49 项，含 13 项 Diff 集成夹具，主控独立复跑结果一致。独立 `target/soxu-46-independent` 的七项门禁通过，冻结预览 SHA-256 一致。配置发现对照、linked 独立 index、基准树独有删除、未授权文件独占锁和 50,000 行输出限额均有夹具证据。配置、index、对象及夹具文件字节和 mtime 复核无变化。Unix 专属真实路径与链接用例由跨平台门禁验证。
 
 - M2c 已通过 PR `#16` 合入 `main`，隔离工作区已归档。夹具覆盖 HTTP/WS 增量、SQLite 回读、FIFO、取消、原生失败、重启恢复，以及只读和浏览器来源门禁。
 - `#11` 的七项测试及 Windows 只读烟测通过。`#12` 的七种流式格式通过夹具验证，Codex 无项目和本地目录的真实对话通过登录烟测，原生 Resume/Fork 通过回环测试。各驱动的验证范围见 [`soxu-drivers/README.md`](../../crates/soxu-drivers/README.md)。
@@ -113,7 +115,7 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 推进 Worktree 受控创建与诊断恢复，创建后接入工作区 `direct` MCP。显式 Init/Clone 按独立 Owned Paths 实现，由调用方明确请求。依据 PR #44 的设计，实现未提交和 `baseRef` 的只读 Diff。
+1. 审查 `#46` 的四基准只读 Diff。依据已合入的 `#47` 设计，先拆单实现受控注册与只读诊断，再分别验收安全检出和宿主接入。显式 Init/Clone 按独立 Owned Paths 排期。
 2. Checkpoint 快照模型稳定后接入 Checkpoint 基准 Diff。执行回退前先保存可恢复快照。
 3. 结构化提交先实现预检，再接入提交执行。根依赖、协议或其他跨模块公共契约如需变更，单独排契约 PR，合入后再联调。
 4. `#26` 继续开放并延期，Daemon 路由保持关闭。恢复验收时覆盖原生入口、配置来源、启动竞态、运行期保护和取消边界。Copilot 项目钩子安全、遥测、历史导入、附件、移交、更高权限及移动端投递另排验收。M2 和 M3 均仍有未交付范围。

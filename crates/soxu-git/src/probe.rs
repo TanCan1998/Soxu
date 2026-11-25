@@ -9,8 +9,8 @@ use tokio::process::{Child, Command};
 
 use crate::{ParseError, StatusSnapshot, parse_status};
 
-const OUTPUT_LIMIT: u64 = 16 * 1024 * 1024;
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+pub(super) const OUTPUT_LIMIT: u64 = 16 * 1024 * 1024;
+pub(super) const COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[cfg(test)]
 mod tests;
@@ -246,19 +246,15 @@ impl GitProbe {
         operation: &'static str,
         arguments: &[&str],
     ) -> Result<Output, GitError> {
-        let mut command = self.command(directory);
-        command.arg(operation).args(arguments);
-        let mut child = command.spawn()?;
-        let (stdout, stderr, status) =
-            collect_output(&mut child, OUTPUT_LIMIT, COMMAND_TIMEOUT).await?;
-        Ok(Output {
-            status,
-            stdout,
-            stderr,
-        })
+        run_bounded(
+            self.command(directory).arg(operation).args(arguments),
+            OUTPUT_LIMIT,
+            COMMAND_TIMEOUT,
+        )
+        .await
     }
 
-    fn command(&self, directory: &Path) -> Command {
+    pub(super) fn command(&self, directory: &Path) -> Command {
         let mut command = Command::new(&self.program);
         command
             .current_dir(directory)
@@ -303,6 +299,20 @@ impl GitProbe {
     }
 }
 
+pub(super) async fn run_bounded(
+    command: &mut Command,
+    limit: u64,
+    timeout: Duration,
+) -> Result<Output, GitError> {
+    let mut child = command.spawn()?;
+    let (stdout, stderr, status) = collect_output(&mut child, limit, timeout).await?;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
 async fn read_bounded(reader: impl AsyncRead + Unpin, limit: u64) -> Result<Vec<u8>, GitError> {
     let mut bytes = Vec::new();
     reader.take(limit + 1).read_to_end(&mut bytes).await?;
@@ -340,11 +350,11 @@ async fn collect_output(
     result
 }
 
-fn null_device() -> &'static OsStr {
+pub(super) fn null_device() -> &'static OsStr {
     OsStr::new(if cfg!(windows) { "NUL" } else { "/dev/null" })
 }
 
-fn native_path(bytes: &[u8]) -> Result<PathBuf, GitError> {
+pub(super) fn native_path(bytes: &[u8]) -> Result<PathBuf, GitError> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStringExt;

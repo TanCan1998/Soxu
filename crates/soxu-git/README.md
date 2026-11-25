@@ -1,6 +1,6 @@
 # soxu-git：本地项目身份与 Git 只读探测
 
-M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
+M3d 提供已跟踪文件的四种只读 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
 
 ## 消费接口
 
@@ -25,9 +25,28 @@ M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项�
 
 格式依据：[官方 git-worktree](https://git-scm.com/docs/git-worktree#_porcelain_format)、[官方 git-check-ref-format](https://git-scm.com/docs/git-check-ref-format)，以及 Git `builtin/worktree.c` 的 `show_worktree_porcelain`。真实临时夹具覆盖主/linked、unborn、detached、bare、locked（有/无原因）、移动目录形成的 prunable、空格/Unicode；探测前后逐字节及修改时间快照相同。纯解析器覆盖 NUL、换行、非 UTF-8、截断、非法 ref/路径和未来字段；Unix 专属真实换行及非 UTF-8 路径测试不等同于本次 Windows 已执行验证。
 
+## 已跟踪文件只读 Diff
+
+`GitProbe::readonly_diff(absolute_worktree_root, DiffRequest).await` 接受精确路径字节列表，可以直接使用 `GitPath::as_bytes()`。列表为空时返回空元数据，空授权请求正文则报错。调用方可通过 `DiffOutput::Review(path)` 审阅授权集合中的一个文件。
+
+| `DiffBaseline` | 比较方向 |
+| --- | --- |
+| `Unstaged` | index → 工作树 |
+| `Staged` | HEAD → index。unborn 时返回全部已授权暂存新增 |
+| `Uncommitted` | HEAD → 工作树净变化。unborn 时返回 `UnbornHead` |
+| `BaseToWorktree(ref)` | 显式本地提交 → 工作树。支持 `HEAD`、完整 SHA-1 OID、`refs/heads/`、`refs/tags/` 和 `refs/remotes/` 下的完整引用 |
+
+- 路径须精确存在于 index 或所选基准树。基准树独有的文件可显示为删除。检查祖先、叶节点与两端目录前缀，拒绝目录、内嵌仓库、符号链接和 reparse point。Git 使用 literal pathspec 与独立 `--` 参数，NUL 元数据回读时再核对授权集合。
+- `DiffChange` 保留原始路径、增删改、模式、Git 提供的 OID 与二进制标志。Git 的 raw 输出可能含 stat 变化的候选，正文实际抵消时不列入净变化。二进制审阅只返回 `DiffReview::Binary`。文本 patch 保留原始字节，可能带 Git 的内建换行或编码转换。Git 为选中路径计算 `numstat` 时可能读取文件正文。
+- 请求最多授权 128 个文件、合计 8 KiB 路径字节。单命令 15 秒、每流 16 MiB，请求总计 45 秒、64 MiB 子进程输出。超限失败，无部分结果。Git 子进程超时后终止并等待直接子进程。请求取消沿用 `kill_on_drop`，系统调用耗时和 Git 内部峰值内存仍受宿主控制。
+- 使用可信原生 Git 和受信任本地仓库，由宿主串行化更新。配置预检在卷根以显式非仓库 `GIT_DIR` 和 `config --file --no-includes` 读取选定配置。Git 的 `config` 在解析子命令参数之前会执行仓库发现，必须隔离其运行上下文。拒绝 includes、clean/process、外部对象库和 partial clone。禁用 external diff、textconv、替换对象、自动刷新 index 与用户/系统 attributes。Git 可读取工作树、index 或仓库内的 attributes。
+- 拒绝冲突、intent-to-add、特殊索引标志、sparse/split index、SHA-256、gitlink 及相关路径的不支持类型。缺失对象或命令失败直接返回错误。复核工作树身份来源、配置、index 字节、选中路径元数据和解析后的提交。`DiffObservation` 记录观察时间与解析端点，文件系统竞态仍可能逃过复核。部署时由宿主负责仓库信任与隔离。
+
+Windows 专项夹具验证四种基准、unborn、linked/detached 独立 index、基准树独有删除、二进制、CRLF 与非 UTF-8 文本。独占锁令未授权文件正文确实无法读取，同次选择其他文件仍能得到审阅结果。50,000 行夹具的元数据查询成功，超过 16 MiB 的审阅整个失败。配置、index、对象库及其余夹具文件的字节和 mtime 前后相同。Unix 真实换行、非 UTF-8 路径和链接替换用例由 Unix 门禁运行。
+
 ## 只读与限制
 
-所有子进程直接传参数并设置独立 `current_dir`，不启动 shell，不改变全局 cwd 或环境。子进程清除继承的 `GIT_*`，忽略系统/全局 Git 配置，保留仓库自身的语义配置；禁用 optional locks、fsmonitor、untracked cache、自动维护、子模块摘要和按需 fetch，关闭交互。仅执行 `rev-parse`、只读 `config`、`ls-files`、`status` 和 `worktree list --porcelain -z`。单命令超时 15 秒，stdout/stderr 各上限 16 MiB；任一流读到上限加一字节立即返回 `OutputLimit`，不等待 EOF 或自然退出而退化成 `Timeout`。超限、超时或读取失败会终止并等待回收直接子进程，不承诺回收恶意入口派生的整个进程树。
+所有子进程直接传参数并设置独立 `current_dir`，不启动 shell，不改变全局 cwd 或环境。子进程清除继承的 `GIT_*`，忽略系统/全局 Git 配置，保留仓库自身的语义配置；禁用 optional locks、fsmonitor、untracked cache、自动维护、子模块摘要和按需 fetch，关闭交互。单命令超时 15 秒，stdout/stderr 各上限 16 MiB；任一流读到上限加一字节立即返回 `OutputLimit`，不等待 EOF 或自然退出而退化成 `Timeout`。超限、超时或读取失败会终止并等待回收直接子进程，不承诺回收恶意入口派生的整个进程树。
 
 `open_local_project` 只运行 `rev-parse`。只有 Git 明确报告没有仓库，并且沿途没有发现疑似被跳过的 Git 元数据，才返回普通目录。现存的 `.git` 文件、目录或链接，以及 `objects`、`refs` 与 `HEAD`、`config` 形成的独立 Git 目录特征，或成对出现的 `commondir` 和 `gitdir` 文件，都按疑似损坏保守拒绝。若 Git 跳过损坏的内层 `.git` 并找到外层工作树，入口也会拒绝打开。损坏判定限于发现身份所需的元数据。索引、对象库和引用完整性不在此检查范围内。已观察到的访问失败和文件系统边界等无法确定归属的诊断直接返回错误。
 
@@ -43,4 +62,4 @@ M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项�
 
 `mise exec -- cargo test -p soxu-git --locked --test project` 使用真实 Git 临时夹具验证项目身份、错误分类与只读边界。打开前后比较目录项、文件字节和修改时间。损坏索引与外部过滤器分别验证身份读取独立于状态查询。Windows 用独占文件句柄复现访问失败，Unix 在文件权限实际受限时断言拒绝。
 
-剩余 M3 包括显式初始化与克隆、Worktree 池与损坏恢复、direct MCP 上下文挂载、三基准 Diff、Checkpoint 与 Safety Stash、拆分式提交及预检。Daemon 与协议接线另行协调。
+剩余 M3 包括显式初始化与克隆、Worktree 池与损坏恢复、direct MCP 上下文挂载、Checkpoint Diff 与 Safety Stash、拆分式提交及预检。Daemon 与协议接线另行协调。
