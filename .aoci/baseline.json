@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-25T14:21:05Z",
+  "updated_at": "2026-11-25T14:54:31Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -95,9 +95,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "bd19d66218a48e3c1bd745a1945abd794edcedce113c1792c493f99edfd80fb9",
-      "size": 58018,
-      "normalized_sha256": "bd19d66218a48e3c1bd745a1945abd794edcedce113c1792c493f99edfd80fb9"
+      "sha256": "fe4b70ba6d9df31256c706cbd91f53a736f001dfb79e7ab23e40b2f888541bf6",
+      "size": 58651,
+      "normalized_sha256": "fe4b70ba6d9df31256c706cbd91f53a736f001dfb79e7ab23e40b2f888541bf6"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -830,6 +830,12 @@
       "sha256": "a55e49d2ea1e165482cd775226a06af38a1ca7faa9e596092fe493e6611b4d1f",
       "size": 28457,
       "normalized_sha256": "a55e49d2ea1e165482cd775226a06af38a1ca7faa9e596092fe493e6611b4d1f"
+    },
+    "docs/dev/git-worktree-lifecycle.md": {
+      "role": "index",
+      "sha256": "cedb87964cb0cae9dc50f6f34f0049a062c4f60a2bf6e9c4591327a9558effee",
+      "size": 16066,
+      "normalized_sha256": "cedb87964cb0cae9dc50f6f34f0049a062c4f60a2bf6e9c4591327a9558effee"
     },
     "docs/ops/DECISIONS.md": {
       "role": "index",
