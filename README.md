@@ -35,7 +35,7 @@ Soxu/
 │   ├── soxu-desktop/         # GPUI + gpui-component 桌面端工作台
 │   └── soxu-cli/             # soxu 命令行控制与环境诊断工具
 ├── apps/
-│   └── mobile-web/           # 响应式移动端 Web/PWA 遥控端 (Preact + TS + Tailwind v4)
+│   └── mobile-web/           # 响应式移动端 Web/PWA 遥控端 (React 19 + shadcn/ui + TS + Tailwind v4)
 ├── scripts/                  # 本地 Git Hooks、隐私防泄露扫描与全量门禁脚本
 └── docs/
     ├── ops/                  # 实时研发进度看板 (PROGRESS.md) 与架构决策 (DECISIONS.md)

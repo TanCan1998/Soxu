@@ -1,7 +1,7 @@
 # 01 · GPUI 桌面四栏工作台与键盘导航规范 (`soxu-desktop`)
 
 > **继承主规范**：[`../MASTER.md`](../MASTER.md)  
-> **目标模块**：`crates/soxu-desktop`（M4 里程碑实现）  
+> **目标模块**：`crates/soxu-desktop`（M4–M6 里程碑实现）  
 > **参考对标**：`padu`（GPUI 焦点栈、面板极值与零 I/O 渲染） + `paseo`（项目/Worktree 树与状态桶排序） + `codeg`（会话标签页与右侧审阅抽屉）
 
 ---

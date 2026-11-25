@@ -80,7 +80,7 @@ Soxu 服务于高频并行操控多个本地编码 Agent（`claude`、`codex`、
 
 ---
 
-## 四、双端工程与性能红线（M1–M5 编码必遵）
+## 四、双端工程与性能红线（M1–M6 编码必遵）
 
 1. **GPUI 渲染线程零阻塞铁律（`soxu-desktop`）**：
    - `Render::render`、补全弹窗渲染、`Cmd+K` 面板渲染中**严禁执行任何文件系统 `stat`/遍历、SQLite 查询、Git 调用或子进程派生**；只允许读取内存不可变快照（优先通过 `Rc::ptr_eq` / 代次号 `generation` 判重）。

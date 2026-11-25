@@ -9,7 +9,7 @@ AGENTS.md[SG9S]: F:定义 Soxu 仓库的多 Agent 协作规范，涵盖安全、
 CLAUDE.md[SG5T]: F:要求阅读并严格遵守仓库根目录 AGENTS.md 中的安全红线、架构边界、最新稳定版优先原则、Git Emoji 提交规范与跨对话无损交接协议 | R:code:AGENTS.md | A:- | S:-
 Cargo.lock[FV7L]: F:锁定 Cargo 构建解析出的依赖版本与依赖关系，并记录注册表来源和校验和 | R:- | A:Cargo.lock v4 | S:由 Cargo 自动生成，更新依赖时使用 Cargo。同名包可并存多个版本，依赖引用中用于区分版本的后缀须保留。
 Cargo.toml[FV8T]: F:定义 Soxu 的 Cargo 工作区成员、共享包元数据、依赖版本与特性及 lint 策略 | R:code:crates/soxu-protocol/Cargo.toml,code:crates/soxu-core/Cargo.toml,code:crates/soxu-magpie/Cargo.toml,code:crates/soxu-drivers/Cargo.toml,code:crates/soxu-git/Cargo.toml | A:workspace,workspace.package,workspace.dependencies,workspace.lints | S:显式使用依赖解析器 3，共享包元数据声明 Rust 最低版本为 1.99；继承工作区 lint 的成员禁止 unsafe_code，dbg_macro、todo 和 unwrap_used 触发警告
-README.md[SG6T]: F:介绍 Soxu 桌面工作台与移动遥控端的核心能力，概览仓库结构并提供研发与用户文档入口 | R:code:AGENTS.md,code:Cargo.toml,code:docs/ops/PROGRESS.md,code:docs/ops/DECISIONS.md,code:docs/dev/architecture.md | A:- | S:未安装 Magpie 时自动扫描各 CLI 的原生配置目录，作为发现模型与路由配置的降级路径。
+README.md[SG6T]: F:介绍 Soxu 桌面工作台与 React 19 + shadcn/ui 移动遥控端的核心能力，概览仓库结构并提供研发与用户文档入口 | R:code:AGENTS.md,code:Cargo.toml,code:docs/ops/PROGRESS.md,code:docs/ops/DECISIONS.md,code:docs/dev/architecture.md | A:- | S:未安装 Magpie 时自动扫描各 CLI 的原生配置目录，作为发现模型与路由配置的降级路径。
 mise.toml[FC6T]: F:声明仓库开发工具版本并配置 Cargo 构建缓存目录 | R:- | A:tools.rust,tools.node,tools.pnpm,env.CARGO_TARGET_DIR | S:缓存路径以 config_root 为基准指向上级目录的 .cargo-target/soxu，供主工作区与多 Agent Worktree 复用，避免硬编码个人盘符。
 paseo.json[FV5T]: F:声明 Paseo 工作树 setup 钩子与本地开发命令，覆盖守护进程、桌面工作台、移动端开发及全仓门禁 | R:code:scripts/check-all.ps1,code:scripts/setup-hooks.ps1 | A:worktree.setup,daemon-dev,desktop-dev,mobile-dev,check-all | S:新建隔离 Worktree 通过 worktree.setup 自动执行 setup-hooks.ps1 启用 .githooks；所有脚本通过 pwsh -NoProfile 运行
 
@@ -103,7 +103,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录项目核心架构决策（ADR-001~006），包含 GPUI + Daemon、Native CLI 复用、Magpie 发现及 React 19 + shadcn/ui M0.5 决策 | R:code:AGENTS.md,code:design-system/soxu/MASTER.md | A:ADR-001,ADR-002,ADR-003,ADR-005,ADR-006 | S:已拍板方案不可无故推翻；明确全局 CLI 目录只读、M0.5 强制使用 shadcn/ui + Tailwind v4 与开源双字体
-PROGRESS.md[SW6T]: F:记录里程碑进度、参考库 AOCI/CodeGraph 索引数据、AGY/Codex 双主控协同及跨会话行动队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1 | A:M0,M0.5,M1..M5 | S:当前标记 M0.5 shadcn/ui 重构已推进至 PR #4 评审，且双桌面端已导入 Soxu 并共享 Paseo 控制闭环，合并后再在 main 启动 M1
+PROGRESS.md[SW6T]: F:记录 Soxu M0–M6 里程碑路线图、Paseo 串并行波次顺序、参考库索引及 AGY/Codex 双主控协同队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1 | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:M0 与 M0.5(PR #4) 已完成；重排为 M0–M6 路线图与 Paseo 串并行主线，合入 PR #4 后在 main 冻结 M1 soxu-protocol 契约
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
@@ -118,17 +118,17 @@ verify-design-system.mjs[XQ7S]: F:设计系统与 UI 纪律校验脚本，检核
 paseo-ctl.ps1[XW7T]: F:提供跨 AGY 与 Codex 桌面端的统一 Paseo CLI 包装器，按需以分离窗口自动唤醒本地守护进程并透传命令 | R:code:.agents/skills/paseo-orchestrator/SKILL.md | A:Resolve-PaseoCli | S:禁加 CmdletBinding/param 防吞原生参数；后台唤醒须用 Start-Process 脱离管道继承以防挂起，提示仅写 stderr 保持 stdout JSON 纯净
 
 ===F:/workplace/Paseo/work/Soxu/design-system/soxu/===
-MASTER.md[SG9S]: F:Soxu 全端设计系统主规范，定义 Pure Black 7 级灰阶、品牌纪律、统一滚动条与递进 Z-Index 秩序 | R:code:design-system/soxu/tokens.json,code:design-system/soxu/pages/01-desktop-workbench.md,code:design-system/soxu/pages/07-settings-fonts-and-motion.md | A:品牌纪律,7级表面海拔,代码块滚动纪律,Z-Index层叠秩序 | S:品牌名恒为 Soxu 无前缀圆点；zIndex 严格遵从 drawerScrim<drawer<modal<floating，防下拉与抽屉遮挡
+MASTER.md[SG9S]: F:Soxu 全端设计系统主规范，定义 Pure Black 7 级灰阶、品牌纪律、M1–M6 双端性能红线、统一滚动条与递进 Z-Index 秩序 | R:code:design-system/soxu/tokens.json,code:design-system/soxu/pages/01-desktop-workbench.md,code:design-system/soxu/pages/07-settings-fonts-and-motion.md | A:品牌纪律,7级表面海拔,代码块滚动纪律,Z-Index层叠秩序 | S:品牌名恒为 Soxu 无前缀圆点；zIndex 严格遵从 drawerScrim<drawer<modal<floating，防下拉与抽屉遮挡
 preview.html[EU5T]: F:单文件离线桌面工作台预览产物，内联代理官方原生图标、纯图标权限投递按钮组、可配模型移交及三色统计面板 | R:code:apps/mobile-web/vite.preview.config.ts,code:apps/mobile-web/src/desktop/DesktopWorkbench.tsx | A:#app | S:由 vite build --config vite.preview.config.ts 自动生成，受 5MB 体积与零泄漏门禁约束
 tokens.css[FS5M]: F:由 tokens.json 编译产出的设计系统样式表，包含滚动条滑块、强调色边框及 drawerScrim/drawer/floating Z-Index 变量 | R:code:design-system/soxu/tokens.json,code:scripts/sync-design-tokens.mjs | A:--soxu-*,--background,--foreground,--radius | S:禁止直接编辑；内容与 apps/mobile-web/src/tokens.generated.css 严格逐字节对齐
 tokens.json[FS9L]: F:双端设计令牌唯一真相源，定义纯黑/日光色阶、字体预设、严格递进 12 档 Z-Index、强调色预设及 i18n 配置 | R:code:scripts/sync-design-tokens.mjs | A:color.dark,color.light,typography,zIndex,accentPresets,i18n | S:zIndex 包含 drawerScrim(50)<drawer(55)<modalScrim(60)<modal(70)<floating(95)；改后须 --write 同步
 
 ===F:/workplace/Paseo/work/Soxu/design-system/soxu/pages/===
-01-desktop-workbench.md[SG7S]: F:桌面工作台规范，明确自适应弹性页签+自隐横滚、顶栏防重叠与窄屏左右双抽屉降级规则 | R:code:design-system/soxu/MASTER.md | A:Session Tab Strip,Progressive Shrink,Resize Handle,ConversationNavigationRail | S:左栏 <900px 与右栏 <1120px 自动改用 Sheet 抽屉；页签 220px-116px 弹性缩窄并启用自隐横滚
+01-desktop-workbench.md[SG7S]: F:桌面工作台规范（覆盖 M4–M6 实现），明确自适应弹性页签+自隐横滚、顶栏防重叠与窄屏左右双抽屉降级规则 | R:code:design-system/soxu/MASTER.md | A:Session Tab Strip,Progressive Shrink,Resize Handle,ConversationNavigationRail | S:左栏 <900px 与右栏 <1120px 自动改用 Sheet 抽屉；页签 220px-116px 弹性缩窄并启用自隐横滚
 02-composer-and-handoff.md[SU6S]: F:规定 760px 输入舱、纯图标按档区分的权限与三态投递组、固定触发态的可配模型思考移交、加号标签及三色圆环统计规范 | R:code:design-system/soxu/MASTER.md | A:ComposerPermissionButton,ComposerTurnBehaviorGroup,ComposerHandoffMenu,ContextUsageRing,SessionStatsPopover | S:要求权限与热纠偏/排队/打断重发采用带悬浮解释和快捷键提示的纯图标交互；移交按钮选中只改样式不换图标文字
 03-timeline-tools-and-checkpoints.md[SU6T]: F:规定对话流角色排版、统一四边等宽细描边权限卡与提问卡、及唯一右对齐不重复代码行号标准 | R:code:design-system/soxu/MASTER.md | A:权限审批卡,Checkpoint,行号右对齐 | S:禁用审批卡与提问卡左侧 3px 加宽色带；代码块与差异行号须严格右对齐且禁止同一槽位重复双行号
 04-magpie-and-cli-inspector.md[SU7T]: F:规定 Magpie 双态拓扑诊断、七大原生 CLI 官方原版品牌矢量徽标、启动环境透视器与本地历史导入抽屉 | R:code:design-system/soxu/MASTER.md | A:MagpieManaged,StandaloneNative,NativeCliKind,Launch Env Inspector | S:要求七类代理统一采用上游原版矢量路径与配色且支持单色继承，禁用自绘线框替代或 Emoji
-05-mobile-remote-pwa.md[SU7S]: F:移动遥控端 PWA 自适应规范，规定窄屏顶栏三轨防重叠及左右侧栏抽屉化承载布局 | R:code:design-system/soxu/MASTER.md | A:Window-Width Adaptive Matrix,Bottom Sheet,Thumb-Zone Approval,Quick Steer Chips | S:宽度 <1024px 时工作树与审阅面板一律收进 Sheet 左右抽屉；顶栏 Soxu 前无圆点且 320px 零重叠
+05-mobile-remote-pwa.md[SU7S]: F:移动遥控端 React 19 + shadcn/ui PWA 自适应规范，规定窄屏顶栏三轨防重叠及左右侧栏抽屉化承载布局 | R:code:design-system/soxu/MASTER.md | A:Window-Width Adaptive Matrix,Bottom Sheet,Thumb-Zone Approval,Quick Steer Chips | S:宽度 <1024px 时工作树与审阅面板一律收进 Sheet 左右抽屉；顶栏 Soxu 前无圆点且 320px 零重叠
 06-modals-onboarding-and-automation.md[SU6T]: F:规定按需弹出的三步引导、命令搜索面板、手机配对、拆分式结构化 Git 提交弹窗及定时巡检看板规范 | R:code:design-system/soxu/MASTER.md | A:CommitDialog,CommandPalette,Schedules | S:引导入口不常驻于主界面与左栏；Git 提交框须将表情按钮、可自定义范围组合栏、简述与正文分离并保持充裕边距
 07-settings-fonts-and-motion.md[SU8S]: F:设置、字体与 GPUI 动效规范，纳入可扩展国际化语言包与预设/自定义主题强调色偏好 Schema | R:code:design-system/soxu/MASTER.md,code:design-system/soxu/tokens.json | A:HoverExpandDock,SettingsDialog,locale,accentPreset,customAccentHex | S:更多工具折叠态无角标；max-lg 下改为悬浮胶囊弹出防顶栏冲突；偏好 Schema 双端同构
 

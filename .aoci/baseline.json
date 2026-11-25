@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-25T04:22:28Z",
+  "updated_at": "2026-11-25T04:41:55Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -89,15 +89,15 @@
     },
     "README.md": {
       "role": "index",
-      "sha256": "65195e6c5d4b4d517eb8da998b228d80a66e3f2db25184c716bb30f9d7a6bc7f",
-      "size": 3691,
-      "normalized_sha256": "65195e6c5d4b4d517eb8da998b228d80a66e3f2db25184c716bb30f9d7a6bc7f"
+      "sha256": "cabe1807a35fec64761f699879ca4591d85449a299c1bf9042306f481d0e3609",
+      "size": 3705,
+      "normalized_sha256": "cabe1807a35fec64761f699879ca4591d85449a299c1bf9042306f481d0e3609"
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "5e40a5962342278b3676dc5e371cd71a5a0750abc6712924ab95734aaf86281e",
-      "size": 38258,
-      "normalized_sha256": "5e40a5962342278b3676dc5e371cd71a5a0750abc6712924ab95734aaf86281e"
+      "sha256": "58bd807027582bb76717d2737da98331e2372289658f8219bc9b1504965e44c4",
+      "size": 38381,
+      "normalized_sha256": "58bd807027582bb76717d2737da98331e2372289658f8219bc9b1504965e44c4"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -479,15 +479,15 @@
     },
     "design-system/soxu/MASTER.md": {
       "role": "index",
-      "sha256": "abc069c065c83ec68071dfb6a992ea3ab8f99f565d20f4a920acd96bd213f548",
+      "sha256": "863df1ace99bca028f96c03b620443da90e20fee16793a414d14f0edeaa061a4",
       "size": 19248,
-      "normalized_sha256": "abc069c065c83ec68071dfb6a992ea3ab8f99f565d20f4a920acd96bd213f548"
+      "normalized_sha256": "863df1ace99bca028f96c03b620443da90e20fee16793a414d14f0edeaa061a4"
     },
     "design-system/soxu/pages/01-desktop-workbench.md": {
       "role": "index",
-      "sha256": "adc019d6bec3519fc95f609bfe96f414e68606f982303b4f98b4f70056b9385a",
-      "size": 16425,
-      "normalized_sha256": "adc019d6bec3519fc95f609bfe96f414e68606f982303b4f98b4f70056b9385a"
+      "sha256": "9bc69baf4d20de2bad1218fd340f68785496f3db4290d079e7c1ec9f139fb9c9",
+      "size": 16430,
+      "normalized_sha256": "9bc69baf4d20de2bad1218fd340f68785496f3db4290d079e7c1ec9f139fb9c9"
     },
     "design-system/soxu/pages/02-composer-and-handoff.md": {
       "role": "index",
@@ -509,9 +509,9 @@
     },
     "design-system/soxu/pages/05-mobile-remote-pwa.md": {
       "role": "index",
-      "sha256": "9bd1fb03b1abdf08c2745332f620a9224f0007badf3db3e0bf85b48ee06f56a5",
-      "size": 10080,
-      "normalized_sha256": "9bd1fb03b1abdf08c2745332f620a9224f0007badf3db3e0bf85b48ee06f56a5"
+      "sha256": "7dce5c3c5893693a826871ef9baae602af240151cab308229678f607ebf1014f",
+      "size": 10094,
+      "normalized_sha256": "7dce5c3c5893693a826871ef9baae602af240151cab308229678f607ebf1014f"
     },
     "design-system/soxu/pages/06-modals-onboarding-and-automation.md": {
       "role": "index",
@@ -575,9 +575,9 @@
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "5f07c2abde64a4f34808252adae928bb0ac3e8b5a7194b61dbcd44f07d41dc77",
-      "size": 4683,
-      "normalized_sha256": "c8492acf17a00a515312df9470ff61002ea53bd134c509b09f2d035fa17a0f5e"
+      "sha256": "ce32ae84b4526cb4aa4533f314ad0cf00d7d897634899b5af5d13e6e85061d52",
+      "size": 8871,
+      "normalized_sha256": "96b4658f5f7ebb412b1aab1a03fcea0e570f1ba3644a2a1fc19563b5fa3c04a7"
     },
     "docs/user/getting-started.md": {
       "role": "index",

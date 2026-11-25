@@ -1,7 +1,7 @@
 # 05 · Daemon 内嵌响应式移动 Web/PWA 遥控端规范 (`apps/mobile-web`)
 
 > **继承主规范**：[`../MASTER.md`](../MASTER.md)  
-> **目标模块**：`apps/mobile-web`（TypeScript + Preact + Tailwind CSS v4，经 `rust-embed` 内嵌进 `soxu-daemon`）  
+> **目标模块**：`apps/mobile-web`（TypeScript + React 19 + shadcn/ui + Tailwind CSS v4，经 `rust-embed` 内嵌进 `soxu-daemon`）  
 > **参考对标**：`padu`（窗口宽度自适应 13 组设备矩阵、安全区与 200% 字号） + `paseo`（`#offer=` 配对链接、手机端审批与 Steer 遥控）
 
 ---
