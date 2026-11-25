@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-25T01:55:07Z",
+  "updated_at": "2026-11-25T03:41:09Z",
   "files": {
     ".editorconfig": {
       "role": "index",
@@ -89,9 +89,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "2b3d7b983d5ea4356f55332ca5c89ce232a0a3ef03b7ea4c73d3232d6c3f64e7",
-      "size": 37033,
-      "normalized_sha256": "2b3d7b983d5ea4356f55332ca5c89ce232a0a3ef03b7ea4c73d3232d6c3f64e7"
+      "sha256": "1f98d422512691029915dd9ca38b2fb78be7506e579c2fef8f03628170c3513e",
+      "size": 37358,
+      "normalized_sha256": "1f98d422512691029915dd9ca38b2fb78be7506e579c2fef8f03628170c3513e"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -149,9 +149,9 @@
     },
     "apps/mobile-web/src/components/AgentIcon.tsx": {
       "role": "index",
-      "sha256": "1f61bab8419c8961d286d704d4997c2edadb13b3d1167ced9e899d45984b19db",
-      "size": 4042,
-      "normalized_sha256": "1f61bab8419c8961d286d704d4997c2edadb13b3d1167ced9e899d45984b19db"
+      "sha256": "33d965f4d946e65c92c2c99d550ad5662e46ef26ce56e33623f5fb44f3ed10cc",
+      "size": 11216,
+      "normalized_sha256": "33d965f4d946e65c92c2c99d550ad5662e46ef26ce56e33623f5fb44f3ed10cc"
     },
     "apps/mobile-web/src/components/BottomSheet.tsx": {
       "role": "index",
@@ -167,9 +167,9 @@
     },
     "apps/mobile-web/src/components/ComposerActionMenus.tsx": {
       "role": "index",
-      "sha256": "f408221fe02b317eb07a4664f7c899c3edc649aa279ad79144b7657e9201ef34",
-      "size": 12660,
-      "normalized_sha256": "f408221fe02b317eb07a4664f7c899c3edc649aa279ad79144b7657e9201ef34"
+      "sha256": "b2cee2fb901631ec58d2a555db1b72488514095241ce6c252b4388b9a5dc827f",
+      "size": 29721,
+      "normalized_sha256": "b2cee2fb901631ec58d2a555db1b72488514095241ce6c252b4388b9a5dc827f"
     },
     "apps/mobile-web/src/components/ContextUsageRing.tsx": {
       "role": "index",
@@ -287,9 +287,9 @@
     },
     "apps/mobile-web/src/desktop/DesktopWorkbench.tsx": {
       "role": "index",
-      "sha256": "c9669711c02dba15967c8ed6d00bf21861bffc8d482047ded0ee7faa13de7669",
-      "size": 119337,
-      "normalized_sha256": "c9669711c02dba15967c8ed6d00bf21861bffc8d482047ded0ee7faa13de7669"
+      "sha256": "e16f3239b1da3993bdafdc8a6ded1e1510234cba8b144f4f4ed777dcab971f3e",
+      "size": 121833,
+      "normalized_sha256": "e16f3239b1da3993bdafdc8a6ded1e1510234cba8b144f4f4ed777dcab971f3e"
     },
     "apps/mobile-web/src/icons.tsx": {
       "role": "index",
@@ -311,9 +311,9 @@
     },
     "apps/mobile-web/src/lib/i18n.ts": {
       "role": "index",
-      "sha256": "b7063dd30c81913dcf31302a53d52dc6acd506331082511362505061ed992ade",
-      "size": 23957,
-      "normalized_sha256": "b7063dd30c81913dcf31302a53d52dc6acd506331082511362505061ed992ade"
+      "sha256": "3c40c8497dfd64cd0de3cf008116f6c33b816ad424bde2caf40067487c171df5",
+      "size": 26418,
+      "normalized_sha256": "3c40c8497dfd64cd0de3cf008116f6c33b816ad424bde2caf40067487c171df5"
     },
     "apps/mobile-web/src/lib/preferences.ts": {
       "role": "index",
@@ -329,9 +329,9 @@
     },
     "apps/mobile-web/src/main.tsx": {
       "role": "index",
-      "sha256": "5e8bc96e138107f59eabeed6621aef1ff3b19367df66ec9304b3757b3237b36c",
-      "size": 99254,
-      "normalized_sha256": "5e8bc96e138107f59eabeed6621aef1ff3b19367df66ec9304b3757b3237b36c"
+      "sha256": "a53308c4af26f241e57c54aacaf7f9862b9b03c7a4f8568b335dc57e44036fd1",
+      "size": 105237,
+      "normalized_sha256": "a53308c4af26f241e57c54aacaf7f9862b9b03c7a4f8568b335dc57e44036fd1"
     },
     "apps/mobile-web/src/mock-data.ts": {
       "role": "index",
@@ -347,9 +347,9 @@
     },
     "apps/mobile-web/src/types.ts": {
       "role": "index",
-      "sha256": "5670d5440c2f92eb51146389d158de7b8088888b458358ff3736e2f7ffa1c91b",
-      "size": 3228,
-      "normalized_sha256": "5670d5440c2f92eb51146389d158de7b8088888b458358ff3736e2f7ffa1c91b"
+      "sha256": "7a2abbcccbec0761c7d97c0f7ec7323e8af95cfa38d1d7b531b9b328d33f4580",
+      "size": 3391,
+      "normalized_sha256": "7a2abbcccbec0761c7d97c0f7ec7323e8af95cfa38d1d7b531b9b328d33f4580"
     },
     "apps/mobile-web/src/vite-env.d.ts": {
       "role": "index",
@@ -485,9 +485,9 @@
     },
     "design-system/soxu/pages/02-composer-and-handoff.md": {
       "role": "index",
-      "sha256": "9f248dd288b52d5e193ac0e277ef96f37aac22b27d656cc48d64ae428a801f5c",
-      "size": 12158,
-      "normalized_sha256": "9f248dd288b52d5e193ac0e277ef96f37aac22b27d656cc48d64ae428a801f5c"
+      "sha256": "cd003584bae0af4d33c0bf1c9f86269d1209bb33594335860a36605398bc8701",
+      "size": 13231,
+      "normalized_sha256": "cd003584bae0af4d33c0bf1c9f86269d1209bb33594335860a36605398bc8701"
     },
     "design-system/soxu/pages/03-timeline-tools-and-checkpoints.md": {
       "role": "index",
@@ -497,9 +497,9 @@
     },
     "design-system/soxu/pages/04-magpie-and-cli-inspector.md": {
       "role": "index",
-      "sha256": "c31c473ce00c41dfc2b568c1c5baeace5e225364961d01e520a29c0b27d5d946",
-      "size": 8420,
-      "normalized_sha256": "c31c473ce00c41dfc2b568c1c5baeace5e225364961d01e520a29c0b27d5d946"
+      "sha256": "1df86f9d469b23882ff65f72583da539519ef6e3e9cd00c24fc53ba4a3743e19",
+      "size": 8591,
+      "normalized_sha256": "1df86f9d469b23882ff65f72583da539519ef6e3e9cd00c24fc53ba4a3743e19"
     },
     "design-system/soxu/pages/05-mobile-remote-pwa.md": {
       "role": "index",
@@ -533,9 +533,9 @@
     },
     "design-system/soxu/preview.html": {
       "role": "index",
-      "sha256": "50d4a6004cf48345df607f6b9df3da13b3102a89a5e0998b6ab6c2f4ae66a0da",
-      "size": 645649,
-      "normalized_sha256": "50d4a6004cf48345df607f6b9df3da13b3102a89a5e0998b6ab6c2f4ae66a0da"
+      "sha256": "def92cea338096b4b9604b7170286077ee8c5037f92c4fd41f89f0fce024f925",
+      "size": 670532,
+      "normalized_sha256": "def92cea338096b4b9604b7170286077ee8c5037f92c4fd41f89f0fce024f925"
     },
     "design-system/soxu/tokens.css": {
       "role": "index",
