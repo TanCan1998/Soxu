@@ -195,3 +195,46 @@ fn rejects_mixed_oid_lengths_within_and_across_records_and_headers() {
         );
     }
 }
+
+#[test]
+fn accepts_directory_suffix_only_for_untracked_and_ignored_records() {
+    for prefix in ['?', '!'] {
+        for name in [
+            "nested 中文/",
+            "space /child/",
+            "line\nname/",
+            "raw-\u{ff}/",
+            "absolute/child/",
+        ] {
+            let snapshot =
+                parse_status(format!("{prefix} {name}\0").as_bytes()).expect("合法目录记录");
+            let path = match &snapshot.entries[0] {
+                StatusEntry::Untracked(path) | StatusEntry::Ignored(path) => path,
+                _ => panic!("应保留目录记录类型"),
+            };
+            assert_eq!(path.as_bytes(), name.as_bytes());
+        }
+        let raw = [prefix as u8, b' ', 0xff, b'/', 0];
+        assert!(parse_status(&raw).is_ok(), "非UTF8目录身份不得丢失");
+        for name in [
+            "/", "a//", "a//b/", "a/./", "a/../", "./", "../", "/a/", "//a/",
+        ] {
+            assert!(
+                parse_status(format!("{prefix} {name}\0").as_bytes()).is_err(),
+                "非法路径 {name:?}"
+            );
+        }
+    }
+    assert!(parse_status(&ordinary(".M", "N...", "tracked/")).is_err());
+    let oid = "a".repeat(40);
+    for input in [
+        format!("2 R. N... 100644 100644 100644 {oid} {oid} R100 new/\0old\0"),
+        format!("2 R. N... 100644 100644 100644 {oid} {oid} R100 new\0old/\0"),
+        format!("u UU N... 100644 100644 100644 100644 {oid} {oid} {oid} conflict/\0"),
+    ] {
+        assert!(
+            parse_status(input.as_bytes()).is_err(),
+            "跟踪记录不得含目录后缀"
+        );
+    }
+}

@@ -204,7 +204,7 @@ pub fn parse_status(input: &[u8]) -> Result<StatusSnapshot, ParseError> {
                     return Err(error("重命名类型或相似度不匹配"));
                 }
                 let original = records.next().ok_or_else(|| error("缺少重命名源路径"))?;
-                let original_path = path(original).map_err(error)?;
+                let original_path = path(original, false).map_err(error)?;
                 record_index += 1;
                 StatusEntry::Renamed(RenameChange {
                     change,
@@ -237,11 +237,11 @@ pub fn parse_status(input: &[u8]) -> Result<StatusSnapshot, ParseError> {
                         oid(fields[8]).map_err(error)?,
                         oid(fields[9]).map_err(error)?,
                     ],
-                    path: path(fields[10]).map_err(error)?,
+                    path: path(fields[10], false).map_err(error)?,
                 })
             }
             Some(b'?' | b'!') if record.get(1) == Some(&b' ') => {
-                let path = path(&record[2..]).map_err(error)?;
+                let path = path(&record[2..], true).map_err(error)?;
                 if record[0] == b'?' {
                     StatusEntry::Untracked(path)
                 } else {
@@ -289,7 +289,7 @@ fn ordinary(fields: &[&[u8]], path_index: usize) -> Result<OrdinaryChange, &'sta
         submodule: submodule(fields[2])?,
         modes: [mode(fields[3])?, mode(fields[4])?, mode(fields[5])?],
         oids: [oid(fields[6])?, oid(fields[7])?],
-        path: path(fields[path_index])?,
+        path: path(fields[path_index], false)?,
     })
 }
 
@@ -342,11 +342,16 @@ fn submodule(value: &[u8]) -> Result<SubmoduleStatus, &'static str> {
     })
 }
 
-fn path(value: &[u8]) -> Result<GitPath, &'static str> {
-    if value.is_empty()
+fn path(value: &[u8], allow_directory_suffix: bool) -> Result<GitPath, &'static str> {
+    let components = if allow_directory_suffix {
+        value.strip_suffix(b"/").unwrap_or(value)
+    } else {
+        value
+    };
+    if components.is_empty()
         || value.contains(&0)
         || value.starts_with(b"/")
-        || value
+        || components
             .split(|byte| *byte == b'/')
             .any(|component| component.is_empty() || component == b"." || component == b"..")
     {

@@ -151,6 +151,7 @@ impl NativeDriver {
         let (events, receiver) = mpsc::channel(64);
         let (commands, pending) = mpsc::channel(16);
         let (cancel, mut cancelled) = watch::channel(false);
+        let (active, activity) = watch::channel(false);
         let kind = self.kind;
         tokio::spawn(async move {
             let outcome = tokio::select! {
@@ -158,7 +159,7 @@ impl NativeDriver {
                 _ = cancelled.wait_for(|value| *value) => Outcome::Cancelled,
                 _ = events.closed() => Outcome::Cancelled,
                 result = async {
-                    let result = drive(kind, input, request.prompt, stdin, stdout, pending, &events).await;
+                    let result = drive(kind, input, request.prompt, stdin, stdout, pending, (&events, &active)).await;
                     match result {
                         Ok(outcome) => match child.wait().await {
                             Ok(status) if status.success() || outcome == Outcome::Cancelled => outcome,
@@ -169,6 +170,7 @@ impl NativeDriver {
                     }
                 } => result,
             };
+            active.send_replace(false);
             if matches!(outcome, Outcome::Cancelled | Outcome::IoFailed) {
                 let _ = child.kill().await;
                 let _ = child.wait().await;
@@ -181,6 +183,7 @@ impl NativeDriver {
                 kind: self.kind,
                 cancel,
                 commands,
+                activity,
             },
         })
     }
@@ -206,6 +209,7 @@ pub struct TurnControl {
     kind: NativeCliKind,
     cancel: watch::Sender<bool>,
     commands: mpsc::Sender<(u64, Control)>,
+    activity: watch::Receiver<bool>,
 }
 
 pub enum Control {
@@ -215,6 +219,10 @@ pub enum Control {
 }
 
 impl TurnControl {
+    pub fn is_active(&self) -> bool {
+        *self.activity.borrow() && !*self.cancel.borrow() && !self.commands.is_closed()
+    }
+
     /// 请求终止所属 CLI 进程。可跨任务调用，且不受输出通道背压影响。
     pub fn cancel(&self) {
         self.cancel.send_replace(true);
@@ -292,8 +300,9 @@ async fn drive(
     stdin: Option<ChildStdin>,
     stdout: ChildStdout,
     mut pending: mpsc::Receiver<(u64, Control)>,
-    events: &mpsc::Sender<DriverEvent>,
+    output: (&mpsc::Sender<DriverEvent>, &watch::Sender<bool>),
 ) -> io::Result<Outcome> {
+    let (events, active) = output;
     let mut writes = Vec::new();
     match input {
         Input::Text => {
@@ -359,6 +368,7 @@ async fn drive(
                     }
                     Err(()) => vec![DriverEvent::MalformedOutput],
                 };
+                active.send_replace(decoder.accepts_controls());
                 for event in decoded {
                     if let DriverEvent::ControlAck { id, .. } = &event
                         && !pending_ids.remove(id)
@@ -402,9 +412,6 @@ async fn drive(
     }
     pending.close();
     while let Ok((id, _)) = pending.try_recv() {
-        pending_ids.insert(id);
-    }
-    for id in pending_ids {
         let _ = events
             .send(DriverEvent::ControlAck {
                 id,

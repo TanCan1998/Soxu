@@ -513,6 +513,608 @@ async fn native_pi_read_only_rpc_resume_cancel_fifo_and_restart() {
     .await;
 }
 
+async fn wait_for_steer_badge(state: &DaemonState, session_id: &str, text: &str, badge: &str) {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if state
+                .list_session_messages(session_id)
+                .expect("read steer history")
+                .iter()
+                .any(|message| {
+                    message.text == text && message.steer_badge.as_deref() == Some(badge)
+                })
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("receive native steer result");
+}
+
+#[tokio::test]
+async fn native_pi_steer_ack_rejection_timeout_stop_and_persistence() {
+    let dir = TempDir::new().expect("create Pi steer fixture");
+    let (addr, state, handle) = spawn_daemon_with_drivers(
+        &dir,
+        None,
+        NativeCliKind::Pi,
+        Some(native_fixture(NativeCliKind::Pi, "pi.cjs")),
+    )
+    .await;
+    assert!(
+        post_rpc(
+            addr,
+            RpcCommand::CreateQuickChat {
+                title: None,
+                agent_id: "pi".to_owned(),
+                model_id: None,
+                permission: Some(PermissionLevel::ReadOnly),
+                thinking: None,
+            }
+        )
+        .await
+        .ok
+    );
+    let (mut ws, hello) = connect_ws(
+        addr,
+        ClientHello {
+            client_kind: ClientKind::Desktop,
+            client_version: "test".to_owned(),
+            protocol_version: soxu_protocol::PROTOCOL_VERSION,
+            after_seq: None,
+            device_id: None,
+        },
+    )
+    .await;
+    assert!(
+        hello
+            .snapshot
+            .agents
+            .iter()
+            .any(|agent| agent.agent_id == "pi" && agent.supports_live_steer)
+    );
+    let session_id = hello.snapshot.sessions[0].session_id.clone();
+    assert!(post_rpc(addr, submit_native(&session_id, "fresh")).await.ok);
+    let done = |event: &DaemonEvent| {
+        matches!(event, DaemonEvent::SessionUpdated(session)
+        if session.session_id == session_id && session.lifecycle == TurnLifecycleState::Idle)
+    };
+    wait_for_ws_event(&mut ws, done).await;
+    assert!(post_rpc(addr, submit_native(&session_id, "hold")).await.ok);
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+        if text_delta == "Pi hold")
+    })
+    .await;
+    let steer = |text: &str| {
+        let mut command = submit_native(&session_id, text);
+        if let RpcCommand::SubmitTurn { behavior, .. } = &mut command {
+            *behavior = ActiveTurnBehavior::Steer;
+        }
+        command
+    };
+    for text in ["", "\0", &"a".repeat(128 * 1024 + 1)] {
+        assert_eq!(
+            post_rpc(addr, steer(text))
+                .await
+                .error
+                .expect("validation error")
+                .code,
+            ErrorCode::ValidationFailed
+        );
+    }
+    let original_messages = state
+        .list_session_messages(&session_id)
+        .expect("original messages");
+    for variant in 0..3 {
+        let mut command = steer("unsafe-input");
+        if let RpcCommand::SubmitTurn {
+            chips,
+            handoff,
+            handoff_scope,
+            ..
+        } = &mut command
+        {
+            match variant {
+                0 => chips.push(soxu_protocol::ComposerChip {
+                    id: "attachment".to_owned(),
+                    kind: soxu_protocol::ComposerChipKind::File,
+                    label: "fixture".to_owned(),
+                    path_or_ref: Some("fixture.txt".to_owned()),
+                    target_agent: None,
+                    target_model: None,
+                    target_thinking: None,
+                }),
+                1 => {
+                    *handoff = Some(soxu_protocol::HandoffSelection {
+                        target_agent: "codex".to_owned(),
+                        target_model: "fixture".to_owned(),
+                        target_thinking: None,
+                    })
+                }
+                _ => *handoff_scope = Some(soxu_protocol::HandoffScopeOptions::default()),
+            }
+        }
+        assert_eq!(
+            post_rpc(addr, command)
+                .await
+                .error
+                .expect("input guard")
+                .code,
+            ErrorCode::ValidationFailed
+        );
+    }
+    let store =
+        SqliteStore::open(&dir.path().join("soxu-daemon.db")).expect("permission fixture store");
+    let mut session = state
+        .snapshot()
+        .expect("session snapshot")
+        .sessions
+        .remove(0);
+    session.permission = PermissionLevel::Plan;
+    store
+        .upsert_session(&session)
+        .expect("set fixture permission");
+    assert_eq!(
+        post_rpc(addr, steer("outside-read-only"))
+            .await
+            .error
+            .expect("permission guard")
+            .code,
+        ErrorCode::DriverUnavailable
+    );
+    session.permission = PermissionLevel::ReadOnly;
+    store
+        .upsert_session(&session)
+        .expect("restore fixture permission");
+    assert_eq!(
+        state
+            .list_session_messages(&session_id)
+            .expect("unchanged messages"),
+        original_messages
+    );
+    let submitted = rpc_via_ws(&mut ws, "steer", steer("correct")).await.0;
+    assert!(matches!(
+        submitted.result,
+        Some(RpcResultData::TurnSubmitted {
+            queued_id: None,
+            ..
+        })
+    ));
+    wait_for_steer_badge(&state, &session_id, "correct", "纠偏已接收").await;
+    assert!(post_rpc(addr, steer("reject")).await.ok);
+    wait_for_steer_badge(&state, &session_id, "reject", "纠偏被拒绝").await;
+    assert!(post_rpc(addr, steer("no-ack")).await.ok);
+    assert_eq!(
+        post_rpc(addr, steer("duplicate"))
+            .await
+            .error
+            .expect("pending conflict")
+            .code,
+        ErrorCode::Conflict
+    );
+    wait_for_steer_badge(&state, &session_id, "no-ack", "纠偏结果未知").await;
+    assert!(!state.events_after(0, 1000).expect("events").0.iter().any(|event|
+        matches!(&event.payload, DaemonEvent::QueueUpdated { queued, .. } if !queued.is_empty())));
+    assert!(
+        post_rpc(addr, submit_native(&session_id, "queued"))
+            .await
+            .ok
+    );
+    assert!(post_rpc(addr, steer("finish")).await.ok);
+    wait_for_steer_badge(&state, &session_id, "finish", "纠偏已接收").await;
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+        if text_delta == "Pi queued")
+    })
+    .await;
+    wait_for_ws_event(&mut ws, done).await;
+    assert!(post_rpc(addr, submit_native(&session_id, "hold")).await.ok);
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+        if text_delta == "Pi hold")
+    })
+    .await;
+    assert!(post_rpc(addr, steer("no-ack")).await.ok);
+    assert!(
+        post_rpc(
+            addr,
+            RpcCommand::StopTurn {
+                session_id: session_id.clone()
+            }
+        )
+        .await
+        .ok
+    );
+    wait_for_ws_event(&mut ws, done).await;
+    assert!(
+        state
+            .events_after(0, 1000)
+            .expect("events")
+            .0
+            .iter()
+            .rev()
+            .find_map(
+                |event| if let DaemonEvent::QueueUpdated { queued, .. } = &event.payload {
+                    Some(queued.is_empty())
+                } else {
+                    None
+                }
+            )
+            .unwrap_or(true)
+    );
+    let messages = state.list_session_messages(&session_id).expect("messages");
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message.text == "no-ack"
+                && message.steer_badge.as_deref() == Some("纠偏结果未知"))
+            .count(),
+        2
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message.text == "correct")
+            .count(),
+        1
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.text == "correct" && message.turn_index == 2)
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|message| message.text == "duplicate" || message.text == "after-stop")
+    );
+    let stored = SqliteStore::open(&dir.path().join("soxu-daemon.db")).expect("database");
+    assert_eq!(
+        stored
+            .list_session_messages(&session_id)
+            .expect("persisted messages"),
+        messages
+    );
+    assert!(state.events_after(0, 1000).expect("events").0.iter().any(|event|
+        matches!(&event.payload, DaemonEvent::ErrorRaised { error, .. } if error.summary_zh.contains("拒绝纠偏"))));
+    assert!(!state.events_after(0, 1000).expect("events").0.iter().any(
+        |event| matches!(&event.payload, DaemonEvent::CapabilitiesLostControls { notices, .. }
+            if notices.iter().any(|notice| notice.previous_value == "steer"))
+    ));
+    handle.abort();
+    let _ = handle.await;
+    let mut interrupted = state.snapshot().expect("snapshot").sessions.remove(0);
+    interrupted.lifecycle = TurnLifecycleState::Running;
+    interrupted.bucket = WorkspaceBucket::Running;
+    stored.upsert_session(&interrupted).expect("interrupted Pi");
+    let mut pending = messages
+        .iter()
+        .find(|message| message.text == "correct")
+        .expect("steer")
+        .clone();
+    pending.steer_badge = Some("纠偏待确认".to_owned());
+    stored.upsert_message(&pending).expect("interrupted steer");
+    let (_, reopened, reopened_handle) = spawn_daemon_with_drivers(
+        &dir,
+        None,
+        NativeCliKind::Pi,
+        Some(native_fixture(NativeCliKind::Pi, "pi.cjs")),
+    )
+    .await;
+    wait_for_steer_badge(&reopened, &session_id, "correct", "纠偏结果未知").await;
+    reopened_handle.abort();
+}
+
+#[test]
+fn native_pi_catalog_requires_configured_driver_and_loopback() {
+    let dir = TempDir::new().expect("catalog fixture");
+    for authenticated in [false, true] {
+        let state = DaemonState::open(None, "http://127.0.0.1:0", authenticated)
+            .expect("state")
+            .with_native_driver_set(
+                dir.path().join("quick"),
+                [(NativeCliKind::Pi, Err(DriverError::BinaryNotFound))],
+            )
+            .expect("unavailable Pi catalog");
+        assert!(
+            !state
+                .snapshot()
+                .expect("catalog")
+                .agents
+                .iter()
+                .find(|agent| agent.agent_id == "pi")
+                .expect("Pi catalog entry")
+                .supports_live_steer
+        );
+    }
+}
+
+#[tokio::test]
+async fn native_pi_steer_late_ack_and_settled_fallback() {
+    let dir = TempDir::new().expect("create Pi settled fixture");
+    let (addr, state, handle) = spawn_daemon_with_drivers(
+        &dir,
+        None,
+        NativeCliKind::Pi,
+        Some(native_fixture(NativeCliKind::Pi, "pi.cjs")),
+    )
+    .await;
+    assert!(
+        post_rpc(
+            addr,
+            RpcCommand::CreateQuickChat {
+                title: None,
+                agent_id: "pi".to_owned(),
+                model_id: None,
+                permission: Some(PermissionLevel::ReadOnly),
+                thinking: None,
+            }
+        )
+        .await
+        .ok
+    );
+    let (mut ws, hello) = connect_ws(
+        addr,
+        ClientHello {
+            client_kind: ClientKind::Desktop,
+            client_version: "test".to_owned(),
+            protocol_version: soxu_protocol::PROTOCOL_VERSION,
+            after_seq: None,
+            device_id: None,
+        },
+    )
+    .await;
+    let session_id = hello.snapshot.sessions[0].session_id.clone();
+    let done = |event: &DaemonEvent| {
+        matches!(event, DaemonEvent::SessionUpdated(session)
+        if session.session_id == session_id && session.lifecycle == TurnLifecycleState::Idle)
+    };
+    assert!(post_rpc(addr, submit_native(&session_id, "fresh")).await.ok);
+    wait_for_ws_event(&mut ws, done).await;
+    for text in ["late-ack", "exit-no-ack"] {
+        assert!(post_rpc(addr, submit_native(&session_id, "hold")).await.ok);
+        wait_for_ws_event(&mut ws, |event| {
+            matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+            if text_delta == "Pi hold")
+        })
+        .await;
+        let mut command = submit_native(&session_id, text);
+        if let RpcCommand::SubmitTurn { behavior, .. } = &mut command {
+            *behavior = ActiveTurnBehavior::Steer;
+        }
+        assert!(post_rpc(addr, command).await.ok);
+        wait_for_steer_badge(
+            &state,
+            &session_id,
+            text,
+            if text == "late-ack" {
+                "纠偏已接收"
+            } else {
+                "纠偏结果未知"
+            },
+        )
+        .await;
+        wait_for_ws_event(&mut ws, done).await;
+    }
+    assert!(
+        post_rpc(addr, submit_native(&session_id, "settled-hold"))
+            .await
+            .ok
+    );
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+        if text_delta == "Pi settled-hold")
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut command = submit_native(&session_id, "after-settled");
+    if let RpcCommand::SubmitTurn { behavior, .. } = &mut command {
+        *behavior = ActiveTurnBehavior::Steer;
+    }
+    assert!(matches!(
+        post_rpc(addr, command).await.result,
+        Some(RpcResultData::TurnSubmitted {
+            queued_id: Some(_),
+            ..
+        })
+    ));
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+        if text_delta == "Pi after-settled")
+    })
+    .await;
+    wait_for_ws_event(&mut ws, done).await;
+    handle.abort();
+}
+
+#[tokio::test]
+#[ignore = "需要 SOXU_TEST_PI_ENTRY 指向已安装的 Pi 原生 JS 入口"]
+async fn native_pi_real_loopback_steer_queue_resume_and_stop() {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let dir = TempDir::new().expect("isolated Pi real test");
+    let entry = PathBuf::from(std::env::var_os("SOXU_TEST_PI_ENTRY").expect("Pi entry"));
+    assert!(entry.is_absolute() && entry.is_file());
+    let output = std::process::Command::new("node")
+        .args(["-p", "process.execPath"])
+        .output()
+        .expect("find Node");
+    let node = PathBuf::from(String::from_utf8(output.stdout).expect("Node path").trim());
+    let version = std::process::Command::new(&node)
+        .arg(&entry)
+        .arg("--version")
+        .output()
+        .expect("Pi version");
+    assert!(version.status.success());
+    eprintln!(
+        "真实 Pi {}；仅连接隔离 localhost 模型夹具",
+        String::from_utf8_lossy(&version.stdout).trim()
+    );
+    let mut provider = tokio::process::Command::new(&node)
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pi-provider.cjs"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("loopback provider");
+    let mut lines = BufReader::new(provider.stdout.take().expect("provider output")).lines();
+    let port: u16 = tokio::time::timeout(Duration::from_secs(10), lines.next_line())
+        .await
+        .expect("provider ready")
+        .expect("provider line")
+        .expect("port")
+        .parse()
+        .expect("port number");
+    let provider_addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let home = dir.path().join("pi-home");
+    std::fs::create_dir(&home).expect("isolated home");
+    std::fs::write(home.join("models.json"), serde_json::json!({ "providers": { "fixture": {
+        "baseUrl": format!("http://{provider_addr}/v1"), "api": "openai-completions",
+        "apiKey": uuid::Uuid::new_v4().to_string(), "models": [{ "id": "soxu-pi", "contextWindow": 8192, "maxTokens": 256 }]
+    } } }).to_string()).expect("fixture model settings");
+    let driver = || {
+        NativeDriver::with_program(
+            NativeCliKind::Pi,
+            node.clone(),
+            [
+                entry.clone().into_os_string(),
+                "--provider".into(),
+                "fixture".into(),
+                "--model".into(),
+                "soxu-pi".into(),
+                "--session-dir".into(),
+                home.join("sessions").into_os_string(),
+            ],
+        )
+        .expect("real Pi driver")
+        .with_env("PI_CODING_AGENT_DIR", Some(home.clone().into_os_string()))
+        .with_env("HTTP_PROXY", None)
+        .with_env("HTTPS_PROXY", None)
+        .with_env("ALL_PROXY", None)
+        .with_env("NO_PROXY", Some("127.0.0.1,localhost".into()))
+    };
+    let (addr, state, handle) =
+        spawn_daemon_with_drivers(&dir, None, NativeCliKind::Pi, Some(driver())).await;
+    assert!(
+        post_rpc(
+            addr,
+            RpcCommand::CreateQuickChat {
+                title: None,
+                agent_id: "pi".to_owned(),
+                model_id: None,
+                permission: Some(PermissionLevel::ReadOnly),
+                thinking: None,
+            }
+        )
+        .await
+        .ok
+    );
+    let (mut ws, hello) = connect_ws(
+        addr,
+        ClientHello {
+            client_kind: ClientKind::Desktop,
+            client_version: "real-test".to_owned(),
+            protocol_version: soxu_protocol::PROTOCOL_VERSION,
+            after_seq: None,
+            device_id: None,
+        },
+    )
+    .await;
+    let session_id = hello.snapshot.sessions[0].session_id.clone();
+    let done = |event: &DaemonEvent| {
+        matches!(event, DaemonEvent::SessionUpdated(session)
+        if session.session_id == session_id && session.lifecycle == TurnLifecycleState::Idle)
+    };
+    assert!(post_rpc(addr, submit_native(&session_id, "fresh")).await.ok);
+    wait_for_ws_event(&mut ws, done).await;
+    let native_id = state.snapshot().expect("snapshot").sessions[0]
+        .native_session_id
+        .clone();
+    assert!(native_id.is_some());
+    assert!(post_rpc(addr, submit_native(&session_id, "hold")).await.ok);
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+        if text_delta.contains("SOXU_HOLD"))
+    })
+    .await;
+    let mut steer = submit_native(&session_id, "correct");
+    if let RpcCommand::SubmitTurn { behavior, .. } = &mut steer {
+        *behavior = ActiveTurnBehavior::Steer;
+    }
+    assert!(matches!(
+        rpc_via_ws(&mut ws, "real-steer", steer).await.0.result,
+        Some(RpcResultData::TurnSubmitted {
+            queued_id: None,
+            ..
+        })
+    ));
+    wait_for_steer_badge(&state, &session_id, "correct", "纠偏已接收").await;
+    assert!(
+        post_rpc(addr, submit_native(&session_id, "queued"))
+            .await
+            .ok
+    );
+    assert_eq!(
+        http_request(provider_addr, "POST", "/release", None, Some(""))
+            .await
+            .0,
+        200
+    );
+    for text in ["SOXU_CORRECT", "SOXU_QUEUED"] {
+        wait_for_ws_event(&mut ws, |event| {
+            matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+            if text_delta.contains(text))
+        })
+        .await;
+    }
+    wait_for_ws_event(&mut ws, done).await;
+    assert_eq!(
+        state.snapshot().expect("snapshot").sessions[0].native_session_id,
+        native_id
+    );
+    assert!(post_rpc(addr, submit_native(&session_id, "stop")).await.ok);
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+        if text_delta.contains("SOXU_STOP"))
+    })
+    .await;
+    assert!(
+        post_rpc(
+            addr,
+            RpcCommand::StopTurn {
+                session_id: session_id.clone()
+            }
+        )
+        .await
+        .ok
+    );
+    wait_for_ws_event(&mut ws, done).await;
+    let (_, body) = http_request(provider_addr, "GET", "/state", None, None).await;
+    let evidence: serde_json::Value = serde_json::from_str(&body).expect("provider evidence");
+    assert_eq!(evidence["requests"].as_array().expect("requests").len(), 5);
+    assert_eq!(evidence["stopDisconnected"], true);
+    let messages = state.list_session_messages(&session_id).expect("messages");
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message.text == "correct")
+            .count(),
+        1
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.text.contains("SOXU_CORRECT"))
+    );
+    assert!(home.join("sessions").is_dir());
+    handle.abort();
+    provider.kill().await.expect("stop local fixture");
+}
+
 #[tokio::test]
 async fn native_claude_read_only_rpc_resume_cancel_fifo_and_restart() {
     assert_read_only_rpc_flow(
@@ -615,7 +1217,11 @@ async fn assert_read_only_rpc_flow(
     .await;
     let mut steer = submit("queued");
     if let RpcCommand::SubmitTurn { behavior, .. } = &mut steer {
-        *behavior = ActiveTurnBehavior::Steer;
+        *behavior = if kind == NativeCliKind::Pi {
+            ActiveTurnBehavior::Queue
+        } else {
+            ActiveTurnBehavior::Steer
+        };
     }
     let queued = post_rpc(addr, steer).await;
     assert!(matches!(
@@ -625,11 +1231,13 @@ async fn assert_read_only_rpc_flow(
             ..
         })
     ));
-    wait_for_ws_event(&mut ws, |event| {
-        matches!(event, DaemonEvent::CapabilitiesLostControls { notices, .. }
+    if kind != NativeCliKind::Pi {
+        wait_for_ws_event(&mut ws, |event| {
+            matches!(event, DaemonEvent::CapabilitiesLostControls { notices, .. }
             if notices.iter().any(|notice| notice.fallback_value == "queue"))
-    })
-    .await;
+        })
+        .await;
+    }
     assert!(
         post_rpc(
             addr,

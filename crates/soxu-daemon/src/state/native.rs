@@ -4,8 +4,8 @@ use super::{DaemonState, internal_err, lock_err, not_found_err};
 use crate::NativeAssetGuard;
 use chrono::Utc;
 use soxu_drivers::{
-    DriverError, DriverEvent, NativeCliKind, NativeDriver, Outcome, RunRequest, RunTarget,
-    RunningTurn, SessionMode, TurnControl,
+    Control, ControlSupport, DriverError, DriverEvent, NativeCliKind, NativeDriver, Outcome,
+    RunRequest, RunTarget, RunningTurn, SessionMode, TurnControl,
 };
 use soxu_protocol::{
     ActionableError, ActiveTurnBehavior, DaemonEvent, ErrorCode, LostControlNotice,
@@ -15,6 +15,7 @@ use soxu_protocol::{
 };
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use uuid::Uuid;
@@ -22,12 +23,14 @@ use uuid::Uuid;
 const MAX_PROMPT_BYTES: usize = 128 * 1024;
 const MAX_REPLY_BYTES: usize = 4 * 1024 * 1024;
 const TURN_TIMEOUT: Duration = Duration::from_secs(300);
+const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) struct NativeTurns {
     quick_chat_root: PathBuf,
     drivers: HashMap<NativeCliKind, Result<NativeDriver, DriverError>>,
     asset_guards: HashMap<NativeCliKind, NativeAssetGuard>,
     active: Mutex<ActiveTurns>,
+    control_sequence: AtomicU64,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -140,6 +143,8 @@ struct ActiveTurn {
     target: SessionTarget,
     control: TurnControl,
     stopping: bool,
+    turn_index: u32,
+    pending_steers: BTreeMap<u64, TurnMessageSnapshot>,
 }
 
 impl DaemonState {
@@ -176,12 +181,15 @@ impl DaemonState {
         configured: impl IntoIterator<Item = (NativeCliKind, Result<NativeDriver, DriverError>)>,
     ) -> anyhow::Result<Self> {
         let drivers: HashMap<_, _> = configured.into_iter().collect();
+        let orchestrator = self
+            .orchestrator
+            .get_mut()
+            .map_err(|_| lock_err("orchestrator"))?;
+        let mut agents = orchestrator.agents().to_vec();
+        if let Some(pi) = agents.iter_mut().find(|agent| agent.agent_id == "pi") {
+            pi.supports_live_steer = false;
+        }
         if !self.require_auth_for_all {
-            let orchestrator = self
-                .orchestrator
-                .get_mut()
-                .map_err(|_| lock_err("orchestrator"))?;
-            let mut agents = orchestrator.agents().to_vec();
             for kind in [
                 NativeCliKind::Pi,
                 NativeCliKind::ClaudeCode,
@@ -203,12 +211,19 @@ impl DaemonState {
                     description: "仅投递文本，禁用工具、扩展和 MCP".to_owned(),
                     tone: PermissionTone::Neutral,
                 });
-                agent.supports_live_steer = false;
+                agent.supports_live_steer = kind == NativeCliKind::Pi && driver.is_ok();
                 agent.installed = driver.is_ok();
             }
-            orchestrator.set_agent_catalog(agents);
         }
+        orchestrator.set_agent_catalog(agents);
         for mut session in self.store.interrupted_native_sessions()? {
+            if session.agent_id == "pi" {
+                for message in self.store.list_session_messages(&session.session_id)? {
+                    if message.steer_badge.as_deref() == Some("纠偏待确认") {
+                        self.publish_steer_result(message, None);
+                    }
+                }
+            }
             session.lifecycle = TurnLifecycleState::Idle;
             session.bucket = WorkspaceBucket::Failed;
             session.updated_at = Utc::now();
@@ -229,6 +244,7 @@ impl DaemonState {
             drivers,
             asset_guards: HashMap::new(),
             active: Mutex::new(BTreeMap::new()),
+            control_sequence: AtomicU64::new(1),
         });
         Ok(self)
     }
@@ -313,6 +329,51 @@ impl DaemonState {
                         "请使用 StopTurn，待会话空闲后重新发送",
                     ));
                 }
+                if agent == ReadOnlyAgent::Pi
+                    && behavior == ActiveTurnBehavior::Steer
+                    && let Some(running) = active.get_mut(&session_id)
+                    && running.control.is_active()
+                {
+                    if !running.pending_steers.is_empty() {
+                        return Err(turn_error(
+                            ErrorCode::Conflict,
+                            "Pi 纠偏仍在等待原生确认",
+                            "请等待确认结果，勿重复发送",
+                        ));
+                    }
+                    let id = runtime.control_sequence.fetch_add(1, Ordering::Relaxed);
+                    let mut message = turn_message(
+                        &session,
+                        running.turn_index,
+                        TurnMessageRole::User,
+                        "你",
+                        text.clone(),
+                    );
+                    message.steer_badge = Some("纠偏待确认".to_owned());
+                    self.store.upsert_message(&message).map_err(internal_err)?;
+                    match running.control.send(id, Control::Steer(text)) {
+                        Ok(ControlSupport::Native) => {}
+                        _ => {
+                            message.steer_badge = Some("纠偏未发送".to_owned());
+                            self.store.upsert_message(&message).map_err(internal_err)?;
+                            self.publish_native(DaemonEvent::TurnMessageUpserted(message));
+                            return Err(turn_error(
+                                ErrorCode::DriverUnavailable,
+                                "Pi 控制通道未接受纠偏，未自动排队",
+                                "请等待回合结束后从历史消息重新发送",
+                            ));
+                        }
+                    }
+                    running.pending_steers.insert(id, message.clone());
+                    self.publish_native(DaemonEvent::TurnMessageUpserted(message));
+                    let state = Arc::clone(self);
+                    let pending_session = session_id.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(CONTROL_TIMEOUT).await;
+                        state.complete_native_steer(&pending_session, id, None);
+                    });
+                    return Ok(submitted(session_id, None));
+                }
                 let running = active.contains_key(&session_id);
                 let queued = if running {
                     true
@@ -345,7 +406,7 @@ impl DaemonState {
                                 previous_value: "steer".to_owned(),
                                 fallback_value: "queue".to_owned(),
                                 reason_zh: format!(
-                                    "Daemon 当前未为 {} 启用中途纠偏，消息已排队",
+                                    "{} 当前回合无法接收中途纠偏，消息已排队",
                                     agent.name()
                                 ),
                             }],
@@ -505,6 +566,8 @@ impl DaemonState {
                 target: session.target.clone(),
                 control: turn.control(),
                 stopping: false,
+                turn_index,
+                pending_steers: BTreeMap::new(),
             },
         );
         self.publish_native(DaemonEvent::TurnMessageUpserted(user));
@@ -536,6 +599,9 @@ impl DaemonState {
             let mut pending_id = None;
             while let Some(event) = turn.next_event().await {
                 match event {
+                    DriverEvent::ControlAck { id, accepted } => {
+                        self.complete_native_steer(&assistant.session_id, id, Some(accepted));
+                    }
                     DriverEvent::Session { id } if agent.valid_session_id(&id) => match agent {
                         ReadOnlyAgent::Codex => self
                             .record_native_session_id(&assistant.session_id, id)
@@ -620,6 +686,60 @@ impl DaemonState {
         Ok(())
     }
 
+    fn complete_native_steer(&self, session_id: &str, id: u64, accepted: Option<bool>) {
+        let Some(runtime) = &self.native_turns else {
+            return;
+        };
+        let Ok(mut active) = runtime.active.lock() else {
+            return;
+        };
+        let Some(message) = active
+            .get_mut(session_id)
+            .and_then(|turn| turn.pending_steers.remove(&id))
+        else {
+            return;
+        };
+        self.publish_steer_result(message, accepted);
+    }
+
+    fn publish_steer_result(&self, mut message: TurnMessageSnapshot, accepted: Option<bool>) {
+        message.steer_badge = Some(
+            match accepted {
+                Some(true) => "纠偏已接收",
+                Some(false) => "纠偏被拒绝",
+                None => "纠偏结果未知",
+            }
+            .to_owned(),
+        );
+        let session_id = message.session_id.clone();
+        if self.store.upsert_message(&message).is_err() {
+            self.publish_native_failure(
+                &session_id,
+                turn_error(
+                    ErrorCode::InternalError,
+                    "Pi 纠偏确认无法落盘",
+                    "请检查事件记录与原生历史，勿盲目重发",
+                ),
+            );
+            return;
+        }
+        self.publish_native(DaemonEvent::TurnMessageUpserted(message));
+        if accepted != Some(true) {
+            self.publish_native_failure(
+                &session_id,
+                turn_error(
+                    ErrorCode::DriverUnavailable,
+                    if accepted == Some(false) {
+                        "Pi 拒绝纠偏，未自动排队"
+                    } else {
+                        "Pi 纠偏未获确认，结果未知且未自动排队"
+                    },
+                    "请核对原生回复与历史消息，等待空闲后决定是否重新发送",
+                ),
+            );
+        }
+    }
+
     fn finish_native(self: &Arc<Self>, session_id: &str, result: Result<(), String>) {
         let Some(runtime) = &self.native_turns else {
             return;
@@ -630,6 +750,9 @@ impl DaemonState {
         let Some(finished) = active.remove(session_id) else {
             return;
         };
+        for message in finished.pending_steers.into_values() {
+            self.publish_steer_result(message, None);
+        }
         let Ok(Some(mut session)) = self.store.get_session(session_id) else {
             tracing::warn!("无法读取原生回合所属会话");
             return;

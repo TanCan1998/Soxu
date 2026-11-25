@@ -443,3 +443,65 @@ async fn accepts_sha256_repositories() {
     assert!(matches!(snapshot.head, HeadState::Attached { oid, .. } if oid.len() == 64));
     assert_eq!(before, file_bytes(&fixture.root));
 }
+
+#[tokio::test]
+async fn native_status_preserves_untracked_nested_repository_directory_record() {
+    let fixture = Fixture::new();
+    let repository = fixture.repo("outer");
+    let nested = repository.join("inner 中文 repo");
+    fs::create_dir(&nested).expect("内嵌仓库目录");
+    fixture.git(&nested, &["init", "--initial-branch=main"]);
+    fs::write(nested.join("file"), "nested content\n").expect("内嵌仓库文件");
+    fixture.commit(&nested);
+    let output = fixture.run(
+        &repository,
+        &["status", "--porcelain=v2", "-z", "--untracked-files=all"],
+    );
+    assert!(output.status.success());
+    assert_eq!(output.stdout, "? inner 中文 repo/\0".as_bytes());
+    println!("真实未跟踪目录记录：{:?}", output.stdout);
+    let before = file_bytes(&fixture.root);
+    let snapshot = fixture
+        .git
+        .probe(&repository)
+        .await
+        .expect("探测合法目录记录");
+    assert!(
+        matches!(&snapshot.status.entries[0], StatusEntry::Untracked(path) if path.as_bytes() == "inner 中文 repo/".as_bytes())
+    );
+    assert_eq!(before, file_bytes(&fixture.root));
+    fs::write(repository.join(".gitignore"), "inner 中文 repo/\n").expect("忽略目录");
+    let output = fixture.run(
+        &repository,
+        &[
+            "status",
+            "--porcelain=v2",
+            "-z",
+            "--untracked-files=all",
+            "--ignored=matching",
+        ],
+    );
+    assert!(output.status.success());
+    assert!(
+        output
+            .stdout
+            .split(|byte| *byte == 0)
+            .any(|record| record == "! inner 中文 repo/".as_bytes())
+    );
+    println!("真实忽略目录记录：{:?}", output.stdout);
+    let snapshot = soxu_git::parse_status(&output.stdout).expect("解析真实忽略目录输出");
+    assert!(snapshot.entries.iter().any(|entry| matches!(entry, StatusEntry::Ignored(path) if path.as_bytes() == "inner 中文 repo/".as_bytes())));
+    let before = file_bytes(&fixture.root);
+    assert!(
+        !fixture
+            .git
+            .probe(&repository)
+            .await
+            .expect("默认忽略枚举关闭")
+            .status
+            .entries
+            .iter()
+            .any(|entry| matches!(entry, StatusEntry::Ignored(_)))
+    );
+    assert_eq!(before, file_bytes(&fixture.root));
+}
