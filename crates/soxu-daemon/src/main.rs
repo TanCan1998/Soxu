@@ -3,6 +3,7 @@
 use anyhow::Context;
 use soxu_daemon::{DaemonState, build_router};
 use soxu_drivers::{DriverError, NativeCliKind, NativeDriver};
+use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -45,6 +46,37 @@ fn discover_codex() -> Result<NativeDriver, DriverError> {
     Ok(driver)
 }
 
+fn configure_pi(session_dir: PathBuf) -> Result<NativeDriver, DriverError> {
+    let program = std::env::var_os("SOXU_PI_EXE").ok_or(DriverError::BinaryNotFound)?;
+    let mut prefix = Vec::new();
+    if let Some(entry) = std::env::var_os("SOXU_PI_ENTRY") {
+        let path = Path::new(&entry);
+        if !path.is_absolute()
+            || !path.extension().is_some_and(|ext| {
+                ["js", "mjs", "cjs"]
+                    .iter()
+                    .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+            })
+            || !path.is_file()
+        {
+            return Err(DriverError::InvalidRequest("SOXU_PI_ENTRY"));
+        }
+        prefix.push(entry);
+    }
+    prefix.extend([
+        OsString::from("--session-dir"),
+        session_dir.into_os_string(),
+    ]);
+    let driver = NativeDriver::with_program(NativeCliKind::Pi, program.into(), prefix)?;
+    if !driver.program().is_file() {
+        return Err(DriverError::BinaryNotFound);
+    }
+    if cfg!(windows) && driver.program().with_extension("shim").is_file() {
+        return Err(DriverError::Unsupported("Windows Pi 入口为 Scoop 包装器"));
+    }
+    Ok(driver)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -62,12 +94,14 @@ async fn main() -> anyhow::Result<()> {
     let data_dir = default_data_dir();
     let _data_lock = data_dir.as_deref().map(lock_data_dir).transpose()?;
     let state = DaemonState::open(data_dir.as_deref(), &endpoint_url, require_auth_for_all)?;
-    let quick_chat_root = data_dir.unwrap_or_else(|| {
+    let native_root = data_dir.unwrap_or_else(|| {
         std::env::temp_dir().join(format!("soxu-{}", state.daemon_fingerprint()))
     });
-    let state = Arc::new(state.with_native_turns(
-        std::path::absolute(quick_chat_root)?.join("quick-chats"),
+    let native_root = std::path::absolute(native_root)?;
+    let state = Arc::new(state.with_native_drivers(
+        native_root.join("quick-chats"),
         discover_codex(),
+        configure_pi(native_root.join("pi-sessions")),
     )?);
     info!(
         address = %local_addr,

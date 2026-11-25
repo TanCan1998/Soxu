@@ -168,7 +168,18 @@ pub(crate) fn invocation(
             Input::Text,
         ),
         Pi => (
-            &["--mode", "rpc", "--no-tools", "--no-extensions", "--no-mcp"],
+            &[
+                "--mode",
+                "rpc",
+                "--no-tools",
+                "--no-extensions",
+                "--no-mcp",
+                "--no-skills",
+                "--no-prompt-templates",
+                "--no-context-files",
+                "--no-approve",
+                "--offline",
+            ],
             Input::Rpc,
         ),
         OpenCode => (

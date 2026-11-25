@@ -27,6 +27,19 @@ Pi 通过 `TurnControl::send` 发送 `follow_up`、`steer` 或 `abort`，
 `Telemetry` 的缺失值为 `None`。`UsageScope` 标记上下文、模型步骤、工具调用、
 轮次或运行汇总，聚合时应避免重复计入。平均和峰值吞吐保留未知。
 
+## Daemon 本机 Pi 只读对话
+
+启动 Daemon 前，将 `SOXU_PI_EXE` 设置为可信 Pi 可执行文件的绝对路径。
+使用 Node 安装的 Pi 时，将该变量指向真实 Node 可执行文件，并将 `SOXU_PI_ENTRY`
+设置为 Pi 安装包声明的 JS 入口绝对路径。Windows 上应使用安装包的入口，
+避免使用会继续派生 Pi 进程的包装器。
+
+在回环监听的 Daemon 上，用 `soxu chat new --agent pi --read-only` 创建快聊，
+再用 `soxu chat send` 和 `soxu chat stop` 控制轮次。Pi 使用本机模型设置，
+以纯文本模式启动，关闭工具、扩展、MCP、项目配置授权、技能、模板和项目上下文文件。
+Pi 原生记录保存在 Daemon 数据目录的 `pi-sessions`，继续发消息时沿用原生会话 ID。
+Daemon 使用自己的 FIFO 队列，运行中的纠偏请求会降级为排队。
+
 ## 逐驱动证据
 
 下列本机版本是本次核对的版本。常规隔离测试验证七种事件格式。实际登录推理已
@@ -36,7 +49,7 @@ Pi 通过 `TurnControl::send` 发送 `follow_up`、`steer` 或 `abort`，
 | CLI | 流式接口与可采集用量 | 历史与本次验证范围 |
 | --- | --- | --- |
 | Codex 0.172.0 | `exec --json`；`thread.started`、`item.completed`、`turn.completed`；轮次、输入输出和缓存 token | `rollout-*.jsonl`，`exec resume/fork`；已登录烟测与回环续接通过 |
-| Pi 1.5.2 | `--mode rpc`；`message_update`、`agent_settled`；模型步骤、token、成本、上下文 | Session JSONL，`--session` / `--fork`；本机帮助、安装包 `dist/modes/rpc/rpc-mode.js`、Paseo `providers/pi` 与夹具 |
+| Pi 1.5.2 | `--mode rpc`；`message_update`、`agent_settled`；模型步骤、token、成本、上下文 | Session JSONL，`--session` / `--fork`；真实 Pi 经 Daemon 接回环模型夹具，通过两轮流式续接并沿用同一会话 ID |
 | Claude Code 2.1.331 | `--print --output-format stream-json --verbose`；部分文本、`result`、报告的轮次、token 与美元成本 | `projects/<cwd>/<id>.jsonl`，`--resume` / `--fork-session`；本机帮助、官方 CLI 参考、Claude Agent SDK 的 *Building a session browser* 与夹具 |
 | OpenCode | `run --standalone --format json`；`text`、`tool_use`、`step_finish`；步骤、token、缓存、成本和工具执行时长 | `--session` / `--fork`；上游 `packages/cli/src/run/{run,noninteractive}.ts` 与夹具。本机不在 PATH，SQLite 历史扫描不可用 |
 | Antigravity 1.5.16 | `--print --output-format stream-json`；`init`、`step_update`、`result`；步骤、时长、轮次与 token | 已知会话 ID 可使用 `--conversation`；本机帮助、Google Antigravity *Headless mode* 与夹具。历史扫描和 Fork 不可用 |

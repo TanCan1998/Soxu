@@ -3,7 +3,7 @@
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use soxu_daemon::{DaemonState, SqliteStore, build_router};
-use soxu_drivers::{NativeCliKind, NativeDriver};
+use soxu_drivers::{DriverError, NativeCliKind, NativeDriver};
 use soxu_protocol::{
     ActiveTurnBehavior, ApprovalItemSnapshot, ApprovalResolutionKind, AskQuestionOption,
     ClaimPairingRequest, ClientHello, ClientKind, DaemonEvent, DraftSnapshot, ErrorCode,
@@ -42,17 +42,34 @@ async fn spawn_daemon(
     Arc<DaemonState>,
     tokio::task::JoinHandle<()>,
 ) {
+    spawn_daemon_with_drivers(dir, driver, None).await
+}
+
+async fn spawn_daemon_with_drivers(
+    dir: &TempDir,
+    codex: Option<NativeDriver>,
+    pi: Option<NativeDriver>,
+) -> (
+    std::net::SocketAddr,
+    Arc<DaemonState>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind ephemeral test port");
     let addr = listener.local_addr().expect("read local addr");
     let endpoint = format!("http://{addr}");
     let state = DaemonState::open(Some(dir.path()), &endpoint, false).expect("open daemon state");
-    let state = Arc::new(match driver {
-        Some(driver) => state
-            .with_native_turns(dir.path().join("quick-chats"), Ok(driver))
-            .expect("recover previous native turns"),
-        None => state,
+    let state = Arc::new(if codex.is_some() || pi.is_some() {
+        state
+            .with_native_drivers(
+                dir.path().join("quick-chats"),
+                codex.ok_or(DriverError::BinaryNotFound),
+                pi.ok_or(DriverError::BinaryNotFound),
+            )
+            .expect("recover previous native turns")
+    } else {
+        state
     });
     let router = build_router(Arc::clone(&state));
     let handle = tokio::spawn(async move {
@@ -62,19 +79,25 @@ async fn spawn_daemon(
 }
 
 fn codex_fixture() -> NativeDriver {
+    native_fixture(NativeCliKind::Codex, "codex.cjs")
+}
+
+fn native_fixture(kind: NativeCliKind, name: &str) -> NativeDriver {
     let output = std::process::Command::new("node")
         .args(["-p", "process.execPath"])
         .output()
         .expect("find real Node executable");
     assert!(output.status.success());
     let program = String::from_utf8(output.stdout).expect("Node executable path");
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex.cjs");
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
     NativeDriver::with_program(
-        NativeCliKind::Codex,
+        kind,
         PathBuf::from(program.trim()),
         [script.into_os_string()],
     )
-    .expect("set Codex fixture")
+    .expect("set native fixture")
 }
 
 fn submit_native(session_id: &str, text: &str) -> RpcCommand {
@@ -242,6 +265,141 @@ async fn native_codex_http_ws_fifo_stop_failure_and_persistence() {
         .map(|msg| msg.text.as_str())
         .collect();
     assert_eq!(replies, ["回复 hold", "回复 queued", "回复 after-stop", ""]);
+}
+
+#[tokio::test]
+async fn native_pi_read_only_rpc_resume_cancel_fifo_and_restart() {
+    let dir = TempDir::new().expect("create Pi daemon data dir");
+    let pi = || native_fixture(NativeCliKind::Pi, "pi.cjs");
+    let (addr, state, handle) =
+        spawn_daemon_with_drivers(&dir, Some(codex_fixture()), Some(pi())).await;
+    let create = |permission| RpcCommand::CreateQuickChat {
+        title: None,
+        agent_id: "pi".to_owned(),
+        model_id: None,
+        permission: Some(permission),
+        thinking: None,
+    };
+    assert!(post_rpc(addr, create(PermissionLevel::ReadOnly)).await.ok);
+    let (mut ws, hello) = connect_ws(
+        addr,
+        ClientHello {
+            client_kind: ClientKind::Desktop,
+            client_version: "test".to_owned(),
+            protocol_version: soxu_protocol::PROTOCOL_VERSION,
+            after_seq: None,
+            device_id: None,
+        },
+    )
+    .await;
+    let session_id = hello.snapshot.sessions[0].session_id.clone();
+    assert_eq!(hello.snapshot.sessions[0].agent_id, "pi");
+    let submit = |text| submit_native(&session_id, text);
+    assert!(post_rpc(addr, submit("invalid")).await.ok);
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::ErrorRaised { error, .. }
+            if error.summary_zh == "Pi 未返回有效原生会话标识")
+    })
+    .await;
+    assert!(
+        state.snapshot().expect("Pi snapshot").sessions[0]
+            .native_session_id
+            .is_none()
+    );
+
+    let done = |event: &DaemonEvent| matches!(event, DaemonEvent::SessionUpdated(session) if session.bucket == WorkspaceBucket::Done);
+    assert!(post_rpc(addr, submit("fresh")).await.ok);
+    wait_for_ws_event(&mut ws, done).await;
+    assert!(rpc_via_ws(&mut ws, "pi-hold", submit("hold")).await.0.ok);
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. } if text_delta == "Pi hold")
+    })
+    .await;
+    let mut steer = submit("queued");
+    if let RpcCommand::SubmitTurn { behavior, .. } = &mut steer {
+        *behavior = ActiveTurnBehavior::Steer;
+    }
+    let queued = post_rpc(addr, steer).await;
+    assert!(matches!(
+        queued.result,
+        Some(RpcResultData::TurnSubmitted {
+            queued_id: Some(_),
+            ..
+        })
+    ));
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::CapabilitiesLostControls { notices, .. }
+            if notices.iter().any(|notice| notice.fallback_value == "queue"))
+    })
+    .await;
+    assert!(
+        post_rpc(
+            addr,
+            RpcCommand::StopTurn {
+                session_id: session_id.clone()
+            },
+        )
+        .await
+        .ok
+    );
+    wait_for_ws_event(&mut ws, done).await;
+    assert!(post_rpc(addr, submit("after-stop")).await.ok);
+    for expected in ["Pi queued", "Pi after-stop"] {
+        wait_for_ws_event(&mut ws, |event| {
+            matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. } if text_delta == expected)
+        })
+        .await;
+    }
+    wait_for_ws_event(&mut ws, done).await;
+    assert!(post_rpc(addr, submit("fail")).await.ok);
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::ErrorRaised { error, .. } if error.summary_zh == "Pi 原生回合失败")
+    })
+    .await;
+
+    let mut interrupted = state.snapshot().expect("Pi snapshot").sessions.remove(0);
+    let native_id = interrupted.native_session_id.clone();
+    assert_eq!(
+        native_id.as_deref(),
+        Some("eeddccbb-1234-4234-8234-eeddccbbaa99")
+    );
+    assert_eq!(interrupted.bucket, WorkspaceBucket::Failed);
+    interrupted.lifecycle = TurnLifecycleState::Running;
+    interrupted.bucket = WorkspaceBucket::Running;
+    SqliteStore::open(&dir.path().join("soxu-daemon.db"))
+        .expect("open Pi database")
+        .upsert_session(&interrupted)
+        .expect("simulate interrupted Pi session");
+    drop(ws);
+    handle.abort();
+    let _ = handle.await;
+    drop(state);
+    let (_, reopened, reopened_handle) = spawn_daemon_with_drivers(&dir, None, Some(pi())).await;
+    let snapshot = reopened.snapshot().expect("restore Pi snapshot");
+    assert_eq!(snapshot.sessions[0].bucket, WorkspaceBucket::Failed);
+    assert_eq!(snapshot.sessions[0].lifecycle, TurnLifecycleState::Idle);
+    assert_eq!(snapshot.sessions[0].native_session_id, native_id);
+    let messages = reopened
+        .list_session_messages(&session_id)
+        .expect("restore Pi messages");
+    let replies: Vec<_> = messages
+        .iter()
+        .filter(|message| message.role == TurnMessageRole::Assistant)
+        .map(|message| (message.author.as_str(), message.text.as_str()))
+        .collect();
+    assert_eq!(
+        replies,
+        [
+            "Pi invalid",
+            "Pi fresh",
+            "Pi hold",
+            "Pi queued",
+            "Pi after-stop",
+            "Pi fail"
+        ]
+        .map(|text| ("Pi", text))
+    );
+    reopened_handle.abort();
 }
 
 fn bind_local_fixture(dir: &TempDir, state: &DaemonState) -> SessionTarget {
