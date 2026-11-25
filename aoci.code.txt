@@ -59,7 +59,13 @@ main.rs[EU6T]: F:解析 Soxu 命令行子命令，显示 CLI 与协议版本并�
 Cargo.toml[FV5T]: F:声明 soxu-core crate 的包元数据、lint 设置和依赖 | R:code:Cargo.toml | A:soxu-core | S:版本、edition、最低 Rust 版本、许可证、lint 配置及全部依赖声明均继承自工作区
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-core/src/===
-lib.rs[DB7T]: F:定义工作区文件系统隔离模式及 Agent CLI 启动前的环境变量扩展接口 | R:- | A:WorkspaceIsolation,RuntimeExtensionHook,RuntimeExtensionHook::transform_launch_env,NoopExtensionHost | S:隔离模式以 kind 字段标记 local 或 worktree，worktree 必须包含 branch 和 base_ref；扩展钩子要求 Send + Sync，默认实现保留环境变量。
+lib.rs[DB8M]: F:组装并重导出 soxu-core 状态桶、能力协商、红线、队列与草稿模块，保留 RuntimeExtensionHook 槽位并覆盖核心单测 | R:code:crates/soxu-core/src/orchestrator.rs,code:crates/soxu-core/src/buckets.rs,code:crates/soxu-core/src/capabilities.rs,code:crates/soxu-core/src/redline.rs | A:CoreOrchestrator,RuntimeExtensionHook,NoopExtensionHost,WorkspaceIsolation | S:WorkspaceIsolation 直接重导出自 soxu_protocol；全部单测禁绝 unwrap 并校验红线禁用 AllowSession
+buckets.rs[DB6T]: F:实现项目与工作区注意力状态桶聚合及排序规则（NeedsInput 优先于 Failed/Running/Attention/Done） | R:code:crates/soxu-protocol/src/domain.rs | A:aggregate_bucket,project_aggregated_bucket,sort_workspaces_by_attention,sort_quick_chats_by_attention | S:project_aggregated_bucket 仅统计未归档工作树，空集默认返回 Done
+capabilities.rs[DB8L]: F:定义 7 大原生 CLI 与默认模型目录，并实现切换代理或模型时的失效控制项自动回退协商 | R:code:crates/soxu-protocol/src/capabilities.rs,code:crates/soxu-protocol/src/domain.rs,code:apps/mobile-web/src/lib/agent-capabilities.ts | A:default_model_catalog,default_agent_catalog,reconcile_capabilities,ReconcileRequest,ReconcileOutcome | S:未知 agent_id 自动回退至 codex 档案；不支持热纠偏或思考调节的驱动会生成 LostControlNotice 并降级为 Queue/None
+drafts.rs[DD6T]: F:实现按 session_id 索引的内存草稿缓存与单调代次号 generation 并发写拦截 | R:code:crates/soxu-protocol/src/domain.rs | A:DraftStore,DraftSaveOutcome | S:仅接受严格递增的 generation（新值须大于已存值），拦截延迟旧写覆盖并返还当前代次
+orchestrator.rs[AB7S]: F:封装纯内存 CoreOrchestrator 统一编排器，聚合能力目录、安全评估、草稿缓存与队列状态流转 | R:code:crates/soxu-core/src/capabilities.rs,code:crates/soxu-core/src/redline.rs,code:crates/soxu-core/src/drafts.rs,code:crates/soxu-core/src/queue.rs | A:CoreOrchestrator | S:纯内存无任何磁盘或进程 I/O；默认装配 7 代理与 7 模型目录供 Daemon 与核心调度共享
+queue.rs[DW6S]: F:维护活跃回合待发队列 FIFO 秩序及 Queue 到 Steer/Interrupt 一键原子提级流转 | R:code:crates/soxu-protocol/src/domain.rs,code:crates/soxu-protocol/src/error.rs | A:TurnQueueManager,QueuePromotion | S:promote 拒绝提级至 Queue 并立即将目标条目移出队列，防止同一指令被重复注入或消费两次
+redline.rs[DS8S]: F:实现高危破坏性命令拦截、全局 CLI/Magpie 配置目录保护及跨端审批幂等与红线裁决校验 | R:code:crates/soxu-protocol/src/domain.rs,code:crates/soxu-protocol/src/error.rs | A:RedlineAssessment,assess_command_safety,validate_approval_resolution | S:命中递归删除/强推/系统盘变更或全局配置路径即强锁 allow_session_permitted=false；重复审批返 Conflict
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/===
 Cargo.toml[FV5T]: F:声明 soxu-daemon 包及其工作区依赖，涵盖异步运行、HTTP 服务、资源嵌入和仓库内部组件 | R:code:Cargo.toml | A:soxu-daemon | S:包的版本、Rust edition、最低 Rust 版本、许可证和 lint 规则均继承工作区设置。
