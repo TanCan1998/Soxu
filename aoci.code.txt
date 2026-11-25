@@ -73,11 +73,12 @@ Cargo.toml[FV5T]: F:声明 soxu-daemon 包及其工作区依赖（axum、rusqlit
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/src/===
 main.rs[EG7M]: F:启动持久化 HTTP/WS 守护进程，独占数据目录并配置六类可信原生只读 CLI 启动器 | R:code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-daemon/src/server.rs,code:crates/soxu-drivers/src/process.rs | A:SOXU_LISTEN,SOXU_DATA_DIR,configure_opencode | S:回环限制取实际绑定 IP。OpenCode 仅接受实测 1.19.6，隔离五类目录，只保留 model/provider 并固定全拒绝权限。Qwen 和 Copilot 直启真实入口，避免包装器派生进程。
-lib.rs[CG7T]: F:重导出 soxu-daemon 核心模块（pairing、server、state、store），供可执行入口与集成测试共用 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/server.rs,code:crates/soxu-daemon/src/store.rs,code:crates/soxu-daemon/src/pairing.rs | A:DaemonState,SqliteStore,build_router | S:所有外部集成测试通过本库入口直接构建无端口硬编码的临时守护实例
+lib.rs[CG7T]: F:公开守护进程状态、传输、存储、配对及原生资产校验模块供入口和集成测试共用 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/server.rs,code:crates/soxu-daemon/src/store.rs,code:crates/soxu-daemon/src/pairing.rs,code:crates/soxu-daemon/src/native_assets.rs | A:DaemonState,SqliteStore,build_router,NativeAssetGuard,NativeAssetError | S:资产校验器只是独立库入口，未自动挂入任何原生回合路由；公开状态仍支持临时无固定端口实例。
 pairing.rs[AI7S]: F:管理移动遥控一次性扫码 #offer= 载荷、6 位动态配对码、防重放认领、Token SHA-256 哈希及空闲锁定 | R:code:crates/soxu-protocol/src/pairing.rs,code:crates/soxu-protocol/src/error.rs | A:PairingManager,PairingManager::hash_token,PairingManager::create_offer,PairingManager::claim,PairingManager::is_idle_locked | S:认领后立即标记 used=true 阻断重放且仅将 Bearer 令牌的 SHA-256 哈希落盘，不持久化明文令牌；默认有效期 300 秒
 server.rs[EN8M]: F:提供 Axum 健康、快照、事件与 RPC 端点，完成 WS 握手及按 after_seq 追平，并将请求派发至 Daemon 传输层 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-protocol/src/rpc.rs | A:build_router,/api/health,/api/snapshot,/api/events,/api/rpc,/ws | S:WS 先订阅再读取快照与补发游标，并按 seq 去重。启用本机原生对话时快照、事件和 RPC 拒绝非回环 Host，存在 Origin 时要求同源。ClaimPairing 可匿名认领。
 state.rs[AB9L]: F:编排 SQLite、领域核心和设备配对，维护 Daemon 会话、审批与能力状态并广播持久增量 | R:code:crates/soxu-daemon/src/store.rs,code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-daemon/src/pairing.rs,code:crates/soxu-core/src/orchestrator.rs,code:crates/soxu-magpie/src/lib.rs | A:DaemonState::open,DaemonState::handle_rpc,DaemonState::authenticate_bearer,DaemonState::register_pending_approval | S:open(None) 提供内存库且默认沿用嵌入式调度；服务传输层可启用原生回合。事件锁串行化持久 seq 分配与广播。切换代理清除旧原生会话 ID；审批注册应用高危红线。
 store.rs[PD8L]: F:以 SQLite WAL 持久化项目、工作区、快聊、会话、消息、草稿、审批、偏好、设备与单调事件 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-core/src/buckets.rs,code:crates/soxu-protocol/src/domain.rs | A:SqliteStore,append_event,query_events_after,begin_native_turn,interrupted_native_sessions | S:原生回合同一事务写入会话和两条消息。重启恢复六种只读 CLI 的 Running 会话，包括 OpenCode。WAL 使用 NORMAL，设备仅存令牌摘要，草稿代次须递增。
+native_assets.rs[MS8S]: F:以调用方可信内容声明校验原生配置资产，检查字节摘要、安全文件路径和根内启动目录 | R:code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-daemon/tests/native_assets.rs | A:NativeAssetGuard::new,NativeAssetGuard::verify,NativeAssetGuard::verify_launch_directory,NativeAssetError | S:不从磁盘学习，单资产上限1 MiB；拒绝symlink及Windows reparse后规范化根与工作目录。启动目录须在根内，该范围不得含.agents；不消除校验到启动竞态，不提供运行期隔离。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-desktop/===
 Cargo.toml[FC5T]: F:声明 soxu-desktop 包并通过工作区引入核心、协议、序列化、错误处理和追踪依赖 | R:code:Cargo.toml | A:soxu-desktop | S:包的版本、Rust 版本下限、edition、许可证和 lint 规则均继承工作区配置
@@ -87,7 +88,7 @@ main.rs[EU4T]: F:Soxu 桌面工作台占位入口，启动时打印应用版本�
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/===
 Cargo.toml[FV5T]: F:声明驱动 crate 的包信息、工作区 lint 设置和依赖 | R:code:Cargo.toml | A:soxu-drivers | S:-
-README.md[SE6S]: F:说明七种 CLI 的启动控制、历史、Daemon 配置与实机安全边界及可复跑探针 | R:code:crates/soxu-daemon/src/main.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs | A:逐驱动证据,空工具代理与钩子实测,钩子故障与资产完整性 | S:Antigravity 空工具仍含 manage_task；钩子运行故障会拒绝，但配置缺失或放行篡改可执行残留工具。项目启动钩子仍加载。Daemon 未开放，必须每轮验证可信资产，不能以成功终态证明无工具。
+README.md[SE6S]: F:说明七种CLI启动控制、历史、Daemon配置、实机探针及可信资产启动门禁 | R:code:crates/soxu-daemon/src/native_assets.rs,code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs | A:逐驱动证据,空工具代理与钩子实测,钩子故障与资产完整性 | S:AGY过滤仍含manage_task，钩子配置缺失或篡改可放行。可选资产绑定在首轮/续接/FIFO启动前重验，但不证明原生入口、配置来源或运行期隔离；AGY路由未开放。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/src/===
 lib.rs[IE6T]: F:定义七种本机原生 Agent CLI 及其程序名，公开进程控制、能力协商、流式事件和只读历史发现入口 | R:code:crates/soxu-drivers/src/events.rs,code:crates/soxu-drivers/src/history.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/src/process.rs | A:NativeCliKind,NativeCliKind::ALL,NativeCliKind::binary_name | S:保持 snake_case 序列化标识与已有程序名映射，例如 antigravity 对应 agy。
@@ -131,7 +132,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录项目核心架构决策（ADR-001~006），包含 GPUI + Daemon、Native CLI 复用、Magpie 发现及 React 19 + shadcn/ui M0.5 决策 | R:code:AGENTS.md,code:design-system/soxu/MASTER.md | A:ADR-001,ADR-002,ADR-003,ADR-005,ADR-006 | S:已拍板方案不可无故推翻；明确全局 CLI 目录只读、M0.5 强制使用 shadcn/ui + Tailwind v4 与开源双字体
-PROGRESS.md[SW6T]: F:记录里程碑、Paseo 交付顺序、实机验收边界和后续安全验证队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:#29 工具过滤探针已合入，#26 继续钩子故障与资产门禁。运行故障阻断，但缺失或篡改配置能放行残留工具；Daemon 路由关闭，M2 未完成，后续每轮验证资产和隔离快聊加载。
+PROGRESS.md[SW6T]: F:记录里程碑、隔离交付顺序、实机边界及可信原生启动门禁的后续队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md,code:crates/soxu-daemon/src/state/native.rs | A:M0,M0.5,M1..M6,Paseo Worktree编排主线 | S:#30故障探针已合入，#26推进可选资产校验和实际回合门禁；原生入口、配置来源、启动竞态及运行期保护尚未闭合。AGY路由关闭，M2未完成。
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
@@ -198,5 +199,5 @@ i18n.ts[CL7L]: F:可扩展前端国际化注册表与 React 上下文，覆盖 z
 SKILL.md[SW7S]: F:定义跨 AGY 与 Codex 桌面端自动发现的 Paseo 协同编排技能、隔离共享矩阵及 30 秒切换流程 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:paseo.json,code:docs/ops/PROGRESS.md | A:paseo-orchestrator,Control Plane,Worktree Isolation | S:要求双端统一通过 paseo-ctl.ps1 调用 Paseo 并隔离宿主全局配置，禁止双端同时在主检出目录并发写业务源码
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/src/state/===
-native.rs[AW8L]: F:调度本机回环的六类原生只读回合，管理续接、取消、FIFO、流式落盘与重启恢复 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/store.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-protocol/src/rpc.rs | A:DaemonState::with_native_driver_set,handle_transport_rpc,SubmitTurn,StopTurn | S:Copilot 和 OpenCode 仅开放未归档快聊。OpenCode 标识须为 ses_ 加 26 位 ASCII 字母数字，其余用 UUID；Codex 收到即保存，其他驱动成功后保存。先落盘再广播文本，停止或失败暂停内存队列。
+native.rs[AW8L]: F:调度本机回环六类只读原生回合，管理续接、取消、FIFO、流式落盘及可选启动资产门禁 | R:code:crates/soxu-daemon/src/store.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-daemon/src/native_assets.rs,code:crates/soxu-protocol/src/rpc.rs | A:DaemonState::with_native_driver_set,DaemonState::with_native_asset_guard,handle_transport_rpc,SubmitTurn,StopTurn | S:Copilot/OpenCode仅快聊；后者ID为ses_加26位ASCII字母数字，其余UUID。Codex收到即保存ID，其他成功后保存；先落盘再广播。绑定校验覆盖每次实际启动，拒绝不写新消息且保留队列；未绑定沿用旧行为，AGY仍关闭。
 
