@@ -6,7 +6,7 @@
 
 ## 1. 当前总体状态
 
-- `M0`、`M0.5`（PR `#4`）与 **`M1: Protocol v1, Domain Core & Daemon Spine`（`#5` / `#6` / `#7`）已全部完成并合入 `main`**。**`M2: Magpie Discovery & 7 Native CLI Drivers`** 已交付双态发现（`#11`）、原生驱动（`#12`）以及 Codex、Pi、Claude Code、Qwen Code 本机只读对话（PR `#16`、`#18`、`#20`、`#22`）。
+- `M0`、`M0.5`（PR `#4`）与 **`M1: Protocol v1, Domain Core & Daemon Spine`（`#5` / `#6` / `#7`）已全部完成并合入 `main`**。**`M2: Magpie Discovery & 7 Native CLI Drivers`** 已交付双态发现（`#11`）、原生驱动（`#12`）、Codex、Pi、Claude Code、Qwen Code 本机只读对话（PR `#16`、`#18`、`#20`、`#22`）及 Copilot 本机只读快聊（PR `#24`）。
 - 仓库已启用合并自动删支（`delete_branch_on_merge = true`）与 Paseo Worktree 回收。
 - **参考项目与索引进度（已全部完成）**：
   - [x] 拉取参考项目至 `.refs/`：`paseo`（7,818 文件）、`codeg`（3,324 文件）、`padu`（1,157 文件）
@@ -22,7 +22,7 @@
 | **M0** | Bootstrap & Engineering Governance | ✅ 已完成 | 仓库骨架（Rust 2024 + PWA）、`.githooks` + `gitleaks` 隐私与 Emoji 门禁、最新 Actions CI、三层文档、Paseo `git` 项目绑定 |
 | **M0.5** | Pure Black Design System & Dual Prototypes | ✅ 已完成 | 纯黑 7 级海拔 `tokens.json` + `shadcn/ui` 变量、MASTER + 7 份分页面规范、React 19 + `shadcn/ui` + Tailwind v4 双端原型与 7 分区独立设置、单文件桌面预览 `preview.html`、移动遥控 PWA 原型（PR `#4`） |
 | **M1** | Protocol v1, Domain Core & Daemon Spine | ✅ 已完成 | `soxu-protocol` 全量 RPC/WS `seq` 契约、`soxu-core` 状态桶/能力协商/安全红线/队列草稿、`soxu-daemon` SQLite WAL 持久化 + WS 增量追平 + `#offer=`/6 位码鉴权、`soxu-cli` 闭环（`#5` / `#6` / `#7`） |
-| **M2** | Magpie Discovery & 7 Native CLI Drivers | M2f 已完成，M2g 进行中 | `soxu-magpie` 提供双态发现和脱敏诊断。`soxu-drivers` 适配七种流式格式。Daemon 已接通 Codex、Pi、Claude Code、Qwen Code 本机回环只读对话。 |
+| **M2** | Magpie Discovery & 7 Native CLI Drivers | M2g 已完成，M2h 进行中 | `soxu-magpie` 提供双态发现和脱敏诊断。`soxu-drivers` 适配七种流式格式。Daemon 已接通 Codex、Pi、Claude Code、Qwen Code 本机回环只读对话与 Copilot 只读快聊。 |
 | **M3** | Git Worktree Pool, Checkpoints & Commit Engine | ⏳ 待启动 | `soxu-git` 三合一项目接入、Worktree 隔离池 + `direct` MCP 上下文挂载 + 工作区损坏恢复、三基准 Diff、Checkpoint 三选一安全回退（含 Safety Stash）、拆分式 Git Emoji 提交与门禁预检 |
 | **M4** | Live Mobile PWA & GPUI Workbench Foundation | ⏳ 待启动 | **双轨 100% 正交并行**：`apps/mobile-web` 去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对与 13 组视口验收；`soxu-desktop` GPUI 令牌编译器、双开源字体联动、可扩展 `i18n`、7 层焦点栈与四栏自适应壳层 |
 | **M5** | GPUI Core Views: Transcript, Composer & Inspector | ⏳ 待启动 | `soxu-desktop` 三路并行落地：`<=8.3Hz` 虚拟对话流 + 5 类工具卡/审批卡/提问卡 + 20px 轮次导航轨、760px 同步宽输入舱 + `@agent` 移交 + 三色圆环统计、右栏 Diff/Files、7 分区设置与核心业务模态框 |
@@ -57,6 +57,9 @@
 - `#17` 已经由 PR `#18` 合入 `main`。真实 Pi `1.5.2` 经 Daemon 连接本机模型夹具，两轮流式回复沿用同一原生 UUID，第二轮带回首轮上下文。HTTP/WS 夹具覆盖无效标识、失败、取消、FIFO 与 SQLite 恢复。Pi 启动参数及数据目录见[驱动说明](../../crates/soxu-drivers/README.md#daemon-本机-pi-只读对话)。
 - `#19` 已由 PR `#20` 合入 `main`，隔离工作区已归档。真实 Claude Code `2.1.331` 经 Daemon 连接本机模型夹具，两轮回复沿用同一 UUID，模型请求未携带工具，会话 JSONL 落在 Daemon 的 `claude` 目录。
 - `#21` 已由 PR `#22` 合入 `main`，隔离工作区已归档。真实 Qwen Code `0.28.0` 经 Daemon 完成两轮回环续接，模型请求未携带工具，额外返回的工具调用触发失败且未执行。配置、运行数据与历史落在 Daemon 的 `qwen` 目录。
+- `#23` 已由 PR `#24` 合入 `main`，隔离工作区已归档。真实 Copilot `1.0.114` 经 Daemon 完成两轮回环续接，两个请求均无工具，第二轮带回首轮提示与回复。两轮复用同一 UUID，历史与缓存分别写入隔离状态和缓存目录。本地及云端门禁通过。
+- Copilot 项目钩子夹具中，默认启动跳过 `sessionStart`，启用目录信任后触发。可信项目把 `disableAllHooks` 设为 `false` 可以覆盖用户级 `true`，项目绑定继续关闭。
+- `#25` 验证 OpenCode 的直接进程、配置隔离与工具边界。`#26` 跟踪 Antigravity。真实 Antigravity `1.5.16` 可连通 Gemini 兼容回环模型。关闭斜杠展开会使 `plan` 失效，回环模型请求仍声明终端、文件修改、工作流和子代理等工具。
 - 本机使用 `soxu doctor --json` 查看脱敏发现结果，通过 `soxu chat new --read-only` 创建快聊，再用 `soxu chat send <对话或会话 ID> <文本>` 发送，`soxu events` 查看增量，`soxu chat stop <对话或会话 ID>` 停止。Windows 的 Scoop 包装器需用 `SOXU_CODEX_EXE` 指定真实 EXE 的绝对路径。失败或停止后暂停剩余队列，下一次投递从队首继续。队列驻留内存。
 
 - **当前并发上限**：参考库索引阶段采用 `3~4` 路独立仓库并行初始化；后续进入 M0.5 顶层规范与各阶段契约冻结时回归 `1` 路串行，M1–M6 接口冻结后的正交模块实现采用 `2~3` 路 Paseo Worktree 并行。
@@ -70,7 +73,7 @@
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 推进 `#23` 的 Copilot 本机只读快聊。真实 `1.0.114` 直连回环模型，两轮请求均无工具且续接读回首轮上下文。需适配终态 `result.exitCode` / `result.sessionId`，因为 `assistant.idle` 与无 ID 的 `session.resume` 均无法按现有事件契约完成续接。
-2. 验证 Copilot 项目绑定的钩子行为，核对 OpenCode 和 Antigravity 的只读隔离条件。
+1. 推进 `#25`，使用官方 OpenCode 便携版验证项目配置、插件、工具和续接边界。达到只读要求后接入本机回环 Daemon。
+2. 推进 `#26`，验证 Antigravity 能否在原生进程中关闭或拒绝声明的工具。继续验证 Copilot 项目绑定时能否让项目配置无法重新开启钩子。
 3. 定义遥测、历史导入、附件、移交、更高权限和移动端投递的验收范围。
 
