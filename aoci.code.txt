@@ -135,7 +135,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录Soxu架构与工程决策，新增主控只编排审查、AGY延期及Pi/Git正交并行的ADR-007 | R:code:AGENTS.md,code:docs/ops/PROGRESS.md,code:design-system/soxu/MASTER.md | A:ADR-001..007,Owned Paths,Queue/Steer/Stop | S:#26开放但路由关闭，延期不等于M2七代理验收；PiDeck仅参考原生Pi，不引入ACP。Issue#34的PR#35先合流，再串行合入Issue#32/#33业务PR；后续分支吸收main并保留前序AOCI认知，执行代理不得合并或回收。
-PROGRESS.md[SW6S]: F:记录M0至M6交付边界、Pi/Git并行身份与白名单、治理PR及串行审查队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0..M6,#26,#32,#33,#34,PR#35 | S:#26暂缓且路由关闭，不阻塞#32/#33；时点快照不是验收。#34治理PR#35待主控审查，其后#32→#33串行合入；M3a仅只读探测，M2七代理及M3全交付不得提前声明。
+PROGRESS.md[SW6S]: F:记录M0至M6交付边界、Pi与Git波次收口证据、并行工作区身份及M3后续依赖 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0..M6,#26,#32/#37,#33/#36,#34/#35,#38/#39 | S:#26开放延期且Daemon路由关闭；M2七代理及M3仍有未交付范围。#38工作区表为PR构建快照；#39先复用M3a只读身份边界，跨模块契约单独合入，回退先快照、提交先预检。
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
