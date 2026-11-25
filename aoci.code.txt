@@ -131,7 +131,7 @@ architecture.md[SG7T]: F:说明 Soxu 客户端、共享协议与守护进程核�
 contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、多 Agent 并行开发及 PR 合入回收流程 | R:code:AGENTS.md,code:scripts/setup-hooks.ps1,code:scripts/check-all.ps1,code:Cargo.toml,code:docs/ops/PROGRESS.md | A:mise trust,setup-hooks.ps1,check-all.ps1,Owned Paths | S:公共契约变更须先单流合入 main；并行上限 2～3 且限于 Owned Paths；PR 合入须用 --delete-branch 并清理 Paseo Worktree。
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
-DECISIONS.md[SW7T]: F:记录Soxu架构与工程决策，新增主控只编排审查、AGY延期及Pi/Git正交并行的ADR-007 | R:code:AGENTS.md,code:docs/ops/PROGRESS.md,code:design-system/soxu/MASTER.md | A:ADR-001..007,Owned Paths,Queue/Steer/Stop | S:#26开放但路由关闭，延期不等于M2七代理验收；PiDeck仅参考原生Pi，不引入ACP。#34→#32→#33串行合入，后续分支吸收main并保留前序AOCI认知，执行代理不得合并或回收。
+DECISIONS.md[SW7T]: F:记录Soxu架构与工程决策，新增主控只编排审查、AGY延期及Pi/Git正交并行的ADR-007 | R:code:AGENTS.md,code:docs/ops/PROGRESS.md,code:design-system/soxu/MASTER.md | A:ADR-001..007,Owned Paths,Queue/Steer/Stop | S:#26开放但路由关闭，延期不等于M2七代理验收；PiDeck仅参考原生Pi，不引入ACP。Issue#34的PR#35先合流，再串行合入Issue#32/#33业务PR；后续分支吸收main并保留前序AOCI认知，执行代理不得合并或回收。
 PROGRESS.md[SW6S]: F:记录M0至M6交付边界、Pi/Git并行身份与白名单、治理PR及串行审查队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0..M6,#26,#32,#33,#34,PR#35 | S:#26暂缓且路由关闭，不阻塞#32/#33；时点快照不是验收。#34治理PR#35待主控审查，其后#32→#33串行合入；M3a仅只读探测，M2七代理及M3全交付不得提前声明。
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
