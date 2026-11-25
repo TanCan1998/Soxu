@@ -77,6 +77,22 @@ fn configure_pi(session_dir: PathBuf) -> Result<NativeDriver, DriverError> {
     Ok(driver)
 }
 
+fn configure_claude(config_dir: PathBuf) -> Result<NativeDriver, DriverError> {
+    let program = std::env::var_os("SOXU_CLAUDE_EXE").ok_or(DriverError::BinaryNotFound)?;
+    let driver = NativeDriver::with_program(NativeCliKind::ClaudeCode, program.into(), [])?;
+    if !driver.program().is_file() {
+        return Err(DriverError::BinaryNotFound);
+    }
+    if cfg!(windows) && driver.program().with_extension("shim").is_file() {
+        return Err(DriverError::Unsupported(
+            "Windows Claude Code 入口为 Scoop 包装器",
+        ));
+    }
+    Ok(driver
+        .with_env("CLAUDE_CONFIG_DIR", Some(config_dir.into_os_string()))
+        .with_env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", Some("1".into())))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -98,10 +114,19 @@ async fn main() -> anyhow::Result<()> {
         std::env::temp_dir().join(format!("soxu-{}", state.daemon_fingerprint()))
     });
     let native_root = std::path::absolute(native_root)?;
-    let state = Arc::new(state.with_native_drivers(
+    let state = Arc::new(state.with_native_driver_set(
         native_root.join("quick-chats"),
-        discover_codex(),
-        configure_pi(native_root.join("pi-sessions")),
+        [
+            (NativeCliKind::Codex, discover_codex()),
+            (
+                NativeCliKind::Pi,
+                configure_pi(native_root.join("pi-sessions")),
+            ),
+            (
+                NativeCliKind::ClaudeCode,
+                configure_claude(native_root.join("claude")),
+            ),
+        ],
     )?);
     info!(
         address = %local_addr,

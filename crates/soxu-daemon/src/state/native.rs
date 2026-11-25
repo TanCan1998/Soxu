@@ -3,8 +3,8 @@
 use super::{DaemonState, internal_err, lock_err, not_found_err};
 use chrono::Utc;
 use soxu_drivers::{
-    DriverError, DriverEvent, NativeDriver, Outcome, RunRequest, RunTarget, RunningTurn,
-    SessionMode, TurnControl,
+    DriverError, DriverEvent, NativeCliKind, NativeDriver, Outcome, RunRequest, RunTarget,
+    RunningTurn, SessionMode, TurnControl,
 };
 use soxu_protocol::{
     ActionableError, ActiveTurnBehavior, DaemonEvent, ErrorCode, LostControlNotice,
@@ -12,7 +12,7 @@ use soxu_protocol::{
     RpcRequest, RpcResponse, RpcResultData, SessionSummary, SessionTarget, TurnLifecycleState,
     TurnMessageRole, TurnMessageSnapshot, WorkspaceBucket, WorkspaceIsolation,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -24,8 +24,7 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub(super) struct NativeTurns {
     quick_chat_root: PathBuf,
-    codex: Result<NativeDriver, DriverError>,
-    pi: Result<NativeDriver, DriverError>,
+    drivers: HashMap<NativeCliKind, Result<NativeDriver, DriverError>>,
     active: Mutex<ActiveTurns>,
 }
 
@@ -33,6 +32,7 @@ pub(super) struct NativeTurns {
 enum ReadOnlyAgent {
     Codex,
     Pi,
+    Claude,
 }
 
 impl ReadOnlyAgent {
@@ -41,12 +41,13 @@ impl ReadOnlyAgent {
             match session.agent_id.as_str() {
                 "codex" => return Ok(Self::Codex),
                 "pi" => return Ok(Self::Pi),
+                "claude" => return Ok(Self::Claude),
                 _ => {}
             }
         }
         Err(turn_error(
             ErrorCode::DriverUnavailable,
-            "当前只接通未归档的 Codex 和 Pi 只读会话",
+            "当前只接通未归档的 Codex、Pi 和 Claude Code 只读会话",
             "请选择已配置的代理与只读权限，或新建只读快速对话",
         ))
     }
@@ -55,22 +56,32 @@ impl ReadOnlyAgent {
         match self {
             Self::Codex => "Codex",
             Self::Pi => "Pi",
+            Self::Claude => "Claude Code",
+        }
+    }
+
+    fn kind(self) -> NativeCliKind {
+        match self {
+            Self::Codex => NativeCliKind::Codex,
+            Self::Pi => NativeCliKind::Pi,
+            Self::Claude => NativeCliKind::ClaudeCode,
         }
     }
 
     fn driver(self, runtime: &NativeTurns) -> Result<&NativeDriver, ActionableError> {
-        match self {
-            Self::Codex => &runtime.codex,
-            Self::Pi => &runtime.pi,
-        }
-        .as_ref()
-        .map_err(|error| self.driver_error(error))
+        runtime
+            .drivers
+            .get(&self.kind())
+            .unwrap_or(&Err(DriverError::BinaryNotFound))
+            .as_ref()
+            .map_err(|error| self.driver_error(error))
     }
 
     fn driver_error(self, error: &DriverError) -> ActionableError {
         let advice = match self {
             Self::Codex => "请检查本机 Codex，或通过 SOXU_CODEX_EXE 指定原生可执行文件",
             Self::Pi => "请通过 SOXU_PI_EXE 指定可信可执行文件，使用 Node 时同时设置 SOXU_PI_ENTRY",
+            Self::Claude => "请通过 SOXU_CLAUDE_EXE 指定可信 Claude Code 可执行文件",
         };
         turn_error(ErrorCode::DriverUnavailable, error.to_string(), advice)
     }
@@ -100,18 +111,39 @@ impl DaemonState {
 
     /// 由守护进程宿主注入可信的只读启动器和快速对话根目录。
     pub fn with_native_drivers(
-        mut self,
+        self,
         quick_chat_root: PathBuf,
         codex: Result<NativeDriver, DriverError>,
         pi: Result<NativeDriver, DriverError>,
     ) -> anyhow::Result<Self> {
+        self.with_native_driver_set(
+            quick_chat_root,
+            [(NativeCliKind::Codex, codex), (NativeCliKind::Pi, pi)],
+        )
+    }
+
+    /// 注册宿主配置的只读原生驱动，启动时恢复中断会话。
+    pub fn with_native_driver_set(
+        mut self,
+        quick_chat_root: PathBuf,
+        configured: impl IntoIterator<Item = (NativeCliKind, Result<NativeDriver, DriverError>)>,
+    ) -> anyhow::Result<Self> {
+        let drivers: HashMap<_, _> = configured.into_iter().collect();
         if !self.require_auth_for_all {
             let orchestrator = self
                 .orchestrator
                 .get_mut()
                 .map_err(|_| lock_err("orchestrator"))?;
             let mut agents = orchestrator.agents().to_vec();
-            if let Some(agent) = agents.iter_mut().find(|agent| agent.agent_id == "pi") {
+            for kind in [NativeCliKind::Pi, NativeCliKind::ClaudeCode] {
+                let (Some(driver), Some(agent)) = (
+                    drivers.get(&kind),
+                    agents
+                        .iter_mut()
+                        .find(|agent| agent.agent_id == kind.binary_name()),
+                ) else {
+                    continue;
+                };
                 agent.permissions.push(PermissionOptionMeta {
                     id: PermissionLevel::ReadOnly,
                     label: "只读对话".to_owned(),
@@ -119,7 +151,7 @@ impl DaemonState {
                     tone: PermissionTone::Neutral,
                 });
                 agent.supports_live_steer = false;
-                agent.installed = pi.is_ok();
+                agent.installed = driver.is_ok();
             }
             orchestrator.set_agent_catalog(agents);
         }
@@ -141,8 +173,7 @@ impl DaemonState {
         }
         self.native_turns = Some(NativeTurns {
             quick_chat_root,
-            codex,
-            pi,
+            drivers,
             active: Mutex::new(BTreeMap::new()),
         });
         Ok(self)
@@ -420,14 +451,14 @@ impl DaemonState {
         mut assistant: TurnMessageSnapshot,
     ) {
         let result = tokio::time::timeout(TURN_TIMEOUT, async {
-            let mut pi_session = None;
+            let mut pending_id = None;
             while let Some(event) = turn.next_event().await {
                 match event {
                     DriverEvent::Session { id } if Uuid::parse_str(&id).is_ok() => match agent {
                         ReadOnlyAgent::Codex => self
                             .record_native_session_id(&assistant.session_id, id)
                             .map_err(|_| "原生会话标识无法落盘".to_owned())?,
-                        ReadOnlyAgent::Pi => pi_session = Some(id),
+                        ReadOnlyAgent::Pi | ReadOnlyAgent::Claude => pending_id = Some(id),
                     },
                     DriverEvent::Text(text_delta) => {
                         if assistant.text.len().saturating_add(text_delta.len()) > MAX_REPLY_BYTES {
@@ -445,8 +476,10 @@ impl DaemonState {
                         });
                     }
                     DriverEvent::Finished(Outcome::Succeeded) => {
-                        if agent == ReadOnlyAgent::Pi {
-                            let id = pi_session.ok_or("Pi 未返回有效原生会话标识")?;
+                        if agent != ReadOnlyAgent::Codex {
+                            let id = pending_id.ok_or_else(|| {
+                                format!("{} 未返回有效原生会话标识", agent.name())
+                            })?;
                             self.record_native_session_id(&assistant.session_id, id)
                                 .map_err(|_| "原生会话标识无法落盘".to_owned())?;
                         }

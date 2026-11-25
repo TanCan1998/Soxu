@@ -40,6 +40,17 @@ Pi 通过 `TurnControl::send` 发送 `follow_up`、`steer` 或 `abort`，
 Pi 原生记录保存在 Daemon 数据目录的 `pi-sessions`，继续发消息时沿用原生会话 ID。
 Daemon 使用自己的 FIFO 队列，运行中的纠偏请求会降级为排队。
 
+## Daemon 本机 Claude Code 只读对话
+
+启动 Daemon 前，将 `SOXU_CLAUDE_EXE` 指向真实 Claude Code 可执行文件的绝对路径。
+Daemon 把 `CLAUDE_CONFIG_DIR` 设置为自身数据目录下的 `claude`，并从进程环境继承
+模型服务配置。可通过 Daemon 的启动环境提供 `ANTHROPIC_API_KEY` 和可选的
+`ANTHROPIC_BASE_URL`。会话与该运行环境的配置均留在独立目录。
+
+使用 `soxu chat new --agent claude --read-only` 创建快聊，再用 `soxu chat send`
+和 `soxu chat stop` 投递或停止。Daemon 使用 Claude Code 的安全和受限模式，
+关闭工具、MCP、斜杠命令与项目自定义，续接成功的会话时沿用原生 UUID。
+
 ## 逐驱动证据
 
 下列本机版本是本次核对的版本。常规隔离测试验证七种事件格式。实际登录推理已
@@ -50,7 +61,7 @@ Daemon 使用自己的 FIFO 队列，运行中的纠偏请求会降级为排队�
 | --- | --- | --- |
 | Codex 0.172.0 | `exec --json`；`thread.started`、`item.completed`、`turn.completed`；轮次、输入输出和缓存 token | `rollout-*.jsonl`，`exec resume/fork`；已登录烟测与回环续接通过 |
 | Pi 1.5.2 | `--mode rpc`；`message_update`、`agent_settled`；模型步骤、token、成本、上下文 | Session JSONL，`--session` / `--fork`；真实 Pi 经 Daemon 接回环模型夹具，通过两轮流式续接并沿用同一会话 ID |
-| Claude Code 2.1.331 | `--print --output-format stream-json --verbose`；部分文本、`result`、报告的轮次、token 与美元成本 | `projects/<cwd>/<id>.jsonl`，`--resume` / `--fork-session`；本机帮助、官方 CLI 参考、Claude Agent SDK 的 *Building a session browser* 与夹具 |
+| Claude Code 2.1.331 | `--print --output-format stream-json --verbose`；部分文本、`result`、报告的轮次、token 与美元成本 | `projects/<cwd>/<id>.jsonl`，`--resume` / `--fork-session`；真实 Claude Code 经 Daemon 接本机模型夹具，两轮回复使用同一 UUID，记录落在隔离目录 |
 | OpenCode | `run --standalone --format json`；`text`、`tool_use`、`step_finish`；步骤、token、缓存、成本和工具执行时长 | `--session` / `--fork`；上游 `packages/cli/src/run/{run,noninteractive}.ts` 与夹具。本机不在 PATH，SQLite 历史扫描不可用 |
 | Antigravity 1.5.16 | `--print --output-format stream-json`；`init`、`step_update`、`result`；步骤、时长、轮次与 token | 已知会话 ID 可使用 `--conversation`；本机帮助、Google Antigravity *Headless mode* 与夹具。历史扫描和 Fork 不可用 |
 | Copilot 1.0.114 | `--output-format json --stream on`；助手增量、轮次结束与有报告的用量、上下文和延迟 | `session-state/<id>/events.jsonl`，`--resume=<id>`；本机帮助、GitHub *Streaming session events*、配置目录参考与夹具。Fork 不可用 |

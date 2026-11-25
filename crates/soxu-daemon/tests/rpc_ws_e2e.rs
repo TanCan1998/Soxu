@@ -42,13 +42,14 @@ async fn spawn_daemon(
     Arc<DaemonState>,
     tokio::task::JoinHandle<()>,
 ) {
-    spawn_daemon_with_drivers(dir, driver, None).await
+    spawn_daemon_with_drivers(dir, driver, NativeCliKind::Pi, None).await
 }
 
 async fn spawn_daemon_with_drivers(
     dir: &TempDir,
     codex: Option<NativeDriver>,
-    pi: Option<NativeDriver>,
+    additional_kind: NativeCliKind,
+    additional: Option<NativeDriver>,
 ) -> (
     std::net::SocketAddr,
     Arc<DaemonState>,
@@ -60,12 +61,20 @@ async fn spawn_daemon_with_drivers(
     let addr = listener.local_addr().expect("read local addr");
     let endpoint = format!("http://{addr}");
     let state = DaemonState::open(Some(dir.path()), &endpoint, false).expect("open daemon state");
-    let state = Arc::new(if codex.is_some() || pi.is_some() {
+    let state = Arc::new(if codex.is_some() || additional.is_some() {
         state
-            .with_native_drivers(
+            .with_native_driver_set(
                 dir.path().join("quick-chats"),
-                codex.ok_or(DriverError::BinaryNotFound),
-                pi.ok_or(DriverError::BinaryNotFound),
+                [
+                    (
+                        NativeCliKind::Codex,
+                        codex.ok_or(DriverError::BinaryNotFound),
+                    ),
+                    (
+                        additional_kind,
+                        additional.ok_or(DriverError::BinaryNotFound),
+                    ),
+                ],
             )
             .expect("recover previous native turns")
     } else {
@@ -269,13 +278,39 @@ async fn native_codex_http_ws_fifo_stop_failure_and_persistence() {
 
 #[tokio::test]
 async fn native_pi_read_only_rpc_resume_cancel_fifo_and_restart() {
-    let dir = TempDir::new().expect("create Pi daemon data dir");
-    let pi = || native_fixture(NativeCliKind::Pi, "pi.cjs");
+    assert_read_only_rpc_flow(
+        NativeCliKind::Pi,
+        "Pi",
+        "pi.cjs",
+        "eeddccbb-1234-4234-8234-eeddccbbaa99",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn native_claude_read_only_rpc_resume_cancel_fifo_and_restart() {
+    assert_read_only_rpc_flow(
+        NativeCliKind::ClaudeCode,
+        "Claude Code",
+        "claude.cjs",
+        "7788eeff-1234-4234-8234-7788eeff9900",
+    )
+    .await;
+}
+
+async fn assert_read_only_rpc_flow(
+    kind: NativeCliKind,
+    label: &str,
+    fixture: &str,
+    expected_id: &str,
+) {
+    let dir = TempDir::new().expect("create native daemon data dir");
+    let driver = || native_fixture(kind, fixture);
     let (addr, state, handle) =
-        spawn_daemon_with_drivers(&dir, Some(codex_fixture()), Some(pi())).await;
+        spawn_daemon_with_drivers(&dir, Some(codex_fixture()), kind, Some(driver())).await;
     let create = |permission| RpcCommand::CreateQuickChat {
         title: None,
-        agent_id: "pi".to_owned(),
+        agent_id: kind.binary_name().to_owned(),
         model_id: None,
         permission: Some(permission),
         thinking: None,
@@ -293,16 +328,20 @@ async fn native_pi_read_only_rpc_resume_cancel_fifo_and_restart() {
     )
     .await;
     let session_id = hello.snapshot.sessions[0].session_id.clone();
-    assert_eq!(hello.snapshot.sessions[0].agent_id, "pi");
+    assert_eq!(hello.snapshot.sessions[0].agent_id, kind.binary_name());
+    assert_eq!(
+        hello.snapshot.sessions[0].permission,
+        PermissionLevel::ReadOnly
+    );
     let submit = |text| submit_native(&session_id, text);
     assert!(post_rpc(addr, submit("invalid")).await.ok);
     wait_for_ws_event(&mut ws, |event| {
         matches!(event, DaemonEvent::ErrorRaised { error, .. }
-            if error.summary_zh == "Pi 未返回有效原生会话标识")
+            if error.summary_zh == format!("{label} 未返回有效原生会话标识"))
     })
     .await;
     assert!(
-        state.snapshot().expect("Pi snapshot").sessions[0]
+        state.snapshot().expect("native snapshot").sessions[0]
             .native_session_id
             .is_none()
     );
@@ -310,9 +349,9 @@ async fn native_pi_read_only_rpc_resume_cancel_fifo_and_restart() {
     let done = |event: &DaemonEvent| matches!(event, DaemonEvent::SessionUpdated(session) if session.bucket == WorkspaceBucket::Done);
     assert!(post_rpc(addr, submit("fresh")).await.ok);
     wait_for_ws_event(&mut ws, done).await;
-    assert!(rpc_via_ws(&mut ws, "pi-hold", submit("hold")).await.0.ok);
+    assert!(rpc_via_ws(&mut ws, "hold", submit("hold")).await.0.ok);
     wait_for_ws_event(&mut ws, |event| {
-        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. } if text_delta == "Pi hold")
+        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. } if text_delta == &format!("{label} hold"))
     })
     .await;
     let mut steer = submit("queued");
@@ -344,60 +383,55 @@ async fn native_pi_read_only_rpc_resume_cancel_fifo_and_restart() {
     );
     wait_for_ws_event(&mut ws, done).await;
     assert!(post_rpc(addr, submit("after-stop")).await.ok);
-    for expected in ["Pi queued", "Pi after-stop"] {
+    for expected in [format!("{label} queued"), format!("{label} after-stop")] {
         wait_for_ws_event(&mut ws, |event| {
-            matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. } if text_delta == expected)
+            matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. } if text_delta == &expected)
         })
         .await;
     }
     wait_for_ws_event(&mut ws, done).await;
     assert!(post_rpc(addr, submit("fail")).await.ok);
     wait_for_ws_event(&mut ws, |event| {
-        matches!(event, DaemonEvent::ErrorRaised { error, .. } if error.summary_zh == "Pi 原生回合失败")
+        matches!(event, DaemonEvent::ErrorRaised { error, .. } if error.summary_zh == format!("{label} 原生回合失败"))
     })
     .await;
 
-    let mut interrupted = state.snapshot().expect("Pi snapshot").sessions.remove(0);
+    let mut interrupted = state
+        .snapshot()
+        .expect("native snapshot")
+        .sessions
+        .remove(0);
     let native_id = interrupted.native_session_id.clone();
-    assert_eq!(
-        native_id.as_deref(),
-        Some("eeddccbb-1234-4234-8234-eeddccbbaa99")
-    );
+    assert_eq!(native_id.as_deref(), Some(expected_id));
     assert_eq!(interrupted.bucket, WorkspaceBucket::Failed);
     interrupted.lifecycle = TurnLifecycleState::Running;
     interrupted.bucket = WorkspaceBucket::Running;
     SqliteStore::open(&dir.path().join("soxu-daemon.db"))
-        .expect("open Pi database")
+        .expect("open native database")
         .upsert_session(&interrupted)
-        .expect("simulate interrupted Pi session");
+        .expect("simulate interrupted native session");
     drop(ws);
     handle.abort();
     let _ = handle.await;
     drop(state);
-    let (_, reopened, reopened_handle) = spawn_daemon_with_drivers(&dir, None, Some(pi())).await;
-    let snapshot = reopened.snapshot().expect("restore Pi snapshot");
+    let (_, reopened, reopened_handle) =
+        spawn_daemon_with_drivers(&dir, None, kind, Some(driver())).await;
+    let snapshot = reopened.snapshot().expect("restore native snapshot");
     assert_eq!(snapshot.sessions[0].bucket, WorkspaceBucket::Failed);
     assert_eq!(snapshot.sessions[0].lifecycle, TurnLifecycleState::Idle);
     assert_eq!(snapshot.sessions[0].native_session_id, native_id);
     let messages = reopened
         .list_session_messages(&session_id)
-        .expect("restore Pi messages");
+        .expect("restore native messages");
     let replies: Vec<_> = messages
         .iter()
         .filter(|message| message.role == TurnMessageRole::Assistant)
-        .map(|message| (message.author.as_str(), message.text.as_str()))
+        .map(|message| (message.author.as_str(), message.text.clone()))
         .collect();
     assert_eq!(
         replies,
-        [
-            "Pi invalid",
-            "Pi fresh",
-            "Pi hold",
-            "Pi queued",
-            "Pi after-stop",
-            "Pi fail"
-        ]
-        .map(|text| ("Pi", text))
+        ["invalid", "fresh", "hold", "queued", "after-stop", "fail"]
+            .map(|text| (label, format!("{label} {text}")))
     );
     reopened_handle.abort();
 }

@@ -164,6 +164,8 @@ pub(crate) fn invocation(
                 "--mcp-config",
                 "{\"mcpServers\":{}}",
                 "--safe-mode",
+                "--restricted",
+                "--disable-slash-commands",
             ],
             Input::Text,
         ),
