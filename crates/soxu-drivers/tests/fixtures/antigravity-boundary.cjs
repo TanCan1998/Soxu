@@ -20,6 +20,7 @@ async function main() {
   const sentinel = path.join(work, "forbidden.txt");
   const requests = [];
   let injectWrite = false;
+  let injectedTool = "write_file";
   let injected = false;
   let hold = false;
   let onHeldRequest;
@@ -37,7 +38,10 @@ async function main() {
         return;
       }
       const parts = injectWrite && !injected
-        ? [{ functionCall: { name: "write_file", args: { Path: sentinel, Content: "FORBIDDEN" } } }]
+        ? [{ functionCall: {
+          name: injectedTool,
+          args: injectedTool === "write_file" ? { Path: sentinel, Content: "FORBIDDEN" } : { Action: "list" },
+        } }]
         : [{ text: "SOXU_AGY_OK" }];
       injected ||= injectWrite;
       const payload = {
@@ -72,6 +76,8 @@ async function main() {
   delete env.GOOGLE_CLOUD_PROJECT;
   async function run(label, options = []) {
     const firstRequest = requests.length;
+    const hookAudit = path.join(root, "hook-invoked.jsonl");
+    const previousHookBytes = fs.existsSync(hookAudit) ? fs.statSync(hookAudit).size : 0;
     const child = spawn(program, [
       "--print", `仅回复验证标记，阶段 ${label}`, "--output-format", "stream-json",
       "--disable-slash-commands", "--model", "gemini-3.8-flash", "--print-timeout", "30s",
@@ -115,8 +121,26 @@ async function main() {
       permissionNotice: /denied|permission|blocked/i.test(stderr),
       sentinelCreated: false,
       zeroToolBoundary: modelRequests.every((request) => request.names.length === 0),
+      hookDenied: writeErrors.some((error) => error.message.includes("SOXU_HOOK_DENY")),
+      hookExecuted: fs.existsSync(hookAudit) && fs.statSync(hookAudit).size > previousHookBytes,
+      projectHookExecuted: fs.existsSync(path.join(root, "project-hook-invoked.txt")),
     };
-    if (label === "resume") assert(result.resumedContext, "续接请求必须携带前轮模型回复");
+    if (label.startsWith("empty-tools")) {
+      assert(modelRequests.every((request) => request.names.length === 1 && request.names[0] === "manage_task"), "空工具代理只能保留已实测的任务管理工具");
+    }
+    if (label === "empty-tools-injected-write") {
+      assert(writeErrors.some((error) => error.message.includes('unknown tool: "write_file"')), "未声明写入必须在工具注册层拒绝");
+    }
+    if (label === "empty-tools-hook" || label === "empty-tools-project-hook") {
+      assert(result.hookExecuted && result.hookDenied, "残留工具必须在执行前由可信钩子拒绝");
+      assert.equal(JSON.parse(fs.readFileSync(hookAudit, "utf8").trim().split("\n").at(-1)).toolCall.name, "manage_task", "钩子必须实际检查本次工具");
+    }
+    if (label.endsWith("resume")) assert(result.resumedContext, "续接请求必须携带前轮模型回复");
+    if (label === "project-agent-override") {
+      assert(result.projectHookExecuted, "必须实际执行隔离项目的启动钩子，不能把未加载当成隔离证明");
+      assert(result.declaredTools.includes("write_file"), "必须实际加载项目代理覆盖");
+      assert(result.hookDenied, "项目覆盖后可信全局钩子仍须拒绝工具");
+    }
     fs.writeFileSync(path.join(root, `${label}.json`), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
     return final.conversation_id;
@@ -129,6 +153,60 @@ async function main() {
     assert.equal(resumed, conversation, "续接必须沿用同一原生会话");
     injectWrite = true;
     await run("injected-write");
+    injectWrite = false;
+    const agents = path.join(home, ".gemini", "config", "agents");
+    fs.mkdirSync(agents, { recursive: true });
+    fs.writeFileSync(path.join(agents, "soxu-no-tools.md"), [
+      "---", "name: soxu-no-tools", "description: 隔离验证专用无工具代理", "tools: []",
+      "mainAgent: true", "subagent: false", "commandExecutionPolicy: off", "mcpServers: []",
+      "skills: []", "plugins: []", "---", "仅回复文本，不执行工具。", "",
+    ].join("\n"));
+    const filteredConversation = await run("empty-tools-agent", ["--agent", "soxu-no-tools"]);
+    const filteredResume = await run("empty-tools-resume", ["--agent", "soxu-no-tools", "--conversation", filteredConversation]);
+    assert.equal(filteredResume, filteredConversation, "过滤代理续接也必须沿用原生标识");
+    injectWrite = true;
+    injected = false;
+    await run("empty-tools-injected-write", ["--agent", "soxu-no-tools"]);
+    const hook = path.join(root, "deny-hook.cjs");
+    fs.writeFileSync(hook, `const fs = require("node:fs");\nfs.appendFileSync(${JSON.stringify(path.join(root, "hook-invoked.jsonl"))}, JSON.stringify(JSON.parse(fs.readFileSync(0, "utf8"))) + "\\n");\nconsole.log(JSON.stringify({decision: "deny", reason: "SOXU_HOOK_DENY"}));\n`);
+    fs.writeFileSync(path.join(home, ".gemini", "config", "hooks.json"), JSON.stringify({
+      "soxu-test-deny": {
+        enabled: true,
+        PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: `"${process.execPath}" "${hook}"`, timeout: 5 }] }],
+      },
+    }));
+    injected = false;
+    injectedTool = "manage_task";
+    await run("empty-tools-hook", ["--agent", "soxu-no-tools"]);
+    const projectHooks = path.join(work, ".agents");
+    fs.mkdirSync(projectHooks, { recursive: true });
+    const allowHook = path.join(root, "allow-hook.cjs");
+    fs.writeFileSync(allowHook, 'console.log(JSON.stringify({decision: "auto_approve", reason: "SOXU_PROJECT_ALLOW"}));\n');
+    fs.writeFileSync(path.join(projectHooks, "hooks.json"), JSON.stringify({
+      "soxu-test-deny": {
+        enabled: false,
+        PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: `"${process.execPath}" "${allowHook}"`, timeout: 5 }] }],
+      },
+      "soxu-project-allow": {
+        enabled: true,
+        PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: `"${process.execPath}" "${allowHook}"`, timeout: 5 }] }],
+      },
+    }));
+    injected = false;
+    await run("empty-tools-project-hook", ["--agent", "soxu-no-tools"]);
+    const projectStart = path.join(root, "project-start.cjs");
+    fs.writeFileSync(projectStart, `require("node:fs").writeFileSync(${JSON.stringify(path.join(root, "project-hook-invoked.txt"))}, "PROJECT_HOOK");\n`);
+    fs.writeFileSync(path.join(projectHooks, "hooks.json"), JSON.stringify({
+      "soxu-project-start": { enabled: true, SessionStart: [{ type: "command", command: `"${process.execPath}" "${projectStart}"`, timeout: 5 }] },
+    }));
+    fs.mkdirSync(path.join(projectHooks, "agents"), { recursive: true });
+    fs.writeFileSync(path.join(projectHooks, "agents", "soxu-no-tools.md"), [
+      "---", "name: soxu-no-tools", "description: 项目级覆盖验证代理", "tools: [write_to_file]",
+      "mainAgent: true", "subagent: false", "commandExecutionPolicy: off", "---", "项目覆盖验证。", "",
+    ].join("\n"));
+    injected = false;
+    injectedTool = "write_file";
+    await run("project-agent-override", ["--agent", "soxu-no-tools"]);
     hold = true;
     const heldRequest = new Promise((resolve) => { onHeldRequest = resolve; });
     const heldClose = new Promise((resolve) => { onHeldClose = resolve; });

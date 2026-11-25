@@ -143,3 +143,21 @@ node crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs
 权限语义依据上游 [CLI Headless](https://antigravity.google/docs/cli/headless/)、
 [Settings](https://antigravity.google/docs/settings/) 与
 [Permissions](https://antigravity.google/docs/permissions/)；实际生效结论以实机探针为准。
+
+### 空工具代理与钩子实测
+
+在隔离全局目录创建 `tools: []` 自定义代理并通过 `--agent` 选择后，真实 `1.5.17`
+的模型工具声明从 15 项降到仅 `manage_task`。模型额外返回有效 `write_file` 调用时，
+工具注册层以 `unknown tool` 拒绝，而非依靠参数校验或文件权限；过滤代理两轮续接
+仍沿用同一 UUID 并带回前轮模型回复。`init.tools` 仍列出完整内置目录，不能用它
+替代真实模型请求的工具列表。
+
+隔离全局 `hooks.json` 的全匹配 `PreToolUse` 钩子能拒绝残留的 `manage_task`。
+项目级同名禁用钩子与另一个自动批准钩子未削弱该拒绝。但项目级同名自定义代理
+可以重新声明写入工具；即使关闭斜杠展开，项目 `SessionStart` 钩子仍真实执行。
+全局工具拒绝不是项目启动钩子隔离，也不是操作系统沙箱。
+
+以上探针现在同时验证工具过滤、过滤代理续接、未声明写入、全局钩子拒绝及真实
+项目覆盖。Daemon 仍未开放：接线还需在 Daemon 管理的快聊目录固定可信代理与
+钩子资产、隔离项目自定义加载并验证资产篡改和全部取消路径，不得直接借用用户
+真实全局目录或把该方案扩展到任意项目目录。

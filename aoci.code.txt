@@ -87,7 +87,7 @@ main.rs[EU4T]: F:Soxu 桌面工作台占位入口，启动时打印应用版本�
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/===
 Cargo.toml[FV5T]: F:声明驱动 crate 的包信息、工作区 lint 设置和依赖 | R:code:Cargo.toml | A:soxu-drivers | S:-
-README.md[SE6S]: F:说明七种 CLI 的启动控制、流式事件、历史接口、Daemon 配置与实机安全边界 | R:code:crates/soxu-daemon/src/main.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs | A:逐驱动证据,Antigravity 只读边界调查,验证命令 | S:Antigravity 1.5.17 的续接、写入拒绝和取消已验证，但仍声明 15 种工具，Daemon 未开放。成功终态可包含被拒绝工具。探针复制 EXE 并隔离用户目录，不触碰真实配置。
+README.md[SE6S]: F:说明七种 CLI 启动控制、历史接口、Daemon 配置及实机工具和配置隔离边界 | R:code:crates/soxu-daemon/src/main.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs | A:逐驱动证据,Antigravity 只读边界调查,空工具代理与钩子实测 | S:Antigravity 空工具代理仍声明 manage_task，全局钩子可拒绝。项目代理可恢复写入声明，关闭斜杠展开仍执行项目启动钩子。init 工具目录不等于模型声明；Daemon 未开放，探针只用隔离副本。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/src/===
 lib.rs[IE6T]: F:定义七种本机原生 Agent CLI 及其程序名，公开进程控制、能力协商、流式事件和只读历史发现入口 | R:code:crates/soxu-drivers/src/events.rs,code:crates/soxu-drivers/src/history.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/src/process.rs | A:NativeCliKind,NativeCliKind::ALL,NativeCliKind::binary_name | S:保持 snake_case 序列化标识与已有程序名映射，例如 antigravity 对应 agy。
@@ -131,7 +131,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录项目核心架构决策（ADR-001~006），包含 GPUI + Daemon、Native CLI 复用、Magpie 发现及 React 19 + shadcn/ui M0.5 决策 | R:code:AGENTS.md,code:design-system/soxu/MASTER.md | A:ADR-001,ADR-002,ADR-003,ADR-005,ADR-006 | S:已拍板方案不可无故推翻；明确全局 CLI 目录只读、M0.5 强制使用 shadcn/ui + Tailwind v4 与开源双字体
-PROGRESS.md[SW6T]: F:记录里程碑、Paseo 并行交付顺序、实机验收边界和跨会话队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:OpenCode 快聊经 #27 合入，M2h 完成但 M2 未完成。#26 的 Antigravity 续接、写入拒绝和取消通过，仍声明工具，路由保持关闭；Copilot 项目钩子隔离尚未闭合。
+PROGRESS.md[SW6T]: F:记录里程碑、Paseo 交付顺序、实机验收与下一步安全调查队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:OpenCode #27 和 Antigravity 防护 #28 已合入。#26 继续验证工具过滤与可信钩子，项目代理覆盖和启动钩子仍可加载；Daemon 路由关闭，M2 未完成，下一步验证隔离快聊资产与篡改边界。
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
