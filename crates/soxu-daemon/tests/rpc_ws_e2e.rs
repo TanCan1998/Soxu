@@ -2,7 +2,7 @@
 
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
-use soxu_daemon::{DaemonState, SqliteStore, build_router};
+use soxu_daemon::{DaemonState, NativeAssetGuard, SqliteStore, build_router};
 use soxu_drivers::{DriverError, NativeCliKind, NativeDriver};
 use soxu_protocol::{
     ActiveTurnBehavior, ApprovalItemSnapshot, ApprovalResolutionKind, AskQuestionOption,
@@ -274,6 +274,232 @@ async fn native_codex_http_ws_fifo_stop_failure_and_persistence() {
         .map(|msg| msg.text.as_str())
         .collect();
     assert_eq!(replies, ["回复 hold", "回复 queued", "回复 after-stop", ""]);
+}
+
+async fn spawn_guarded_daemon(
+    dir: &TempDir,
+) -> (
+    std::net::SocketAddr,
+    Arc<DaemonState>,
+    tokio::task::JoinHandle<()>,
+) {
+    let asset = dir.path().join("hooks.json");
+    std::fs::write(&asset, b"trusted").expect("write trusted fixture");
+    let driver = native_fixture(NativeCliKind::Codex, "guarded.cjs").with_env(
+        "SOXU_TEST_LAUNCH_LOG",
+        Some(dir.path().join("launch.log").into_os_string()),
+    );
+    let guard = NativeAssetGuard::new(
+        dir.path().to_owned(),
+        [(PathBuf::from("hooks.json"), b"trusted".to_vec())],
+    )
+    .expect("declare trusted asset");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind fixture");
+    let addr = listener.local_addr().expect("fixture address");
+    let state = Arc::new(
+        DaemonState::open(Some(dir.path()), &format!("http://{addr}"), false)
+            .expect("open fixture")
+            .with_native_driver_set(
+                dir.path().join("quick-chats"),
+                [(NativeCliKind::Codex, Ok(driver))],
+            )
+            .expect("register fixture")
+            .with_native_asset_guard(NativeCliKind::Codex, guard)
+            .expect("bind guard"),
+    );
+    let router = build_router(Arc::clone(&state));
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    (addr, state, handle)
+}
+
+async fn create_guarded_session(addr: std::net::SocketAddr, state: &DaemonState) -> String {
+    let created = post_rpc(
+        addr,
+        RpcCommand::CreateQuickChat {
+            title: None,
+            agent_id: "codex".to_owned(),
+            model_id: None,
+            permission: Some(PermissionLevel::ReadOnly),
+            thinking: None,
+        },
+    )
+    .await;
+    assert!(matches!(
+        created.result,
+        Some(RpcResultData::QuickChatCreated(_))
+    ));
+    state.snapshot().expect("guarded snapshot").sessions[0]
+        .session_id
+        .clone()
+}
+
+#[tokio::test]
+async fn native_asset_guard_rechecks_resume_before_spawn_and_persistence() {
+    let dir = TempDir::new().expect("isolated guarded fixture");
+    let (addr, state, handle) = spawn_guarded_daemon(&dir).await;
+    let session_id = create_guarded_session(addr, &state).await;
+    let (mut ws, _) = connect_ws(
+        addr,
+        ClientHello {
+            client_kind: ClientKind::Desktop,
+            client_version: "test".to_owned(),
+            protocol_version: soxu_protocol::PROTOCOL_VERSION,
+            after_seq: None,
+            device_id: None,
+        },
+    )
+    .await;
+    let done = |event: &DaemonEvent| matches!(event, DaemonEvent::SessionUpdated(session) if session.bucket == WorkspaceBucket::Done);
+    assert!(post_rpc(addr, submit_native(&session_id, "first")).await.ok);
+    wait_for_ws_event(&mut ws, done).await;
+    assert!(
+        post_rpc(addr, submit_native(&session_id, "resume"))
+            .await
+            .ok
+    );
+    wait_for_ws_event(&mut ws, done).await;
+    std::fs::write(dir.path().join("hooks.json"), b"allowed").expect("same-length tampering");
+    let denied = post_rpc(addr, submit_native(&session_id, "tampered")).await;
+    assert_eq!(
+        denied.error.expect("guard error").code,
+        ErrorCode::DriverUnavailable
+    );
+    std::fs::rename(
+        dir.path().join("hooks.json"),
+        dir.path().join("saved-hooks.json"),
+    )
+    .expect("missing asset");
+    assert!(
+        !post_rpc(addr, submit_native(&session_id, "missing"))
+            .await
+            .ok
+    );
+    std::fs::write(dir.path().join("hooks.json"), b"trusted").expect("restore asset");
+    std::fs::create_dir(dir.path().join("quick-chats/.agents")).expect("ancestor project override");
+    assert!(
+        !post_rpc(addr, submit_native(&session_id, "project-override"))
+            .await
+            .ok
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("launch.log")).expect("spawn audit"),
+        "first\nresume\n"
+    );
+    assert_eq!(
+        state
+            .list_session_messages(&session_id)
+            .expect("persisted accepted turns")
+            .len(),
+        4
+    );
+    assert_eq!(
+        state.snapshot().expect("snapshot").sessions[0].bucket,
+        WorkspaceBucket::Done
+    );
+    handle.abort();
+}
+
+#[tokio::test]
+async fn native_asset_guard_rechecks_automatic_fifo_launch() {
+    let dir = TempDir::new().expect("isolated guarded fixture");
+    let (addr, state, handle) = spawn_guarded_daemon(&dir).await;
+    let session_id = create_guarded_session(addr, &state).await;
+    let (mut ws, _) = connect_ws(
+        addr,
+        ClientHello {
+            client_kind: ClientKind::Desktop,
+            client_version: "test".to_owned(),
+            protocol_version: soxu_protocol::PROTOCOL_VERSION,
+            after_seq: None,
+            device_id: None,
+        },
+    )
+    .await;
+    assert!(
+        post_rpc(addr, submit_native(&session_id, "delayed"))
+            .await
+            .ok
+    );
+    wait_for_ws_event(&mut ws, |event| matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. } if text_delta == "delayed")).await;
+    let queued = post_rpc(addr, submit_native(&session_id, "queued")).await;
+    assert!(matches!(
+        queued.result,
+        Some(RpcResultData::TurnSubmitted {
+            queued_id: Some(_),
+            ..
+        })
+    ));
+    std::fs::write(dir.path().join("hooks.json"), b"allowed").expect("tamper before dequeue");
+    wait_for_ws_event(&mut ws, |event| matches!(event, DaemonEvent::ErrorRaised { error, .. } if error.summary_zh == "原生启动资产或快聊目录未通过可信校验")).await;
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("launch.log")).expect("spawn audit"),
+        "delayed\n"
+    );
+    assert_eq!(
+        state
+            .list_session_messages(&session_id)
+            .expect("persisted first turn")
+            .len(),
+        2
+    );
+    std::fs::write(dir.path().join("hooks.json"), b"trusted").expect("restore guard");
+    assert!(
+        post_rpc(addr, submit_native(&session_id, "after-restore"))
+            .await
+            .ok
+    );
+    for expected in ["queued", "after-restore"] {
+        wait_for_ws_event(&mut ws, |event| matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. } if text_delta == expected)).await;
+    }
+    wait_for_ws_event(&mut ws, |event| matches!(event, DaemonEvent::SessionUpdated(session) if session.bucket == WorkspaceBucket::Done)).await;
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("launch.log")).expect("restored spawn audit"),
+        "delayed\nqueued\nafter-restore\n"
+    );
+    handle.abort();
+}
+
+#[tokio::test]
+async fn native_asset_guard_does_not_enable_antigravity_route() {
+    let dir = TempDir::new().expect("isolated blocked driver");
+    let (addr, state, handle) = spawn_daemon_with_drivers(
+        &dir,
+        None,
+        NativeCliKind::Antigravity,
+        Some(native_fixture(NativeCliKind::Antigravity, "guarded.cjs")),
+    )
+    .await;
+    let created = post_rpc(
+        addr,
+        RpcCommand::CreateQuickChat {
+            title: None,
+            agent_id: "agy".to_owned(),
+            model_id: None,
+            permission: Some(PermissionLevel::ReadOnly),
+            thinking: None,
+        },
+    )
+    .await;
+    assert!(created.ok);
+    let session_id = state.snapshot().expect("blocked driver snapshot").sessions[0]
+        .session_id
+        .clone();
+    let denied = post_rpc(addr, submit_native(&session_id, "never-spawn")).await;
+    assert_eq!(
+        denied.error.expect("closed route error").code,
+        ErrorCode::DriverUnavailable
+    );
+    assert!(
+        state
+            .list_session_messages(&session_id)
+            .expect("no launch persistence")
+            .is_empty()
+    );
+    handle.abort();
 }
 
 #[tokio::test]

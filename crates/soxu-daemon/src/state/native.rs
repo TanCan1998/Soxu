@@ -1,6 +1,7 @@
 //! 将本机只读回合接入既有会话与事件流。
 
 use super::{DaemonState, internal_err, lock_err, not_found_err};
+use crate::NativeAssetGuard;
 use chrono::Utc;
 use soxu_drivers::{
     DriverError, DriverEvent, NativeCliKind, NativeDriver, Outcome, RunRequest, RunTarget,
@@ -25,6 +26,7 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(300);
 pub(super) struct NativeTurns {
     quick_chat_root: PathBuf,
     drivers: HashMap<NativeCliKind, Result<NativeDriver, DriverError>>,
+    asset_guards: HashMap<NativeCliKind, NativeAssetGuard>,
     active: Mutex<ActiveTurns>,
 }
 
@@ -225,8 +227,26 @@ impl DaemonState {
         self.native_turns = Some(NativeTurns {
             quick_chat_root,
             drivers,
+            asset_guards: HashMap::new(),
             active: Mutex::new(BTreeMap::new()),
         });
+        Ok(self)
+    }
+
+    pub fn with_native_asset_guard(
+        mut self,
+        kind: NativeCliKind,
+        guard: NativeAssetGuard,
+    ) -> anyhow::Result<Self> {
+        let runtime = self
+            .native_turns
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("须先注册原生驱动集合"))?;
+        if !runtime.drivers.get(&kind).is_some_and(Result::is_ok) {
+            anyhow::bail!("资产校验只能绑定已配置的可信驱动");
+        }
+        guard.verify()?;
+        runtime.asset_guards.insert(kind, guard);
         Ok(self)
     }
 
@@ -450,6 +470,17 @@ impl DaemonState {
             .store
             .next_turn_index(&session.session_id)
             .map_err(internal_err)?;
+        if let Some(guard) = runtime.asset_guards.get(&agent.kind()) {
+            guard
+                .verify_launch_directory(request.target.directory())
+                .map_err(|_| {
+                    turn_error(
+                        ErrorCode::DriverUnavailable,
+                        "原生启动资产或快聊目录未通过可信校验",
+                        "请恢复宿主声明的可信资产，并检查隔离目录是否被替换",
+                    )
+                })?;
+        }
         let turn = driver
             .start(request)
             .map_err(|error| agent.driver_error(&error))?;
