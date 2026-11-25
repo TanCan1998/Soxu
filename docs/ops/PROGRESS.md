@@ -6,7 +6,7 @@
 
 ## 1. 当前总体状态
 
-- **当前所处阶段**：`M0: Bootstrap & Engineering Governance` 与 **`M0.5: Pure Black Design System & Dual Prototypes`（PR `#4`）均已完成**；已结合最新 UI/UX 7 份规范与 8 个 Rust Crate 现状重排 **M0–M6 全景路线图与 Paseo 串并行开发顺序**，紧接在 `main` 分支正式启动 **`M1: Protocol v1, Domain Core & Daemon Spine`**。
+- **当前所处阶段**：`M0` 与 **`M0.5: Pure Black Design System & Dual Prototypes`（PR `#4`）均已合入 `main` 并关闭收口**，仓库已开启合并自动删支（`delete_branch_on_merge = true`）并清理全部遗留历史分支；当前正在推进 **M1 Wave 1.1（Issue `#5`：`Cargo.toml` 公共依赖与 `soxu-protocol` v1 全量契约冻结）**，合入 `main` 后立即双路并行启动 **Wave 1.2**。
 - **参考项目与索引进度（已全部完成）**：
   - [x] 拉取参考项目至 `.refs/`：`paseo`（7,818 文件）、`codeg`（3,324 文件）、`padu`（1,157 文件）
   - [x] **AOCI 认知索引已全部原子入库**：`padu`（方案 A 全量 **1,086** 条）、`paseo`（方案 B 宏观核心 **202** 条）、`codeg`（方案 B 宏观核心 **177** 条）、`Soxu` 主仓（全量对齐）
@@ -20,7 +20,7 @@
 | :--- | :--- | :--- | :--- |
 | **M0** | Bootstrap & Engineering Governance | ✅ 已完成 | 仓库骨架（Rust 2024 + PWA）、`.githooks` + `gitleaks` 隐私与 Emoji 门禁、最新 Actions CI、三层文档、Paseo `git` 项目绑定 |
 | **M0.5** | Pure Black Design System & Dual Prototypes | ✅ 已完成 | 纯黑 7 级海拔 `tokens.json` + `shadcn/ui` 变量、MASTER + 7 份分页面规范、React 19 + `shadcn/ui` + Tailwind v4 双端原型与 7 分区独立设置、单文件桌面预览 `preview.html`、移动遥控 PWA 原型（PR `#4`） |
-| **M1** | Protocol v1, Domain Core & Daemon Spine | ⏳ 待启动 | `soxu-protocol` 全量 RPC/WS `seq` 契约、快速对话与项目二级树模型、6 档权限与高危红线审批 / `PendingUserInput` 状态机、7 代理能力协商、本地持久化与 `#offer=` / 6 位码配对鉴权 |
+| **M1** | Protocol v1, Domain Core & Daemon Spine | 🚧 进行中（Wave 1.1 `#5`） | `soxu-protocol` 全量 RPC/WS `seq` 契约、快速对话与项目二级树模型、6 档权限与高危红线审批 / `PendingUserInput` 状态机、7 代理能力协商、本地持久化与 `#offer=` / 6 位码配对鉴权 |
 | **M2** | Magpie Discovery & 7 Native CLI Drivers | ⏳ 待启动 | `soxu-magpie` 双态只读拓扑 + 原生降级扫描 + 启动环境脱敏透视；`soxu-drivers` 7 大原生 CLI 流式驱动、`Queue`/`Steer`/`Interrupt`、11 项遥测采集、本地历史 Resume/Fork 导入（无项目与本地对话率先跑通） |
 | **M3** | Git Worktree Pool, Checkpoints & Commit Engine | ⏳ 待启动 | `soxu-git` 三合一项目接入、Worktree 隔离池 + `direct` MCP 上下文挂载 + 工作区损坏恢复、三基准 Diff、Checkpoint 三选一安全回退（含 Safety Stash）、拆分式 Git Emoji 提交与门禁预检 |
 | **M4** | Live Mobile PWA & GPUI Workbench Foundation | ⏳ 待启动 | **双轨 100% 正交并行**：`apps/mobile-web` 去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对与 13 组视口验收；`soxu-desktop` GPUI 令牌编译器、双开源字体联动、可扩展 `i18n`、7 层焦点栈与四栏自适应壳层 |
@@ -61,6 +61,6 @@
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 完成 M0–M6 路线图、GitHub Milestones 与 M0.5 文档收口校验，合入 PR `#4` 至 `main` 并关闭 Issue `#3`。
-2. 在 `main` 分支按「Issue -> Paseo 隔离 Worktree」启动 **M1 Wave 1.1**：冻结 `Cargo.toml` 与 `crates/soxu-protocol` 全量 RPC/WS 契约后，并行推进 **Wave 1.2**（`soxu-core` 状态机与 `soxu-daemon`/`soxu-cli` 持久化配对底座）。
+1. 完成 **M1 Wave 1.1（Issue `#5`）** 门禁校验、自动删支 Squash 合入 `main` 并回收 Paseo Worktree。
+2. 基于最新 `main` 双路并行拉起 **M1 Wave 1.2a（Issue `#6`：`soxu-core` 状态桶、能力协商与红线状态机）** 与 **M1 Wave 1.2b（Issue `#7`：`soxu-daemon` + `soxu-cli` 持久化、WS `seq` 增量追平与配对鉴权）**。
 
