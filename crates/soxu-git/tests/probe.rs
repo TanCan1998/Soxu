@@ -278,29 +278,106 @@ async fn preserves_real_merge_conflicts() {
 }
 
 #[tokio::test]
-async fn disables_fsmonitor_and_rejects_external_clean_filters() {
-    let fixture = Fixture::new();
-    let repository = fixture.repo("unsafe-config");
-    fs::write(repository.join("file"), "base\n").expect("base");
-    fixture.commit(&repository);
-    fixture.git(&repository, &["config", "core.fsmonitor", "does-not-exist"]);
-    let before = file_bytes(&fixture.root);
-    fixture
-        .git
-        .probe(&repository)
-        .await
-        .expect("不调用 fsmonitor");
-    assert_eq!(before, file_bytes(&fixture.root));
-    fixture.git(
-        &repository,
-        &["config", "filter.fixture.clean", "does-not-exist"],
-    );
-    let before = file_bytes(&fixture.root);
-    assert!(matches!(
-        fixture.git.probe(&repository).await,
-        Err(GitError::ExternalFilter)
-    ));
-    assert_eq!(before, file_bytes(&fixture.root));
+async fn marker_scripts_prove_local_include_and_worktree_sources_are_safe() {
+    for source in [
+        "local",
+        "include",
+        "conditional_include",
+        "worktree",
+        "worktree_include",
+    ] {
+        for hook in ["clean", "process", "fsmonitor"] {
+            let fixture = Fixture::new();
+            let repository = fixture.repo("repo");
+            fs::write(repository.join("file"), "base\n").expect("base");
+            fs::write(repository.join(".gitattributes"), "file filter=fixture\n")
+                .expect("启用过滤器属性");
+            fixture.commit(&repository);
+            let worktree = source.starts_with("worktree");
+            let directory = if worktree {
+                fixture.git(
+                    &repository,
+                    &["config", "extensions.worktreeConfig", "true"],
+                );
+                fixture.git(
+                    &repository,
+                    &["worktree", "add", "-b", "linked", "../linked"],
+                );
+                fixture.root.join("linked")
+            } else {
+                repository
+            };
+            let git_dir = fixture
+                .git
+                .probe(&directory)
+                .await
+                .expect("配置前探测")
+                .git_dir;
+            let key = if hook == "fsmonitor" {
+                "core.fsmonitor".to_owned()
+            } else {
+                format!("filter.fixture.{hook}")
+            };
+            let command = "sh ../marker.sh";
+            let tail = if hook == "clean" { "cat\n" } else { "exit 1\n" };
+            fs::write(
+                fixture.root.join("marker.sh"),
+                format!("printf executed > ../marker\n{tail}"),
+            )
+            .expect("可执行副作用夹具");
+            fs::write(directory.join("file"), "changed content longer than base\n")
+                .expect("触发状态内容比较");
+            if source.contains("include") {
+                let contents = if hook == "fsmonitor" {
+                    format!("[core]\nfsmonitor = {command}\n")
+                } else {
+                    format!("[filter \"fixture\"]\n{hook} = {command}\n")
+                };
+                fs::write(git_dir.join("marker.config"), contents).expect("include 过滤器配置");
+                let include_key = if source == "conditional_include" {
+                    "includeIf.onbranch:main.path"
+                } else {
+                    "include.path"
+                };
+                let scope = if worktree { "--worktree" } else { "--local" };
+                fixture.git(&directory, &["config", scope, include_key, "marker.config"]);
+            } else {
+                let scope = if worktree { "--worktree" } else { "--local" };
+                fixture.git(&directory, &["config", scope, &key, command]);
+            }
+            let marker = fixture.root.join("marker");
+            let before = file_bytes(&fixture.root);
+            let result = fixture.git.probe(&directory).await;
+            if hook == "fsmonitor" {
+                result.expect("强制禁用 fsmonitor");
+            } else {
+                assert!(
+                    matches!(result, Err(GitError::ExternalFilter)),
+                    "{source}/{hook}: {result:?}"
+                );
+            }
+            assert!(!marker.exists(), "安全探测不得执行 {source}/{hook}");
+            assert_eq!(before, file_bytes(&fixture.root));
+            let control = if hook == "fsmonitor" {
+                fixture.run(
+                    &directory,
+                    &["status", "--porcelain=v2", "--untracked-files=no"],
+                )
+            } else {
+                fixture.run(&directory, &["diff", "--", "file"])
+            };
+            assert!(
+                marker.exists(),
+                "正向对照必须触发 {source}/{hook}：{}",
+                String::from_utf8_lossy(&control.stderr)
+            );
+            assert_eq!(
+                fs::read(marker).expect("正向对照必须真实触发脚本"),
+                b"executed",
+                "{source}/{hook}"
+            );
+        }
+    }
 }
 
 #[cfg(unix)]

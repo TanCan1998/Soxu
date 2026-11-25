@@ -1,16 +1,19 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use tokio::io::AsyncReadExt;
-use tokio::process::Command;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::process::{Child, Command};
 
 use crate::{ParseError, StatusSnapshot, parse_status};
 
 const OUTPUT_LIMIT: u64 = 16 * 1024 * 1024;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GitError {
@@ -129,6 +132,7 @@ impl GitProbe {
                 &root,
                 "config",
                 &[
+                    "--includes",
                     "--null",
                     "--name-only",
                     "--get-regexp",
@@ -214,41 +218,8 @@ impl GitProbe {
         let mut command = self.command(directory);
         command.arg(operation).args(arguments);
         let mut child = command.spawn()?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or(GitError::InvalidMetadata("缺少 stdout 管道"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or(GitError::InvalidMetadata("缺少 stderr 管道"))?;
-        let result = tokio::time::timeout(COMMAND_TIMEOUT, async {
-            tokio::try_join!(
-                async {
-                    let mut bytes = Vec::new();
-                    stdout
-                        .take(OUTPUT_LIMIT + 1)
-                        .read_to_end(&mut bytes)
-                        .await?;
-                    Ok::<_, io::Error>(bytes)
-                },
-                async {
-                    let mut bytes = Vec::new();
-                    stderr
-                        .take(OUTPUT_LIMIT + 1)
-                        .read_to_end(&mut bytes)
-                        .await?;
-                    Ok::<_, io::Error>(bytes)
-                },
-                child.wait(),
-            )
-        })
-        .await
-        .map_err(|_| GitError::Timeout)??;
-        let (stdout, stderr, status) = result;
-        if stdout.len() as u64 > OUTPUT_LIMIT || stderr.len() as u64 > OUTPUT_LIMIT {
-            return Err(GitError::OutputLimit);
-        }
+        let (stdout, stderr, status) =
+            collect_output(&mut child, OUTPUT_LIMIT, COMMAND_TIMEOUT).await?;
         if !status.success() {
             if operation == "config" && status.code() == Some(1) && stderr.is_empty() {
                 return Ok(Vec::new());
@@ -308,6 +279,43 @@ impl GitProbe {
             ]);
         command
     }
+}
+
+async fn read_bounded(reader: impl AsyncRead + Unpin, limit: u64) -> Result<Vec<u8>, GitError> {
+    let mut bytes = Vec::new();
+    reader.take(limit + 1).read_to_end(&mut bytes).await?;
+    if bytes.len() as u64 > limit {
+        return Err(GitError::OutputLimit);
+    }
+    Ok(bytes)
+}
+
+async fn collect_output(
+    child: &mut Child,
+    limit: u64,
+    timeout: Duration,
+) -> Result<(Vec<u8>, Vec<u8>, ExitStatus), GitError> {
+    let result = tokio::time::timeout(timeout, async {
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or(GitError::InvalidMetadata("缺少 stdout 管道"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or(GitError::InvalidMetadata("缺少 stderr 管道"))?;
+        tokio::try_join!(
+            read_bounded(stdout, limit),
+            read_bounded(stderr, limit),
+            async { child.wait().await.map_err(GitError::Io) }
+        )
+    })
+    .await
+    .unwrap_or(Err(GitError::Timeout));
+    if result.is_err() {
+        child.kill().await?;
+    }
+    result
 }
 
 fn null_device() -> &'static OsStr {

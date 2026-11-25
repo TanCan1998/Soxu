@@ -137,6 +137,7 @@ pub fn parse_status(input: &[u8]) -> Result<StatusSnapshot, ParseError> {
     let mut records = input[..input.len() - 1].split(|byte| *byte == 0);
     let mut snapshot = StatusSnapshot::default();
     let mut record_index = 0;
+    let mut oid_length = None;
     while let Some(record) = records.next() {
         record_index += 1;
         let error = |reason| ParseError {
@@ -157,6 +158,9 @@ pub fn parse_status(input: &[u8]) -> Result<StatusSnapshot, ParseError> {
                     return Err(error("头部为空或重复"));
                 }
                 validate_header(name, value).map_err(error)?;
+                if name == b"branch.oid" && value != b"(initial)" {
+                    validate_oid_length(&mut oid_length, value.len()).map_err(error)?;
+                }
                 snapshot.headers.push(StatusHeader {
                     name: name.to_vec(),
                     value: value.to_vec(),
@@ -246,9 +250,29 @@ pub fn parse_status(input: &[u8]) -> Result<StatusSnapshot, ParseError> {
             }
             _ => return Err(error("未知或空记录")),
         };
+        let oids: &[String] = match &entry {
+            StatusEntry::Ordinary(change) => &change.oids,
+            StatusEntry::Renamed(rename) => &rename.change.oids,
+            StatusEntry::Unmerged(change) => &change.oids,
+            StatusEntry::Untracked(_) | StatusEntry::Ignored(_) => &[],
+        };
+        for oid in oids {
+            validate_oid_length(&mut oid_length, oid.len()).map_err(|reason| ParseError {
+                record: record_index,
+                reason,
+            })?;
+        }
         snapshot.entries.push(entry);
     }
     Ok(snapshot)
+}
+
+fn validate_oid_length(expected: &mut Option<usize>, length: usize) -> Result<(), &'static str> {
+    if expected.is_some_and(|expected| expected != length) {
+        return Err("同一状态流中对象标识长度不一致");
+    }
+    *expected = Some(length);
+    Ok(())
 }
 
 fn fields(record: &[u8], count: usize) -> Result<Vec<&[u8]>, &'static str> {

@@ -99,12 +99,12 @@ process.rs[IW8L]: F:用 Tokio 发现和启动可信原生 CLI，处理有界 JSO
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/===
 Cargo.toml[FV5T]: F:声明 soxu-git crate 的包元数据、lint 规则和依赖 | R:code:Cargo.toml | A:soxu-git | S:版本、Rust edition、最低 Rust 版本、许可证、lint 规则和全部依赖均继承自工作区
-README.md[SD6T]: F:说明M3a只读探测接口、原始路径身份、安全限制、临时夹具验证与后续M3任务 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/status.rs | A:消费接口,只读与限制,验证与后续 | S:子模块及外部过滤器失败关闭；不承诺恶意入口或配置竞态下的沙箱与原子快照，Unix真实特殊路径测试仅在Unix执行
+README.md[SD6T]: F:说明M3a只读探测接口、原始路径身份、安全限制、临时夹具验证与后续M3任务 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/status.rs | A:消费接口,只读与限制,验证与后续 | S:过滤器检查覆盖linked worktree与生效include，marker测试用原生Git证明脚本确实可执行；超限优先并等待回收直接子进程，无配置竞态或进程树保护
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/===
 lib.rs[LD6T]: F:公开Git仓库探测与结构化状态解析类型，保留轮次检查点摘要及兼容测试 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/status.rs | A:GitProbe,RepositorySnapshot,HeadState,parse_status,StatusEntry,CheckpointSummary | S:CheckpointSummary原有四字段及serde契约不变，探测结果未扩展公共协议
-probe.rs[ID8M]: F:通过可信原生Git绝对入口异步探测工作树根、独立与共享Git目录、分支HEAD及结构化状态 | R:code:crates/soxu-git/src/status.rs,code:crates/soxu-git/tests/probe.rs | A:GitProbe::new,GitProbe::discover,GitProbe::probe,RepositorySnapshot,HeadState,GitError | S:清除继承GIT环境并屏蔽全局配置；禁用锁、fsmonitor及按需fetch。外部过滤器和gitlink提前拒绝；每命令15秒、每输出16MiB，非原子快照且无配置竞态保护
-status.rs[KD8M]: F:纯字节解析porcelain v2 NUL记录，结构化保留XY、子模块、模式OID、重命名评分与原始路径 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/status.rs | A:parse_status,GitPath,StatusSnapshot,StatusEntry,ParseError | S:重命名下一NUL段是源路径而非记录；未知类型或非法字段整批报错，未来头部原样保留。Windows路径转换拒绝非UTF8及归一化风险名；serde路径为字节数组，不提供文件访问沙箱
+probe.rs[ID8M]: F:通过可信原生Git绝对入口异步探测工作树根、独立与共享Git目录、分支HEAD及结构化状态 | R:code:crates/soxu-git/src/status.rs,code:crates/soxu-git/src/probe/tests.rs | A:GitProbe::new,GitProbe::discover,GitProbe::probe,RepositorySnapshot,HeadState,GitError | S:清除继承GIT环境并屏蔽全局配置；禁用可选锁、fsmonitor及按需fetch。含include与worktree配置的外部过滤器和gitlink提前拒绝。限时15秒、每流16MiB；读到上限加一立即终止，超时也等待回收直接子进程。非原子快照且无配置竞态保护
+status.rs[KD8M]: F:纯字节解析porcelain v2 NUL记录，结构化保留XY、子模块、模式OID、重命名评分与原始路径 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/status.rs | A:parse_status,GitPath,StatusSnapshot,StatusEntry,ParseError | S:重命名下一NUL段为源路径；全部OID含零占位及branch.oid须同为40或64位，混用整批报错。未知头部保留原始字节。Windows转换拒绝非UTF8及归一化风险名；serde路径为字节数组
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-magpie/===
 Cargo.toml[FV5T]: F:声明soxu-magpie包及其工作区依赖 | R:code:Cargo.toml | A:soxu-magpie | S:包版本、Rust版本、edition、许可证和lint规则均继承自工作区
@@ -203,4 +203,7 @@ SKILL.md[SW7S]: F:定义跨 AGY 与 Codex 桌面端自动发现的 Paseo 协同�
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/src/state/===
 native.rs[AW8L]: F:调度本机回环六类只读原生回合，管理续接、取消、FIFO、流式落盘及可选启动资产门禁 | R:code:crates/soxu-daemon/src/store.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-daemon/src/native_assets.rs,code:crates/soxu-protocol/src/rpc.rs | A:DaemonState::with_native_driver_set,DaemonState::with_native_asset_guard,handle_transport_rpc,SubmitTurn,StopTurn | S:Copilot/OpenCode仅快聊；后者ID为ses_加26位ASCII字母数字，其余UUID。Codex收到即保存ID，其他成功后保存；先落盘再广播。绑定校验覆盖每次实际启动，拒绝不写新消息且保留队列；未绑定沿用旧行为，AGY仍关闭。
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/probe/===
+tests.rs[TD6T]: F:验证Git输出边界、超限与超时分型及直接子进程回收 | R:code:crates/soxu-git/src/probe.rs | A:output_overflow_wins_over_timeout_and_reaps_both_streams,timeout_awaits_direct_child_reaping,exact_output_limit_is_not_overflow | S:用当前原生测试二进制作为夹具，超限后故意保持进程存活；测试小限额复用生产收集路径
 

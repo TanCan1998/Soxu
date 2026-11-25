@@ -159,3 +159,39 @@ fn windows_conversion_never_normalizes_special_identity() {
         assert!(path.to_path_buf().is_err());
     }
 }
+
+#[test]
+fn rejects_mixed_oid_lengths_within_and_across_records_and_headers() {
+    let sha1 = "a".repeat(40);
+    let sha256 = "b".repeat(64);
+    let valid = format!("1 .M N... 100644 100644 100644 {sha1} {sha1} valid\0");
+    for record in [
+        format!("1 .M N... 100644 100644 100644 {sha1} {sha256} mixed\0"),
+        format!("2 R. N... 100644 100644 100644 {sha1} {sha256} R100 mixed\0source\0"),
+        format!("u UU N... 100644 100644 100644 100644 {sha1} {sha256} {sha1} mixed\0"),
+        format!("1 .M N... 100644 100644 100644 {sha256} {sha256} mixed\0"),
+        format!("# branch.oid {sha256}\0"),
+    ] {
+        let input = format!("{valid}{record}");
+        let error = parse_status(input.as_bytes()).expect_err("整批拒绝混合 OID 算法");
+        assert!(error.reason.contains("长度不一致"));
+    }
+    let input = format!("# branch.oid {sha256}\0{valid}");
+    assert!(
+        parse_status(input.as_bytes()).is_err(),
+        "头部先出现也必须校验"
+    );
+    for length in [40, 64] {
+        let oid = "0".repeat(length);
+        let input = format!(
+            "# branch.oid {oid}\0# branch.head main\x001 .M N... 100644 100644 100644 {oid} {oid} valid\0"
+        );
+        assert_eq!(
+            parse_status(input.as_bytes())
+                .expect("一致长度合法")
+                .entries
+                .len(),
+            1
+        );
+    }
+}
