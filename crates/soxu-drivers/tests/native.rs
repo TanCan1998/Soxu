@@ -264,6 +264,7 @@ async fn pi_acknowledges_native_controls_including_abort_after_settled() {
     let mut turn = driver.start(request).expect("spawn");
     while event(&mut turn).await.expect("start") != DriverEvent::TurnStarted {}
     let control = turn.control();
+    assert!(control.is_active());
     for (id, command) in [
         (1, Control::Queue(PROMPT.into())),
         (2, Control::Steer(PROMPT.into())),
@@ -275,6 +276,7 @@ async fn pi_acknowledges_native_controls_including_abort_after_settled() {
         );
     }
     let events = collect(turn).await;
+    assert!(!control.is_active());
     for id in 1..=3 {
         assert!(events.contains(&DriverEvent::ControlAck { id, accepted: true }));
     }

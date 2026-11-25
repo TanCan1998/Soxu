@@ -15,7 +15,10 @@ Copilot 的 npm loader 会再启动一个进程，建议直接使用平台包的
 
 `capabilities` 描述各适配器实现的能力。它不探测版本或登录状态。
 Pi 通过 `TurnControl::send` 发送 `follow_up`、`steer` 或 `abort`，
-`ControlAck` 表示 RPC 接受或拒绝该请求。Daemon 应在 `TurnStarted` 后发送控制。
+`ControlAck` 表示 RPC 接受或拒绝该请求，不保证消息已被模型消费。`is_active()`
+反映解码器最近确认的 Pi `agent_start` / `agent_settled` 状态，在取消或控制通道关闭后
+返回 false。Daemon 应在 `TurnStarted` 后发送控制；发送时仍可能撞上 settled，须核对 ack。
+已经写入原生通道但退出前未获得应答的请求不合成拒绝 ack，调用方应报告结果未知。
 其余驱动将 Queue 交回 Daemon，Steer 返回不可用，Interrupt 请求终止所启动的
 直接子进程。`TurnControl::cancel` 对所有驱动可用。丢弃 `RunningTurn` 也会触发
 进程回收。进程级取消的范围是直接子进程。
@@ -38,7 +41,49 @@ Pi 通过 `TurnControl::send` 发送 `follow_up`、`steer` 或 `abort`，
 再用 `soxu chat send` 和 `soxu chat stop` 控制轮次。Pi 使用本机模型设置，
 以纯文本模式启动，关闭工具、扩展、MCP、项目配置授权、技能、模板和项目上下文文件。
 Pi 原生记录保存在 Daemon 数据目录的 `pi-sessions`，继续发消息时沿用原生会话 ID。
-Daemon 使用自己的 FIFO 队列，运行中的纠偏请求会降级为排队。
+Daemon 使用自己的 FIFO 队列。Pi 确认 active 时，`SubmitTurn.behavior=steer`
+发送原生 `steer`，不会再写入 FIFO；尚未 active 或已经 settled 但进程仍收尾时，
+沿用明确的 Queue 降级提示。`StopTurn` 仍采用直接进程取消，不伪造 abort 应答。
+
+纠偏消息与当前轮次绑定并持久化，通过 `steer_badge` 和 `TurnMessageUpserted`
+事件标记“纠偏待确认”“纠偏已接收”“纠偏被拒绝”或“纠偏结果未知”。
+`TurnSubmitted` 无 `queued_id` 只表示已提交控制，不代表原生确认；原生 ack 才更新结果。
+5 秒未确认、退出或取消时报告可恢复错误，不自动排队或重发；应核对回复及历史后决定。
+同一回合最多等待一条纠偏确认，防止重复点击堆积。停止中不接受新消息，权限、纯文本
+及 128 KiB 长度门禁保持不变。FIFO 仍仅驻留内存，重启不会自动重放。
+
+### PiDeck 参考与验证（Issue #32）
+
+参考 `ayuayue/PiDeck` commit `b9a095e063845c80574c5517994c6fcf2be60f25`：
+
+- `src/main/pi/PiRpcClient.ts`：按请求 ID 关联应答，关闭和超时结清 pending；借鉴明确确认边界。
+- `src/main/pi/AgentManager.ts` 的 `agent_settled` 与 `abort`：settled 才表示自动后续工作已结束，
+  abort 先设本地取消标记，不能把迟到事件重新当作运行；Soxu 保留进程级 Stop 与停止门禁。
+- `src/main/pi/promptDispatch.ts`：忙碌投递需显式 `streamingBehavior`，不可因 UI 状态失准丢失投递语义。
+  Soxu 使用现有原生 `steer` RPC，而非复制其 prompt 重试路线。
+- `src/shared/busySendDelivery.ts`：区分当前回合纠偏与下一轮 follow-up；Soxu 的下一轮仍由自身 FIFO 管理。
+
+不复用 ACP、凭据配置、扩展加载或权限放宽。参考代码只读取，没有复制运行配置。
+
+```powershell
+mise exec -- pwsh -NoProfile
+$env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
+cargo test -p soxu-daemon --test rpc_ws_e2e native_pi
+cargo test -p soxu-drivers --test native pi_
+$env:SOXU_TEST_PI_ENTRY = '<已安装 Pi 包的绝对 JS 入口>'
+cargo test -p soxu-daemon --test rpc_ws_e2e native_pi_real_loopback -- --ignored --nocapture
+pwsh -NoProfile -File scripts/check-all.ps1
+```
+
+隔离子 shell 启动后执行 `cargo test` 与 `pwsh -NoProfile -File scripts/check-all.ps1`；
+不要再次嵌套 `mise exec`，以免 mise.toml 重新覆盖 `CARGO_TARGET_DIR`。
+最终门禁使用当前工作树已被忽略的 `target`，不使用多分支共享构建产物。
+
+隔离 Node RPC 夹具覆盖 HTTP/WS、成功/拒绝/超时/断管、settled 后迟到 ack、FIFO、Stop、
+SQLite 回读与续接。真实 Pi `1.5.2` + localhost OpenAI 兼容模型夹具实测通过：同一 UUID
+续接，纠偏出现在下一次模型请求中且仅记录一次，Queue 等原回合结束后单独执行，
+5 次请求均无工具，Stop 后模型连接关闭。真实测试用动态临时 key 和 `PI_CODING_AGENT_DIR`
+隔离配置及会话，不修改用户全局配置；该证据不是公网模型推理或其他 Pi 版本验证。
 
 ## Daemon 本机 Claude Code 只读对话
 
