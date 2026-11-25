@@ -5,12 +5,18 @@ use serde::{Deserialize, Serialize};
 mod probe;
 mod project;
 mod status;
+mod worktrees;
 
 pub use probe::{GitError, GitProbe, HeadState, RepositorySnapshot};
 pub use project::{LocalProject, ProjectOpenError, WorktreeIdentity};
 pub use status::{
     ChangeStatus, GitPath, OrdinaryChange, ParseError, RenameChange, StatusEntry, StatusHeader,
     StatusSnapshot, SubmoduleStatus, UnmergedChange, parse_status,
+};
+
+pub use worktrees::{
+    WorktreeAnnotation, WorktreeEntry, WorktreeHead, WorktreeInventory, WorktreeInventoryError,
+    WorktreeKind, WorktreeParseError, WorktreePath, parse_worktrees,
 };
 
 /// 与对话轮次绑定的 Git 检查点摘要。
