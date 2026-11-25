@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-25T13:18:38Z",
+  "updated_at": "2026-11-25T14:04:48Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -95,9 +95,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "486d902e3d6bbbe77639f5027ff3dba9d1d3cf7efe2fbb9d4b832c0c242f7972",
-      "size": 56568,
-      "normalized_sha256": "486d902e3d6bbbe77639f5027ff3dba9d1d3cf7efe2fbb9d4b832c0c242f7972"
+      "sha256": "af1a7042935db8a4c620d349c41e3daff76569338e9df54f75e43a05797793b1",
+      "size": 57133,
+      "normalized_sha256": "af1a7042935db8a4c620d349c41e3daff76569338e9df54f75e43a05797793b1"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -812,6 +812,12 @@
       "sha256": "098a52fdba439513a8be67dab8ef4829a30c864b53cf6a9db1f9c6d185295479",
       "size": 1848,
       "normalized_sha256": "098a52fdba439513a8be67dab8ef4829a30c864b53cf6a9db1f9c6d185295479"
+    },
+    "docs/dev/git-readonly-diff.md": {
+      "role": "index",
+      "sha256": "a55e49d2ea1e165482cd775226a06af38a1ca7faa9e596092fe493e6611b4d1f",
+      "size": 28457,
+      "normalized_sha256": "a55e49d2ea1e165482cd775226a06af38a1ca7faa9e596092fe493e6611b4d1f"
     },
     "docs/ops/DECISIONS.md": {
       "role": "index",
