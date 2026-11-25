@@ -2,6 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 
+mod probe;
+mod status;
+
+pub use probe::{GitError, GitProbe, HeadState, RepositorySnapshot};
+pub use status::{
+    ChangeStatus, GitPath, OrdinaryChange, ParseError, RenameChange, StatusEntry, StatusHeader,
+    StatusSnapshot, SubmoduleStatus, UnmergedChange, parse_status,
+};
+
 /// 与对话轮次绑定的 Git 检查点摘要。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckpointSummary {
