@@ -3,6 +3,29 @@ export type MobileTab = "session" | "workspaces" | "approvals" | "scripts";
 export type SizeClass = "compact" | "regular" | "wide";
 export type WorkspaceBucket = "needs_input" | "failed" | "running" | "attention" | "done";
 export type PermissionLevel = "plan" | "read-only" | "ask" | "auto-edit" | "full-access" | "turbo";
+export type ComposerChipKind = "file" | "folder" | "diff" | "terminal" | "image" | "skill" | "handoff";
+
+export interface ComposerChip {
+  id: string;
+  kind: ComposerChipKind;
+  label: string;
+  targetAgent?: string;
+}
+
+export interface SessionTelemetryStats {
+  turns: number;
+  steps: number;
+  totalTokens: number;
+  apiCostUsd: number;
+  avgSpeed: number;
+  peakSpeed: number;
+  recentSpeed: number;
+  cacheHitPct: number;
+  cacheNote: string;
+  modelDurationSec: number;
+  toolDurationSec: number;
+  ttftSec: number;
+}
 
 export type SheetKind =
   | null
@@ -81,6 +104,7 @@ export interface TurnMessage {
   role: "user" | "assistant";
   author: string;
   text: string;
+  chips?: ComposerChip[];
   badge?: string;
   reasoningSec?: string;
   reasoningSteps?: string[];

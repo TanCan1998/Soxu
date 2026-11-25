@@ -2,7 +2,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowUp,
-  AtSign,
   Bolt,
   Check,
   ChevronDown,
@@ -34,8 +33,10 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentIcon } from "@/components/AgentIcon";
 import { CodeDiffView, CodeSnippetView, type DiffRowItem } from "@/components/CodeBlockView";
+import { ComposerChipBar, ComposerHandoffMenu, ComposerPlusMenu } from "@/components/ComposerActionMenus";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { HoverExpandDock } from "@/components/HoverExpandDock";
+import { SessionStatsPopover } from "@/components/SessionStatsPopover";
 import { SettingsDialog, type SettingsSectionId } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
@@ -74,11 +75,13 @@ import {
 import type {
   ApprovalItem,
   AskQuestionState,
+  ComposerChip,
   MobileTab,
   PermissionLevel,
   QuickChatItem,
   ScheduleItem,
   ScriptItem,
+  SessionTelemetryStats,
   SheetKind,
   SizeClass,
   ToolCardItem,
@@ -200,7 +203,24 @@ function MobileAppInner({
   const [behavior, setBehavior] = useState<TurnBehavior>("steer");
   const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
   const [draft, setDraft] = useState<string>("");
-  const [contextTokens, setContextTokens] = useState<number>(64200);
+  const [composerChips, setComposerChips] = useState<ComposerChip[]>([
+    { id: "mob-init-chip", kind: "file", label: "crates/soxu-drivers/src/lib.rs:22-27" },
+  ]);
+  const [contextTokens, setContextTokens] = useState<number>(172800);
+  const [sessionStats, setSessionStats] = useState<SessionTelemetryStats>({
+    turns: 24,
+    steps: 1439,
+    totalTokens: 104800000,
+    apiCostUsd: 31.49,
+    avgSpeed: 77.2,
+    peakSpeed: 313.9,
+    recentSpeed: 94.4,
+    cacheHitPct: 91.9,
+    cacheNote: "待确认",
+    modelDurationSec: 182 * 60 + 13,
+    toolDurationSec: 143 * 60 + 34,
+    ttftSec: 11,
+  });
 
   const [openReasons, setOpenReasons] = useState<Record<string, boolean>>({});
   const [openTools, setOpenTools] = useState<Record<string, boolean>>({ "tl-edit": true });
@@ -365,33 +385,81 @@ function MobileAppInner({
     );
   }
 
+  function addComposerChip(draftChip: Omit<ComposerChip, "id">) {
+    setComposerChips((prev) => {
+      if (draftChip.kind === "handoff") {
+        const rest = prev.filter((c) => c.kind !== "handoff");
+        return [{ ...draftChip, id: `mob-handoff-${Date.now()}` }, ...rest];
+      }
+      if (prev.some((c) => c.kind === draftChip.kind && c.label === draftChip.label)) {
+        return prev;
+      }
+      return [...prev, { ...draftChip, id: `mob-chip-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }];
+    });
+  }
+
+  function removeComposerChip(chipId: string) {
+    setComposerChips((prev) => prev.filter((c) => c.id !== chipId));
+  }
+
   function handleSubmitPrompt() {
-    const text = draft.trim();
-    if (!text) return;
+    const rawText = draft.trim();
+    const attachedChips = composerChips;
+    if (!rawText && attachedChips.length === 0) return;
+
+    const handoffChip = attachedChips.find((c) => c.kind === "handoff" && c.targetAgent);
+    const effectiveCli = handoffChip?.targetAgent ?? cli;
+    if (handoffChip?.targetAgent && handoffChip.targetAgent !== cli) {
+      handleSelectCli(handoffChip.targetAgent);
+    }
+
+    const text = rawText || `请处理已附加的 ${attachedChips.length} 项上下文标签`;
+
+    setSessionStats((prev) => ({
+      ...prev,
+      turns: prev.turns + 1,
+      steps: prev.steps + 4,
+      totalTokens: prev.totalTokens + Math.max(2400, text.length * 60),
+      apiCostUsd: Number((prev.apiCostUsd + 0.08).toFixed(2)),
+      recentSpeed: Number((88 + (text.length % 15)).toFixed(1)),
+      modelDurationSec: prev.modelDurationSec + 14,
+      toolDurationSec: prev.toolDurationSec + 6,
+    }));
 
     if (targetKind === "quick" && activeQuickChat) {
       const nextSeq = seqCursor + 2;
       setSeqCursor(nextSeq);
-      const uMsg: TurnMessage = { id: `qu-${nextSeq}`, role: "user", author: "你", text };
+      const uMsg: TurnMessage = {
+        id: `qu-${nextSeq}`,
+        role: "user",
+        author: "你",
+        text,
+        chips: attachedChips.length > 0 ? attachedChips : undefined,
+      };
       const aMsg: TurnMessage = {
         id: `qa-${nextSeq + 1}`,
         role: "assistant",
-        author: `${cli} · ${model}`,
-        text: `已在无项目快速对话下响应（${activePermMeta.label}）：收到你的指令「${text}」。`,
+        author: `${effectiveCli} · ${model}`,
+        badge: handoffChip ? `@${effectiveCli} 已接管` : undefined,
+        text: handoffChip
+          ? `已在无项目快速对话中移交至 @${effectiveCli}（${activePermMeta.label}）并继续响应。`
+          : `已在无项目快速对话下响应（${activePermMeta.label}）：收到你的指令「${text}」。`,
       };
       setQuickChats((prev) =>
         prev.map((q) =>
           q.id === activeQuickChat.id ? { ...q, updatedAt: "刚刚", messages: [...q.messages, uMsg, aMsg] } : q,
         ),
       );
-      setContextTokens((t) => t + Math.max(1200, text.length * 40));
+      setContextTokens((cur) => cur + Math.max(1200, text.length * 40));
+      setComposerChips([]);
       setDraft("");
       return;
     }
 
-    if (isRunning) {
+    if (isRunning && !handoffChip) {
       if (behavior === "queue") {
         setQueuedPrompt(text);
+        setComposerChips([]);
         setDraft("");
         flashToast("已加入指令队列，当前回合结束时顺延发送");
         return;
@@ -403,23 +471,33 @@ function MobileAppInner({
 
     const nextSeq = seqCursor + 2;
     setSeqCursor(nextSeq);
-    const userTurn: TurnMessage = { id: `turn-u-${nextSeq}`, role: "user", author: "你", text };
+    const userTurn: TurnMessage = {
+      id: `turn-u-${nextSeq}`,
+      role: "user",
+      author: "你",
+      text,
+      chips: attachedChips.length > 0 ? attachedChips : undefined,
+      badge: handoffChip ? `移交 -> @${effectiveCli}` : undefined,
+    };
     const replyTurn: TurnMessage = {
       id: `turn-a-${nextSeq + 1}`,
       role: "assistant",
-      author: `${cli} · ${model}`,
+      author: `${effectiveCli} · ${model}`,
+      badge: handoffChip ? `@${effectiveCli} 接管` : undefined,
       reasoningSec: "1.1 秒",
       reasoningSteps: [
         "1. 读取工作区检查点确保修改严格落在目标范围。",
         "2. 在沙箱隔离边界内验证测试结果，绝不修改全局外部配置。",
       ],
-      text:
-        behavior === "steer"
+      text: handoffChip
+        ? `已接收跨代理移交上下文与 ${attachedChips.length} 项标签，切换至 @${effectiveCli}（${activePermMeta.label}）继续执行。`
+        : behavior === "steer"
           ? `已在不中断当前进程前提下热纠偏：收到指令「${text}」，正在应用至活跃上下文。`
           : `已按「${activePermMeta.label}」策略接收新指令，正在执行检验。`,
     };
     setTurns((prev) => [...prev, userTurn, replyTurn]);
-    setContextTokens((t) => t + Math.max(1800, text.length * 45));
+    setContextTokens((cur) => cur + Math.max(1800, text.length * 45));
+    setComposerChips([]);
     setDraft("");
   }
 
@@ -1255,7 +1333,8 @@ function MobileAppInner({
                       ) : (
                         activeQuickChat.messages.map((m) =>
                           m.role === "user" ? (
-                            <div key={m.id} className="flex justify-end">
+                            <div key={m.id} className="flex flex-col items-end gap-1.5">
+                              {m.chips && m.chips.length > 0 && <ComposerChipBar chips={m.chips} className="justify-end" />}
                               <div className="max-w-[85%] rounded-[18px] px-4 py-2.5 text-sm leading-relaxed bg-[var(--soxu-surface-user-bubble)] text-[var(--soxu-text-primary)]">
                                 {m.text}
                               </div>
@@ -1265,6 +1344,7 @@ function MobileAppInner({
                               <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--soxu-text-secondary)]">
                                 <AgentIcon agent={m.author} className="h-3.5 w-3.5 shrink-0" />
                                 <span>{m.author}</span>
+                                {m.badge && <Badge variant="handoff">{m.badge}</Badge>}
                               </div>
                               <p className="text-sm m-0 leading-relaxed text-[var(--soxu-text-primary)]">{m.text}</p>
                             </article>
@@ -1287,7 +1367,11 @@ function MobileAppInner({
                         {turns.map((turn) => {
                           if (turn.role === "user") {
                             return (
-                              <div key={turn.id} className="flex justify-end">
+                              <div key={turn.id} className="flex flex-col items-end gap-1.5">
+                                {turn.badge && <Badge variant="handoff">{turn.badge}</Badge>}
+                                {turn.chips && turn.chips.length > 0 && (
+                                  <ComposerChipBar chips={turn.chips} className="justify-end" />
+                                )}
                                 <div className="max-w-[85%] rounded-[18px] px-4 py-2.5 text-sm leading-relaxed bg-[var(--soxu-surface-user-bubble)] text-[var(--soxu-text-primary)]">
                                   {turn.text}
                                 </div>
@@ -1471,6 +1555,8 @@ function MobileAppInner({
                     </div>
                   )}
 
+                  <ComposerChipBar chips={composerChips} onRemove={removeComposerChip} />
+
                   <textarea
                     rows={2}
                     value={draft}
@@ -1492,8 +1578,13 @@ function MobileAppInner({
                   />
 
                   <div className="flex flex-wrap items-center justify-between gap-1.5">
-                    {/* 操作权限与代理/模型完全常驻不折叠 */}
+                    {/* 操作权限与代理/模型完全常驻不折叠，左侧保留 + 更多操作及可选代理移交 */}
                     <div className="flex flex-wrap items-center gap-1 min-w-0">
+                      <ComposerPlusMenu
+                        hasWorkspace={targetKind === "workspace"}
+                        onAddChip={addComposerChip}
+                      />
+
                       <Button variant="ghost" size="sm" onClick={() => setSheet("cli")} className="h-7 px-2 text-[11.5px] soxu-mono">
                         <AgentIcon agent={cli} className="h-3.5 w-3.5 shrink-0" />
                         <span>{cli}</span>
@@ -1526,9 +1617,18 @@ function MobileAppInner({
                         <span>{activePermMeta.label}</span>
                       </Button>
 
-                      <Button variant="ghost" size="sm" onClick={() => setSheet("handoff")} className="h-7 px-1.5 text-[11px]">
-                        <AtSign className="h-3 w-3" strokeWidth={1.75} />
-                      </Button>
+                      <ComposerHandoffMenu
+                        currentCli={cli}
+                        selectedTargetAgent={composerChips.find((c) => c.kind === "handoff")?.targetAgent}
+                        onSelectTarget={(targetCli) => {
+                          addComposerChip({
+                            kind: "handoff",
+                            label: `@${targetCli}`,
+                            targetAgent: targetCli,
+                          });
+                          flashToast(`已选定移交目标代理 @${targetCli}`);
+                        }}
+                      />
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0 ml-auto">
@@ -1540,6 +1640,8 @@ function MobileAppInner({
                           flashToast("已完成上下文摘要压缩");
                         }}
                       />
+
+                      <SessionStatsPopover stats={sessionStats} />
 
                       {isRunning && (
                         <Button
@@ -1557,7 +1659,7 @@ function MobileAppInner({
                           {behavior === "steer" ? "热纠偏" : behavior === "queue" ? "排队" : "打断"}
                         </Button>
                       )}
-                      {isRunning && !draft.trim() ? (
+                      {isRunning && !draft.trim() && composerChips.length === 0 ? (
                         <Button
                           variant="destructive"
                           size="icon"
@@ -1572,7 +1674,13 @@ function MobileAppInner({
                           <Square className="h-3.5 w-3.5 fill-current" strokeWidth={1.75} />
                         </Button>
                       ) : (
-                        <Button variant="default" size="icon" disabled={!draft.trim()} onClick={handleSubmitPrompt} aria-label="发送指令">
+                        <Button
+                          variant="default"
+                          size="icon"
+                          disabled={!draft.trim() && composerChips.length === 0}
+                          onClick={handleSubmitPrompt}
+                          aria-label="发送指令"
+                        >
                           <ArrowUp className="h-4 w-4" strokeWidth={2} />
                         </Button>
                       )}

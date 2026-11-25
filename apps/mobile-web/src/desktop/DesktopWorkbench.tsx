@@ -2,7 +2,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowUp,
-  AtSign,
   Check,
   ChevronDown,
   ChevronRight,
@@ -34,8 +33,10 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { AgentIcon } from "@/components/AgentIcon";
 import { CodeDiffView, CodeSnippetView, type DiffRowItem } from "@/components/CodeBlockView";
+import { ComposerChipBar, ComposerHandoffMenu, ComposerPlusMenu } from "@/components/ComposerActionMenus";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { HoverExpandDock } from "@/components/HoverExpandDock";
+import { SessionStatsPopover } from "@/components/SessionStatsPopover";
 import { SettingsDialog, type SettingsSectionId } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { UtilityModals, type WorkbenchModalKind } from "@/components/UtilityModals";
@@ -82,8 +83,10 @@ import {
 } from "@/mock-data";
 import type {
   ApprovalItem,
+  ComposerChip,
   PermissionLevel,
   QuickChatItem,
+  SessionTelemetryStats,
   TurnBehavior,
   TurnMessage,
   WorkspaceBucket,
@@ -242,9 +245,57 @@ function DesktopWorkbenchInner({
   );
   const [lostControlToast, setLostControlToast] = useState<string | null>(null);
   const [contextTokens, setContextTokens] = useState<Record<string, number>>({
-    "tab-wks-m2": 76400,
+    "tab-wks-m2": 172800,
     "tab-chat-arch": 24800,
-    "tab-wks-m1": 112000,
+    "tab-wks-m1": 182000,
+  });
+  const [composerChipsByTab, setComposerChipsByTab] = useState<Record<string, ComposerChip[]>>({
+    "tab-wks-m2": [{ id: "chip-init-lib", kind: "file", label: "crates/soxu-drivers/src/lib.rs:22-27" }],
+    "tab-wks-m1": [{ id: "chip-init-proto", kind: "file", label: "crates/soxu-protocol/src/lib.rs" }],
+  });
+  const [sessionStatsByTab, setSessionStatsByTab] = useState<Record<string, SessionTelemetryStats>>({
+    "tab-wks-m2": {
+      turns: 24,
+      steps: 1439,
+      totalTokens: 104800000,
+      apiCostUsd: 31.49,
+      avgSpeed: 77.2,
+      peakSpeed: 313.9,
+      recentSpeed: 94.4,
+      cacheHitPct: 91.9,
+      cacheNote: "待确认",
+      modelDurationSec: 182 * 60 + 13,
+      toolDurationSec: 143 * 60 + 34,
+      ttftSec: 11,
+    },
+    "tab-chat-arch": {
+      turns: 6,
+      steps: 18,
+      totalTokens: 38400,
+      apiCostUsd: 0.42,
+      avgSpeed: 88.6,
+      peakSpeed: 142.0,
+      recentSpeed: 96.2,
+      cacheHitPct: 84.5,
+      cacheNote: "稳定命中",
+      modelDurationSec: 94,
+      toolDurationSec: 18,
+      ttftSec: 2,
+    },
+    "tab-wks-m1": {
+      turns: 14,
+      steps: 412,
+      totalTokens: 19600000,
+      apiCostUsd: 9.84,
+      avgSpeed: 71.4,
+      peakSpeed: 218.5,
+      recentSpeed: 85.1,
+      cacheHitPct: 88.2,
+      cacheNote: "稳定命中",
+      modelDurationSec: 46 * 60 + 12,
+      toolDurationSec: 29 * 60 + 48,
+      ttftSec: 6,
+    },
   });
 
   const [scripts, setScripts] = useState(INITIAL_SCRIPTS);
@@ -543,33 +594,113 @@ function DesktopWorkbenchInner({
     flashToast("已从归档恢复会话");
   }
 
+  function addChipToActive(draftChip: Omit<ComposerChip, "id">) {
+    const key = activeTabId ?? "__draft__";
+    setComposerChipsByTab((prev) => {
+      const list = prev[key] ?? [];
+      if (draftChip.kind === "handoff") {
+        const rest = list.filter((c) => c.kind !== "handoff");
+        return { ...prev, [key]: [{ ...draftChip, id: `chip-handoff-${Date.now()}` }, ...rest] };
+      }
+      if (list.some((c) => c.kind === draftChip.kind && c.label === draftChip.label)) {
+        return prev;
+      }
+      return { ...prev, [key]: [...list, { ...draftChip, id: `chip-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }] };
+    });
+  }
+
+  function removeChipFromActive(chipId: string) {
+    const key = activeTabId ?? "__draft__";
+    setComposerChipsByTab((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? []).filter((c) => c.id !== chipId),
+    }));
+  }
+
+  function bumpTabTelemetry(tabId: string, promptLen: number) {
+    setContextTokens((prev) => ({
+      ...prev,
+      [tabId]: (prev[tabId] ?? 52000) + Math.max(1800, promptLen * 45),
+    }));
+    setSessionStatsByTab((prev) => {
+      const base = prev[tabId] ?? {
+        turns: 1,
+        steps: 3,
+        totalTokens: 12400,
+        apiCostUsd: 0.14,
+        avgSpeed: 82.0,
+        peakSpeed: 128.4,
+        recentSpeed: 91.8,
+        cacheHitPct: 86.0,
+        cacheNote: "正常",
+        modelDurationSec: 32,
+        toolDurationSec: 11,
+        ttftSec: 3,
+      };
+      const deltaTokens = Math.max(2400, promptLen * 60);
+      return {
+        ...prev,
+        [tabId]: {
+          ...base,
+          turns: base.turns + 1,
+          steps: base.steps + 4,
+          totalTokens: base.totalTokens + deltaTokens,
+          apiCostUsd: Number((base.apiCostUsd + 0.08).toFixed(2)),
+          recentSpeed: Number((88 + (promptLen % 15)).toFixed(1)),
+          modelDurationSec: base.modelDurationSec + 14,
+          toolDurationSec: base.toolDurationSec + 6,
+        },
+      };
+    });
+  }
+
   function sendPrompt() {
-    const t = composerText.trim();
-    if (!t) {
+    const tText = composerText.trim();
+    const key = activeTabId ?? "__draft__";
+    const attachedChips = composerChipsByTab[key] ?? [];
+    if (!tText && attachedChips.length === 0) {
       flashToast("已发送优雅中断信号停止当前输出");
       return;
     }
 
+    const handoffChip = attachedChips.find((c) => c.kind === "handoff" && c.targetAgent);
+    const effectiveCli = handoffChip?.targetAgent ?? cli;
+    if (handoffChip?.targetAgent && handoffChip.targetAgent !== cli) {
+      handleSelectCli(handoffChip.targetAgent);
+    }
+
+    const finalPrompt = tText || `请处理已附加的 ${attachedChips.length} 项上下文标签`;
+
     if (!activeTab) {
-      createQuickChat(t);
+      createQuickChat(finalPrompt);
+      setComposerChipsByTab((p) => ({ ...p, [key]: [] }));
       setComposerText("");
       return;
     }
 
     if (activeTab.targetKind === "quick" && activeQuickChat) {
-      const nextMsgUser: TurnMessage = { id: `qu-${Date.now()}`, role: "user", author: "你", text: t };
+      const nextMsgUser: TurnMessage = {
+        id: `qu-${Date.now()}`,
+        role: "user",
+        author: "你",
+        text: finalPrompt,
+        chips: attachedChips.length > 0 ? attachedChips : undefined,
+      };
       const nextMsgAi: TurnMessage = {
         id: `qa-${Date.now() + 1}`,
         role: "assistant",
-        author: `${cli} · ${model}`,
-        text: `已在无项目对话中响应（${getPermissionMeta(cli, permLevel).label}）：收到你的指令「${t}」。`,
+        author: `${effectiveCli} · ${model}`,
+        badge: handoffChip ? `@${effectiveCli} 已接管` : undefined,
+        text: handoffChip
+          ? `已将最近上下文与附加标签移交至 @${effectiveCli}（${getPermissionMeta(effectiveCli, permLevel).label}），开始继续响应。`
+          : `已在无项目对话中响应（${getPermissionMeta(effectiveCli, permLevel).label}）：收到你的指令「${finalPrompt}」。`,
       };
       setQuickChats((prev) =>
         prev.map((q) =>
           q.id === activeQuickChat.id
             ? {
                 ...q,
-                title: q.messages.length === 0 ? t.slice(0, 18) : q.title,
+                title: q.messages.length === 0 ? finalPrompt.slice(0, 18) : q.title,
                 updatedAt: "刚刚",
                 messages: [...q.messages, nextMsgUser, nextMsgAi],
               }
@@ -578,19 +709,18 @@ function DesktopWorkbenchInner({
       );
       setTabs((prev) =>
         prev.map((tb) =>
-          tb.id === activeTab.id && tb.draft ? { ...tb, draft: false, title: t.slice(0, 18) } : tb,
+          tb.id === activeTab.id && tb.draft ? { ...tb, draft: false, title: finalPrompt.slice(0, 18) } : tb,
         ),
       );
+      setComposerChipsByTab((p) => ({ ...p, [key]: [] }));
       setComposerText("");
-      setContextTokens((prev) => ({
-        ...prev,
-        [activeTab.id]: (prev[activeTab.id] ?? 18000) + Math.max(1200, t.length * 40),
-      }));
+      bumpTabTelemetry(activeTab.id, finalPrompt.length);
       return;
     }
 
-    if (composerMode === "queue") {
-      setQueuedPrompt(t);
+    if (composerMode === "queue" && !handoffChip) {
+      setQueuedPrompt(finalPrompt);
+      setComposerChipsByTab((p) => ({ ...p, [key]: [] }));
       setComposerText("");
       flashToast("已加入本轮末尾待发队列");
       return;
@@ -602,20 +732,26 @@ function DesktopWorkbenchInner({
         id: `u-${Date.now()}`,
         role: "user",
         author: "你",
-        text: t,
-        badge: composerMode === "steer" ? "热纠偏 · 下一步生效" : "打断重发",
+        text: finalPrompt,
+        chips: attachedChips.length > 0 ? attachedChips : undefined,
+        badge: handoffChip
+          ? `移交 -> @${effectiveCli}`
+          : composerMode === "steer"
+            ? "热纠偏 · 下一步生效"
+            : "打断重发",
       },
       {
         id: `a-${Date.now() + 1}`,
         role: "assistant",
-        author: `${cli} · ${model}`,
-        text: `已按「${getPermissionMeta(cli, permLevel).label}」策略执行当前指令，仅调整工作树内受控改动。`,
+        author: `${effectiveCli} · ${model}`,
+        badge: handoffChip ? `@${effectiveCli} 接管` : undefined,
+        text: handoffChip
+          ? `已接收跨代理移交上下文与 ${attachedChips.length} 项附件标签，以 @${effectiveCli}（${getPermissionMeta(effectiveCli, permLevel).label}）继续执行。`
+          : `已按「${getPermissionMeta(effectiveCli, permLevel).label}」策略执行当前指令，仅调整工作树内受控改动。`,
       },
     ]);
-    setContextTokens((prev) => ({
-      ...prev,
-      [activeTab.id]: (prev[activeTab.id] ?? 52000) + Math.max(1800, t.length * 45),
-    }));
+    bumpTabTelemetry(activeTab.id, finalPrompt.length);
+    setComposerChipsByTab((p) => ({ ...p, [key]: [] }));
     setComposerText("");
   }
 
@@ -624,7 +760,24 @@ function DesktopWorkbenchInner({
   const availableModels = getAgentModels(cli);
   const currentModelMeta = availableModels.find((m) => m.id === model) ?? availableModels[0];
   const activePermMeta = getPermissionMeta(cli, permLevel);
+  const activeChipKey = activeTabId ?? "__draft__";
+  const currentComposerChips = composerChipsByTab[activeChipKey] ?? [];
+  const selectedHandoffTarget = currentComposerChips.find((c) => c.kind === "handoff")?.targetAgent;
   const currentContextUsed = activeTab ? (contextTokens[activeTab.id] ?? 42800) : 6400;
+  const currentSessionStats: SessionTelemetryStats = (activeTab && sessionStatsByTab[activeTab.id]) || {
+    turns: 3,
+    steps: 19,
+    totalTokens: 28400,
+    apiCostUsd: 0.28,
+    avgSpeed: 84.5,
+    peakSpeed: 162.3,
+    recentSpeed: 92.4,
+    cacheHitPct: 87.6,
+    cacheNote: "正常",
+    modelDurationSec: 54,
+    toolDurationSec: 21,
+    ttftSec: 4,
+  };
 
   const activeQuickChats = quickChats.filter((q) => !q.archived);
   const activeWorkspaces = workspaces.filter((w) => !w.archived);
@@ -1482,7 +1635,8 @@ function DesktopWorkbenchInner({
                         ) : (
                           activeQuickChat.messages.map((m) =>
                             m.role === "user" ? (
-                              <div key={m.id} className="flex justify-end">
+                              <div key={m.id} className="flex flex-col items-end gap-1.5">
+                                {m.chips && m.chips.length > 0 && <ComposerChipBar chips={m.chips} className="justify-end" />}
                                 <div className="max-w-[78%] rounded-[18px] bg-[var(--soxu-surface-raised)] px-4 py-2.5 leading-relaxed">
                                   {m.text}
                                 </div>
@@ -1492,6 +1646,7 @@ function DesktopWorkbenchInner({
                                 <div className="flex items-center gap-2 text-xs font-semibold">
                                   <AgentIcon agent={m.author} className="h-4 w-4 shrink-0" />
                                   <span>{m.author}</span>
+                                  {m.badge && <Badge variant="handoff">{m.badge}</Badge>}
                                 </div>
                                 <p className="m-0 leading-relaxed text-[var(--soxu-text-primary)]">{m.text}</p>
                               </div>
@@ -1816,21 +1971,25 @@ function DesktopWorkbenchInner({
                             );
                           })}
 
-                          {workspaceTurns.map((t) =>
-                            t.role === "user" ? (
-                              <div key={t.id} className="flex flex-col items-end gap-1 animate-in fade-in-0 slide-in-from-bottom-2 duration-200">
-                                {t.badge && <Badge variant="running">{t.badge}</Badge>}
+                          {workspaceTurns.map((turnItem) =>
+                            turnItem.role === "user" ? (
+                              <div key={turnItem.id} className="flex flex-col items-end gap-1.5 animate-in fade-in-0 slide-in-from-bottom-2 duration-200">
+                                {turnItem.badge && <Badge variant="running">{turnItem.badge}</Badge>}
+                                {turnItem.chips && turnItem.chips.length > 0 && (
+                                  <ComposerChipBar chips={turnItem.chips} className="justify-end" />
+                                )}
                                 <div className="max-w-[78%] rounded-[18px] bg-[var(--soxu-surface-raised)] px-4 py-2.5">
-                                  {t.text}
+                                  {turnItem.text}
                                 </div>
                               </div>
                             ) : (
-                              <div key={t.id} className="flex flex-col gap-1.5 animate-in fade-in-0 duration-200">
+                              <div key={turnItem.id} className="flex flex-col gap-1.5 animate-in fade-in-0 duration-200">
                                 <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--soxu-text-secondary)]">
-                                  <AgentIcon agent={t.author} className="h-3.5 w-3.5 shrink-0" />
-                                  <span>{t.author}</span>
+                                  <AgentIcon agent={turnItem.author} className="h-3.5 w-3.5 shrink-0" />
+                                  <span>{turnItem.author}</span>
+                                  {turnItem.badge && <Badge variant="handoff">{turnItem.badge}</Badge>}
                                 </div>
-                                <p className="m-0 leading-relaxed">{t.text}</p>
+                                <p className="m-0 leading-relaxed">{turnItem.text}</p>
                               </div>
                             ),
                           )}
@@ -1880,14 +2039,7 @@ function DesktopWorkbenchInner({
                             : "border-[var(--soxu-border-subtle)] focus-within:border-[var(--soxu-border-strong)]",
                       )}
                     >
-                      {activeTab?.targetKind === "workspace" && (
-                        <div className="flex items-center gap-1.5 px-1">
-                          <span className="inline-flex items-center gap-1 rounded-md border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] px-2 py-0.5 text-[11px] soxu-mono text-[var(--soxu-text-secondary)]">
-                            <FileCode2 className="h-3 w-3" strokeWidth={1.75} />
-                            <span>crates/soxu-drivers/src/lib.rs:22-27</span>
-                          </span>
-                        </div>
-                      )}
+                      <ComposerChipBar chips={currentComposerChips} onRemove={removeChipFromActive} />
 
                       <textarea
                         rows={2}
@@ -1908,8 +2060,13 @@ function DesktopWorkbenchInner({
                       />
 
                       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-                        {/* 左侧常驻：代理 + 模型 + 思考强度(支持时) + 常驻操作权限（绝不折叠，随代理动态适配） */}
+                        {/* 左侧常驻：+ 更多操作 + 代理 + 模型 + 思考强度(支持时) + 常驻操作权限 + 可选代理移交 */}
                         <div className="flex flex-wrap items-center gap-1 min-w-0">
+                          <ComposerPlusMenu
+                            hasWorkspace={activeTab?.targetKind === "workspace"}
+                            onAddChip={addChipToActive}
+                          />
+
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button
@@ -2018,19 +2175,21 @@ function DesktopWorkbenchInner({
                             </DropdownMenuContent>
                           </DropdownMenu>
 
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-[11px] text-[var(--soxu-semantic-handoff)] rounded-full"
-                            onClick={() => setComposerText((cur) => `@codex ${cur}`)}
-                            title="移交上下文至其他原生代理"
-                          >
-                            <AtSign className="h-3 w-3" strokeWidth={1.75} />
-                            <span>{t("composer.handoff")}</span>
-                          </Button>
+                          <ComposerHandoffMenu
+                            currentCli={cli}
+                            selectedTargetAgent={selectedHandoffTarget}
+                            onSelectTarget={(targetCli) => {
+                              addChipToActive({
+                                kind: "handoff",
+                                label: `@${targetCli}`,
+                                targetAgent: targetCli,
+                              });
+                              flashToast(`已选择将上下文移交至 @${targetCli}`);
+                            }}
+                          />
                         </div>
 
-                        {/* 右侧：上下文百分比小圆环 + 投递模式 + 发送/停止按钮 */}
+                        {/* 右侧：三色上下文圆环 + 会话统计胶囊 + 投递模式 + 发送/停止按钮 */}
                         <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                           <ContextUsageRing
                             model={model}
@@ -2042,6 +2201,8 @@ function DesktopWorkbenchInner({
                               flashToast("已完成上下文无损摘要压缩");
                             }}
                           />
+
+                          <SessionStatsPopover stats={currentSessionStats} />
 
                           {activeTab?.targetKind === "workspace" && (
                             <Button
@@ -2068,10 +2229,10 @@ function DesktopWorkbenchInner({
                             size="icon"
                             variant="default"
                             onClick={sendPrompt}
-                            aria-label={composerText.trim() ? t("composer.send") : t("composer.stop")}
+                            aria-label={composerText.trim() || currentComposerChips.length > 0 ? t("composer.send") : t("composer.stop")}
                             className="transition-transform duration-150 active:scale-90"
                           >
-                            {composerText.trim() ? (
+                            {composerText.trim() || currentComposerChips.length > 0 ? (
                               <ArrowUp className="h-4 w-4 transition-transform duration-200" strokeWidth={2} />
                             ) : (
                               <Square className="h-3.5 w-3.5 fill-current" />
