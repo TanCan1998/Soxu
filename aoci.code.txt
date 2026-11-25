@@ -131,7 +131,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录项目核心架构决策（ADR-001~006），包含 GPUI + Daemon、Native CLI 复用、Magpie 发现及 React 19 + shadcn/ui M0.5 决策 | R:code:AGENTS.md,code:design-system/soxu/MASTER.md | A:ADR-001,ADR-002,ADR-003,ADR-005,ADR-006 | S:已拍板方案不可无故推翻；明确全局 CLI 目录只读、M0.5 强制使用 shadcn/ui + Tailwind v4 与开源双字体
-PROGRESS.md[SW6T]: F:记录 Soxu 里程碑、Paseo 串并行顺序、活跃工作区、验证证据与跨会话待办 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:记录 #15 的本机 Codex 只读接线与 CLI 用法。区分实际 EXE 连本机夹具的 Daemon 验证及 #12 的在线登录推理验证。
+PROGRESS.md[SW6T]: F:记录 Soxu 里程碑、Paseo 串并行顺序、已交付验证与跨会话待办 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:#16 已合入并归档，M2 剩余驱动待接线。#15 验证真实 Codex 经 Daemon 连接本机夹具，在线推理证据见 #12。
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
