@@ -43,6 +43,12 @@ if (kind === "pi") {
     assert.equal(fs.readFileSync(0, "utf8"), prompt);
   } else {
     assert.equal(args.at(-1), `--print=${prompt}`);
+    assert.equal(args.includes("--mode"), false);
+    assert(args.includes("--disable-slash-commands"));
+    const settings = JSON.parse(args[args.indexOf("--settings") + 1]);
+    assert.equal(settings.toolPermission, "strict");
+    assert.equal(settings.allowNonWorkspaceAccess, false);
+    assert.deepEqual(settings.permissions.deny, ["read_file(*)", "write_file(*)", "command(*)", "read_url(*)", "execute_url(*)", "mcp(*)"]);
   }
   switch (kind) {
     case "codex":

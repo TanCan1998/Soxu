@@ -189,10 +189,10 @@ pub(crate) fn invocation(
             &[
                 "--output-format",
                 "stream-json",
-                "--mode",
-                "plan",
                 "--sandbox",
                 "--disable-slash-commands",
+                "--settings",
+                "{\"toolPermission\":\"strict\",\"allowNonWorkspaceAccess\":false,\"permissions\":{\"deny\":[\"read_file(*)\",\"write_file(*)\",\"command(*)\",\"read_url(*)\",\"execute_url(*)\",\"mcp(*)\"]}}",
             ],
             Input::Argument,
         ),

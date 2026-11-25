@@ -99,7 +99,7 @@ OpenCode 配置、数据库、缓存与状态到 Daemon 的 `opencode` 子目录
 | Pi 1.5.2 | `--mode rpc`；`message_update`、`agent_settled`；模型步骤、token、成本、上下文 | Session JSONL，`--session` / `--fork`；真实 Pi 经 Daemon 接回环模型夹具，通过两轮流式续接并沿用同一会话 ID |
 | Claude Code 2.1.331 | `--print --output-format stream-json --verbose`；部分文本、`result`、报告的轮次、token 与美元成本 | `projects/<cwd>/<id>.jsonl`，`--resume` / `--fork-session`；真实 Claude Code 经 Daemon 接本机模型夹具，两轮回复使用同一 UUID，记录落在隔离目录 |
 | OpenCode 1.19.6 | `run --format json`、stdin；`text`、`tool_use`、`step_finish`；步骤、token、缓存、成本和工具执行时长 | `--session` / `--fork`；真实 OpenCode 经 Daemon 验证两轮回环、零工具、同一原生 ID 和停止后模型连接断开。SQLite 历史扫描不可用 |
-| Antigravity 1.5.16 | `--print --output-format stream-json`；`init`、`step_update`、`result`；步骤、时长、轮次与 token | 已知会话 ID 可使用 `--conversation`；本机帮助、Google Antigravity *Headless mode* 与夹具。历史扫描和 Fork 不可用 |
+| Antigravity 1.5.17 | `--print --output-format stream-json`；`init`、`step_update`、`result`；步骤、时长、轮次与 token | 真实隔离回环验证 `--conversation` 两轮同 ID、上下文续接、写入拒绝与取消；仍声明工具，Daemon 尚未开放。历史扫描和 Fork 不可用 |
 | Copilot 1.0.114 | `--output-format json --stream on`、stdin；助手增量、最终 `result`、有报告的用量、上下文和延迟 | `session-state/<id>/events.jsonl`，`--resume=<id>`；真实 Copilot 经 Daemon 通过两轮回环续接，沿用同一 UUID，且模型请求均无工具。Fork 不可用 |
 | Qwen Code 0.28.0 | `--output-format stream-json --include-partial-messages`；助手增量与 `result` 用量 | 项目 `chats/<id>.jsonl`，`--resume` / `--fork-session`；真实 Qwen 经 Daemon 通过两轮回环续接，模型请求不带工具，额外的工具请求被拦截 |
 
@@ -118,3 +118,28 @@ cargo test -p soxu-drivers --test native signed_in_codex_streams_both_targets --
 与 loopback 服务，分别记录四次请求的阶段，不打印请求体或原生诊断。
 逐字节输入测试独立覆盖引号、Unicode、换行和 shell 元字符。已登录烟测继承
 现有 Codex 环境和默认模型，以临时工作目录和只读、临时会话模式运行。
+
+## Antigravity 只读边界调查（Daemon 尚未开放）
+
+真实 Windows Antigravity `1.5.17` 的隔离回环验证已覆盖两轮流式、同一 UUID、
+续接携带前轮模型回复，以及直接进程停止后模型连接断开。有效 `write_file`
+调用被全局 `write_file(*)` deny 规则拒绝，目标文件未产生；回合仍以成功状态结束，
+所以成功终态不能证明工具已执行或整轮未触发工具。
+
+驱动移除与 `--disable-slash-commands` 同时使用时无效的 `--mode plan`，改用
+会话级 `--settings` 固定严格权限、关闭非工作区访问，并拒绝文件、命令、网页和
+MCP 的全部权限命名空间。这不是工具注册过滤器：模型请求仍声明 15 种工具，
+包括调度、工作流及子代理。上述额外工具的副作用与项目插件加载尚未完整验证，
+因此没有注册 Antigravity 的 Daemon 只读路由，不能把它描述为零工具快聊。
+
+可复跑探针仅复制可信 EXE 到临时目录，生成独立用户目录和随机本机模型夹具凭据，
+不读取或写入用户真实配置，不安装软件，并保留脱敏的 JSON 证据：
+
+```powershell
+$env:SOXU_TEST_AGY = '<可信 Antigravity EXE 的绝对路径>'
+node crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs
+```
+
+权限语义依据上游 [CLI Headless](https://antigravity.google/docs/cli/headless/)、
+[Settings](https://antigravity.google/docs/settings/) 与
+[Permissions](https://antigravity.google/docs/permissions/)；实际生效结论以实机探针为准。
