@@ -138,7 +138,7 @@ git-readonly-diff.md[SD7M]: F:审定已跟踪只读Diff的端点语义、命令�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录Soxu架构与工程决策，新增主控只编排审查、AGY延期及Pi/Git正交并行的ADR-007 | R:code:AGENTS.md,code:docs/ops/PROGRESS.md,code:design-system/soxu/MASTER.md | A:ADR-001..007,Owned Paths,Queue/Steer/Stop | S:#26开放但路由关闭，延期不等于M2七代理验收；PiDeck仅参考原生Pi，不引入ACP。Issue#34的PR#35先合流，再串行合入Issue#32/#33业务PR；后续分支吸收main并保留前序AOCI认知，执行代理不得合并或回收。
-PROGRESS.md[SW6S]: F:记录里程碑事实、M3b与只读Diff设计主线合入、M3c清单构建验收及后续审查队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-git/README.md,code:docs/dev/git-readonly-diff.md | A:M0..M6,#39/#41,#42,#43/#44,list_worktrees,Unavailable | S:#39已合入7cea1c4；#43设计文档已合入63acf15但Diff功能未实现；#42独立target七项和35项Git专项及主控host-review七项通过，吸收最新主线后重验，PR待审不自行合入归档；Unix真实特殊路径未在Windows执行，根协议依赖冻结
+PROGRESS.md[SW6S]: F:记录里程碑交付范围、已合入事实、工作区快照、验收证据和后续工程队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-git/README.md,code:docs/dev/git-readonly-diff.md | A:M0..M6,#39/#41,#42/#45,#43/#44,list_worktrees,Unavailable | S:#39已合入7cea1c4；#42交付只读清单，PR状态只记构建快照，独立target七项及35项Git测试通过；#43仅交付Diff设计，后续队列含Worktree受控创建与诊断、显式Init/Clone及只读Diff实现
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
