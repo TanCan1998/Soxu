@@ -99,9 +99,12 @@ process.rs[IW8L]: F:用Tokio启动可信原生CLI，转发有界JSONL与Pi控制
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/===
 Cargo.toml[FV5T]: F:声明 soxu-git crate 的包元数据、lint 规则和依赖 | R:code:Cargo.toml | A:soxu-git | S:版本、Rust edition、最低 Rust 版本、许可证、lint 规则和全部依赖均继承自工作区
+README.md[SD6T]: F:说明M3a只读探测接口、原始路径身份、安全限制、临时夹具验证与后续M3任务 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/status.rs | A:消费接口,只读与限制,验证与后续 | S:内嵌Git工作树在untracked=all下仍输出目录后缀，仅问号与叹号记录允许；marker证明配置可执行而探测拒绝执行，超限回收直接子进程，不消除竞态
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/===
-lib.rs[LR5T]: F:定义与对话轮次绑定的 Git 检查点摘要，记录检查点标识、轮次索引、提交对象标识和变更文件数 | R:- | A:CheckpointSummary | S:-
+lib.rs[LD6T]: F:公开Git仓库探测与结构化状态解析类型，保留轮次检查点摘要及兼容测试 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/status.rs | A:GitProbe,RepositorySnapshot,HeadState,parse_status,StatusEntry,CheckpointSummary | S:CheckpointSummary原有四字段及serde契约不变，探测结果未扩展公共协议
+probe.rs[ID8M]: F:通过可信原生Git绝对入口异步探测工作树根、独立与共享Git目录、分支HEAD及结构化状态 | R:code:crates/soxu-git/src/status.rs,code:crates/soxu-git/src/probe/tests.rs | A:GitProbe::new,GitProbe::discover,GitProbe::probe,RepositorySnapshot,HeadState,GitError | S:清除继承GIT环境并屏蔽全局配置；禁用可选锁、fsmonitor及按需fetch。含include与worktree配置的外部过滤器和gitlink提前拒绝。限时15秒、每流16MiB；读到上限加一立即终止，超时也等待回收直接子进程。非原子快照且无配置竞态保护
+status.rs[KD8M]: F:纯字节解析porcelain v2 NUL记录，结构化保留XY、子模块、模式OID、重命名评分与原始路径 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/status.rs | A:parse_status,GitPath,StatusSnapshot,StatusEntry,ParseError | S:重命名下一NUL段为源路径；OID含零占位与头部须同为40或64位。仅未跟踪和忽略路径允许单个尾斜线，原字节保留；跟踪路径及内部空分量拒绝。Windows转换拒绝非UTF8及风险名；serde路径为字节数组
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-magpie/===
 Cargo.toml[FV5T]: F:声明soxu-magpie包及其工作区依赖 | R:code:Cargo.toml | A:soxu-magpie | S:包版本、Rust版本、edition、许可证和lint规则均继承自工作区
@@ -200,4 +203,7 @@ SKILL.md[SW7S]: F:定义跨 AGY 与 Codex 桌面端自动发现的 Paseo 协同�
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/src/state/===
 native.rs[AW8L]: F:调度回环六类只读原生回合、Pi纠偏、续接、Stop和FIFO，持久化用户消息及确认结果，执行可选启动门禁 | R:code:crates/soxu-daemon/src/store.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-daemon/src/native_assets.rs,code:crates/soxu-protocol/src/rpc.rs | A:with_native_driver_set,with_native_asset_guard,handle_transport_rpc,SubmitTurn,StopTurn | S:仅本机已配置Pi在active时发送steer，单回合仅一条待确认。ack只证明接收，超时、退出或重启时待确认转未知，不自动重发。停止暂停FIFO；资产拒绝保留队首。Codex立即存ID，其余成功后保存。AGY仍关闭。
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/probe/===
+tests.rs[TD6T]: F:验证Git输出边界、超限与超时分型及直接子进程回收 | R:code:crates/soxu-git/src/probe.rs | A:output_overflow_wins_over_timeout_and_reaps_both_streams,timeout_awaits_direct_child_reaping,exact_output_limit_is_not_overflow | S:用当前原生测试二进制作为夹具，超限后故意保持进程存活；测试小限额复用生产收集路径
 
