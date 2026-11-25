@@ -206,10 +206,13 @@ pub(crate) fn invocation(
                 "--no-ask-user",
                 "--disable-builtin-mcps",
                 "--no-auto-update",
+                "--no-custom-instructions",
+                "--disable-client-telemetry",
+                "--available-tools=soxu_no_native_tools",
                 "--stream",
                 "on",
             ],
-            Input::Argument,
+            Input::Text,
         ),
         QwenCode => (
             &[
@@ -291,14 +294,7 @@ pub(crate) fn invocation(
     match kind {
         Codex => args.push("-".into()),
         OpenCode => args.extend(["--".into(), OsString::from(&request.prompt)]),
-        Antigravity | Copilot => args.push(
-            format!(
-                "--{}={}",
-                if kind == Copilot { "prompt" } else { "print" },
-                request.prompt
-            )
-            .into(),
-        ),
+        Antigravity => args.push(format!("--print={}", request.prompt).into()),
         _ => {}
     }
     Ok((args, input))

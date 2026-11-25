@@ -651,6 +651,14 @@ impl Decoder {
             "session.shutdown" if data["shutdownType"] == "error" => {
                 self.finish(Outcome::NativeFailed, events)
             }
+            "result" => {
+                self.session(&record["sessionId"], events);
+                match record["exitCode"].as_i64() {
+                    Some(0) if self.copilot_turn_ended => self.finish(Outcome::Succeeded, events),
+                    Some(code) if code != 0 => self.finish(Outcome::NativeFailed, events),
+                    _ => {}
+                }
+            }
             _ => {}
         }
     }

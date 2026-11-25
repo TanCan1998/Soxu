@@ -143,6 +143,35 @@ fn configure_qwen(config_dir: PathBuf) -> Result<NativeDriver, DriverError> {
         .with_env("QWEN_CODE_RELAUNCH_ARGS", None))
 }
 
+fn configure_copilot(config_dir: PathBuf) -> Result<NativeDriver, DriverError> {
+    let program = std::env::var_os("SOXU_COPILOT_EXE").ok_or(DriverError::BinaryNotFound)?;
+    let driver = NativeDriver::with_program(NativeCliKind::Copilot, program.into(), [])?;
+    if !driver.program().is_file() {
+        return Err(DriverError::BinaryNotFound);
+    }
+    if cfg!(windows) && driver.program().with_extension("shim").is_file() {
+        return Err(DriverError::Unsupported(
+            "Windows Copilot 入口为 Scoop 包装器",
+        ));
+    }
+    Ok(driver
+        .with_env(
+            "COPILOT_HOME",
+            Some(config_dir.join("state").into_os_string()),
+        )
+        .with_env(
+            "COPILOT_CACHE_HOME",
+            Some(config_dir.join("cache").into_os_string()),
+        )
+        .with_env("COPILOT_AUTO_UPDATE", Some("false".into()))
+        .with_env("COPILOT_ALLOW_ALL", Some("false".into()))
+        .with_env("COPILOT_ASSISTED_APPROVAL", Some("false".into()))
+        .with_env("COPILOT_PLUGIN_DIR_ONLY", Some("true".into()))
+        .with_env("COPILOT_DISABLE_RESUME_AUTO_CD", Some("1".into()))
+        .with_env("COPILOT_PROVIDER_API_KEY_COMMAND", None)
+        .with_env("COPILOT_SKILLS_DIRS", None))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -179,6 +208,10 @@ async fn main() -> anyhow::Result<()> {
             (
                 NativeCliKind::QwenCode,
                 configure_qwen(native_root.join("qwen")),
+            ),
+            (
+                NativeCliKind::Copilot,
+                configure_copilot(native_root.join("copilot")),
             ),
         ],
     )?);

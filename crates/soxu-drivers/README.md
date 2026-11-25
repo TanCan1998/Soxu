@@ -63,6 +63,18 @@ Daemon 将 Qwen 的配置、运行数据与历史隔离到自身数据目录的 
 创建快聊。Daemon 使用 Qwen 的最小与安全模式，按名称排除已实测的内置工具，并将
 本轮工具调用预算设为零。若模型仍返回工具调用，回合失败并暂停队列。
 
+## Daemon 本机 Copilot 只读快聊
+
+将 `SOXU_COPILOT_EXE` 指向真实 Copilot 平台可执行文件的绝对路径。Daemon
+将 `COPILOT_HOME` 与 `COPILOT_CACHE_HOME` 分别设置为自身数据目录下的
+`copilot/state` 与 `copilot/cache`。自定义模型可通过 Daemon 的启动环境设置
+`COPILOT_PROVIDER_BASE_URL`、`COPILOT_MODEL` 及相应的 provider 认证参数。
+使用 `soxu chat new --agent copilot --read-only` 创建本机快聊。
+
+Daemon 通过 stdin 投递用户文本，关闭内置 MCP、交互提问、项目指令和自动更新，
+并使用空工具白名单。Copilot 续接成功后沿用同一原生 UUID。当前只读接线限于快聊，
+项目目录会话需要先验证原生项目钩子的隔离行为。
+
 ## 逐驱动证据
 
 下列本机版本是本次核对的版本。常规隔离测试验证七种事件格式。实际登录推理已
@@ -76,7 +88,7 @@ Daemon 将 Qwen 的配置、运行数据与历史隔离到自身数据目录的 
 | Claude Code 2.1.331 | `--print --output-format stream-json --verbose`；部分文本、`result`、报告的轮次、token 与美元成本 | `projects/<cwd>/<id>.jsonl`，`--resume` / `--fork-session`；真实 Claude Code 经 Daemon 接本机模型夹具，两轮回复使用同一 UUID，记录落在隔离目录 |
 | OpenCode | `run --standalone --format json`；`text`、`tool_use`、`step_finish`；步骤、token、缓存、成本和工具执行时长 | `--session` / `--fork`；上游 `packages/cli/src/run/{run,noninteractive}.ts` 与夹具。本机不在 PATH，SQLite 历史扫描不可用 |
 | Antigravity 1.5.16 | `--print --output-format stream-json`；`init`、`step_update`、`result`；步骤、时长、轮次与 token | 已知会话 ID 可使用 `--conversation`；本机帮助、Google Antigravity *Headless mode* 与夹具。历史扫描和 Fork 不可用 |
-| Copilot 1.0.114 | `--output-format json --stream on`；助手增量、轮次结束与有报告的用量、上下文和延迟 | `session-state/<id>/events.jsonl`，`--resume=<id>`；本机帮助、GitHub *Streaming session events*、配置目录参考与夹具。Fork 不可用 |
+| Copilot 1.0.114 | `--output-format json --stream on`、stdin；助手增量、最终 `result`、有报告的用量、上下文和延迟 | `session-state/<id>/events.jsonl`，`--resume=<id>`；真实 Copilot 经 Daemon 通过两轮回环续接，沿用同一 UUID，且模型请求均无工具。Fork 不可用 |
 | Qwen Code 0.28.0 | `--output-format stream-json --include-partial-messages`；助手增量与 `result` 用量 | 项目 `chats/<id>.jsonl`，`--resume` / `--fork-session`；真实 Qwen 经 Daemon 通过两轮回环续接，模型请求不带工具，额外的工具请求被拦截 |
 
 ## 验证命令
