@@ -39,10 +39,10 @@ if (kind === "pi") {
     }
   });
 } else {
-  if (kind === "codex" || kind === "claude" || kind === "qwen") {
+  if (["codex", "claude", "qwen", "copilot"].includes(kind)) {
     assert.equal(fs.readFileSync(0, "utf8"), prompt);
   } else {
-    const expected = { agy: `--print=${prompt}`, copilot: `--prompt=${prompt}`, opencode: prompt }[kind];
+    const expected = { agy: `--print=${prompt}`, opencode: prompt }[kind];
     assert.equal(args.at(-1), expected);
   }
   switch (kind) {

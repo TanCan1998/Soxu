@@ -309,6 +309,17 @@ async fn native_qwen_read_only_rpc_resume_cancel_fifo_and_restart() {
     .await;
 }
 
+#[tokio::test]
+async fn native_copilot_read_only_rpc_resume_cancel_fifo_and_restart() {
+    assert_read_only_rpc_flow(
+        NativeCliKind::Copilot,
+        "Copilot",
+        "copilot.cjs",
+        "aabbccdd-1234-4234-8234-aabbccddeeff",
+    )
+    .await;
+}
+
 async fn assert_read_only_rpc_flow(
     kind: NativeCliKind,
     label: &str,
@@ -485,6 +496,38 @@ fn bind_local_fixture(dir: &TempDir, state: &DaemonState) -> SessionTarget {
     SessionTarget::Workspace {
         workspace_id: "workspace-fixture".to_owned(),
     }
+}
+
+#[tokio::test]
+async fn native_copilot_rejects_bound_directory() {
+    let dir = TempDir::new().expect("create test data dir");
+    let kind = NativeCliKind::Copilot;
+    let (addr, state, handle) =
+        spawn_daemon_with_drivers(&dir, None, kind, Some(native_fixture(kind, "copilot.cjs")))
+            .await;
+    let create = RpcCommand::CreateSession {
+        target: bind_local_fixture(&dir, &state),
+        title: None,
+        agent_id: kind.binary_name().to_owned(),
+        model_id: None,
+        permission: Some(PermissionLevel::ReadOnly),
+        thinking: None,
+    };
+    let Some(RpcResultData::SessionCreated(session)) = post_rpc(addr, create).await.result else {
+        panic!("expected bound session");
+    };
+    let denied = post_rpc(addr, submit_native(&session.session_id, "directory")).await;
+    assert_eq!(
+        denied.error.expect("directory error").code,
+        ErrorCode::DriverUnavailable
+    );
+    assert!(
+        state
+            .list_session_messages(&session.session_id)
+            .expect("load bound session history")
+            .is_empty()
+    );
+    handle.abort();
 }
 
 #[tokio::test]

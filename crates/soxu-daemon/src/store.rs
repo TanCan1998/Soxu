@@ -328,7 +328,7 @@ impl SqliteStore {
         load_table_json(
             &conn,
             "SELECT json FROM sessions
-             WHERE json_extract(json, '$.agent_id') IN ('codex', 'pi', 'claude', 'qwen')
+             WHERE json_extract(json, '$.agent_id') IN ('codex', 'pi', 'claude', 'qwen', 'copilot')
                AND json_extract(json, '$.permission') = 'read-only'
                AND json_extract(json, '$.lifecycle') = 'running'",
         )

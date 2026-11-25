@@ -34,6 +34,7 @@ enum ReadOnlyAgent {
     Pi,
     Claude,
     Qwen,
+    Copilot,
 }
 
 impl ReadOnlyAgent {
@@ -44,12 +45,22 @@ impl ReadOnlyAgent {
                 "pi" => return Ok(Self::Pi),
                 "claude" => return Ok(Self::Claude),
                 "qwen" => return Ok(Self::Qwen),
+                "copilot" if matches!(session.target, SessionTarget::QuickChat { .. }) => {
+                    return Ok(Self::Copilot);
+                }
+                "copilot" => {
+                    return Err(turn_error(
+                        ErrorCode::DriverUnavailable,
+                        "Copilot 只读当前仅支持本机快速对话",
+                        "请创建 Copilot 只读快速对话",
+                    ));
+                }
                 _ => {}
             }
         }
         Err(turn_error(
             ErrorCode::DriverUnavailable,
-            "当前只接通未归档的 Codex、Pi、Claude Code 和 Qwen Code 只读会话",
+            "当前只接通未归档的 Codex、Pi、Claude Code、Qwen Code 与 Copilot 只读会话",
             "请选择已配置的代理与只读权限，或新建只读快速对话",
         ))
     }
@@ -60,6 +71,7 @@ impl ReadOnlyAgent {
             Self::Pi => "Pi",
             Self::Claude => "Claude Code",
             Self::Qwen => "Qwen Code",
+            Self::Copilot => "Copilot",
         }
     }
 
@@ -69,6 +81,7 @@ impl ReadOnlyAgent {
             Self::Pi => NativeCliKind::Pi,
             Self::Claude => NativeCliKind::ClaudeCode,
             Self::Qwen => NativeCliKind::QwenCode,
+            Self::Copilot => NativeCliKind::Copilot,
         }
     }
 
@@ -87,6 +100,7 @@ impl ReadOnlyAgent {
             Self::Pi => "请通过 SOXU_PI_EXE 指定可信可执行文件，使用 Node 时同时设置 SOXU_PI_ENTRY",
             Self::Claude => "请通过 SOXU_CLAUDE_EXE 指定可信 Claude Code 可执行文件",
             Self::Qwen => "请通过 SOXU_QWEN_NODE 和 SOXU_QWEN_ENTRY 指定可信 Node 和 Qwen JS 入口",
+            Self::Copilot => "请通过 SOXU_COPILOT_EXE 指定可信 Copilot 平台可执行文件",
         };
         turn_error(ErrorCode::DriverUnavailable, error.to_string(), advice)
     }
@@ -144,6 +158,7 @@ impl DaemonState {
                 NativeCliKind::Pi,
                 NativeCliKind::ClaudeCode,
                 NativeCliKind::QwenCode,
+                NativeCliKind::Copilot,
             ] {
                 let (Some(driver), Some(agent)) = (
                     drivers.get(&kind),
@@ -467,9 +482,7 @@ impl DaemonState {
                         ReadOnlyAgent::Codex => self
                             .record_native_session_id(&assistant.session_id, id)
                             .map_err(|_| "原生会话标识无法落盘".to_owned())?,
-                        ReadOnlyAgent::Pi | ReadOnlyAgent::Claude | ReadOnlyAgent::Qwen => {
-                            pending_id = Some(id)
-                        }
+                        _ => pending_id = Some(id),
                     },
                     DriverEvent::Text(text_delta) => {
                         if assistant.text.len().saturating_add(text_delta.len()) > MAX_REPLY_BYTES {
