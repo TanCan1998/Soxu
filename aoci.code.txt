@@ -99,12 +99,13 @@ process.rs[IW8L]: F:用Tokio启动可信原生CLI，转发有界JSONL与Pi控制
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/===
 Cargo.toml[FV5T]: F:声明 soxu-git crate 的包元数据、lint 规则和依赖 | R:code:Cargo.toml | A:soxu-git | S:版本、Rust edition、最低 Rust 版本、许可证、lint 规则和全部依赖均继承自工作区
-README.md[SD6T]: F:说明M3a只读探测接口、原始路径身份、安全限制、临时夹具验证与后续M3任务 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/status.rs | A:消费接口,只读与限制,验证与后续 | S:内嵌Git工作树在untracked=all下仍输出目录后缀，仅问号与叹号记录允许；marker证明配置可执行而探测拒绝执行，超限回收直接子进程，不消除竞态
+README.md[SD6T]: F:说明M3a状态探测及M3b本地项目只读接入、身份类型、安全边界和临时夹具验证 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/project.rs,code:crates/soxu-git/tests/project.rs | A:GitProbe,open_local_project,只读与限制,验证与后续 | S:打开只查身份不扫描status；普通目录仅接受Git明确非仓库结果，bare、元数据和损坏不降级；后续Init/Clone需显式请求
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/===
-lib.rs[LD6T]: F:公开Git仓库探测与结构化状态解析类型，保留轮次检查点摘要及兼容测试 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/status.rs | A:GitProbe,RepositorySnapshot,HeadState,parse_status,StatusEntry,CheckpointSummary | S:CheckpointSummary原有四字段及serde契约不变，探测结果未扩展公共协议
-probe.rs[ID8M]: F:通过可信原生Git绝对入口异步探测工作树根、独立与共享Git目录、分支HEAD及结构化状态 | R:code:crates/soxu-git/src/status.rs,code:crates/soxu-git/src/probe/tests.rs | A:GitProbe::new,GitProbe::discover,GitProbe::probe,RepositorySnapshot,HeadState,GitError | S:清除继承GIT环境并屏蔽全局配置；禁用可选锁、fsmonitor及按需fetch。含include与worktree配置的外部过滤器和gitlink提前拒绝。限时15秒、每流16MiB；读到上限加一立即终止，超时也等待回收直接子进程。非原子快照且无配置竞态保护
+lib.rs[LD6T]: F:公开Git探测、结构化状态与本地项目身份类型，保留轮次检查点摘要及兼容测试 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/project.rs,code:crates/soxu-git/src/status.rs | A:GitProbe,LocalProject,WorktreeIdentity,ProjectOpenError,parse_status,CheckpointSummary | S:CheckpointSummary原有四字段及serde契约不变，项目身份未扩展根协议
+probe.rs[ID8M]: F:经可信原生Git入口异步探测工作树、Git目录、分支HEAD与状态，并为项目接入复用受限身份命令 | R:code:crates/soxu-git/src/status.rs,code:crates/soxu-git/src/project.rs,code:crates/soxu-git/src/probe/tests.rs | A:GitProbe::new,discover,probe,read_path,run_command,GitError | S:清除继承GIT环境并屏蔽全局配置；禁用可选锁、fsmonitor及按需fetch。状态探测提前拒绝外部过滤器与gitlink。限时15秒、每流16MiB，超限与超时回收直接子进程；run_command保留退出码和stderr供身份判定，run既有错误语义不变，非原子快照且无配置竞态保护
 status.rs[KD8M]: F:纯字节解析porcelain v2 NUL记录，结构化保留XY、子模块、模式OID、重命名评分与原始路径 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/status.rs | A:parse_status,GitPath,StatusSnapshot,StatusEntry,ParseError | S:重命名下一NUL段为源路径；OID含零占位与头部须同为40或64位。仅未跟踪和忽略路径允许单个尾斜线，原字节保留；跟踪路径及内部空分量拒绝。Windows转换拒绝非UTF8及风险名；serde路径为字节数组
+project.rs[ID8S]: F:只读打开规范化绝对目录，区分普通目录和Git工作树，返回工作树根及独立与共享Git目录 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/project.rs | A:GitProbe::open_local_project,LocalProject,WorktreeIdentity,ProjectOpenError | S:仅退出128且空stdout及精确非仓库stderr可降级普通目录；检查被Git跳过的祖先元数据防损坏误判。bare和元数据目录拒绝，linked保留独立根及Git目录；不扫描status、不执行初始化克隆或写入
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-magpie/===
 Cargo.toml[FV5T]: F:声明soxu-magpie包及其工作区依赖 | R:code:Cargo.toml | A:soxu-magpie | S:包版本、Rust版本、edition、许可证和lint规则均继承自工作区
@@ -135,7 +136,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录Soxu架构与工程决策，新增主控只编排审查、AGY延期及Pi/Git正交并行的ADR-007 | R:code:AGENTS.md,code:docs/ops/PROGRESS.md,code:design-system/soxu/MASTER.md | A:ADR-001..007,Owned Paths,Queue/Steer/Stop | S:#26开放但路由关闭，延期不等于M2七代理验收；PiDeck仅参考原生Pi，不引入ACP。Issue#34的PR#35先合流，再串行合入Issue#32/#33业务PR；后续分支吸收main并保留前序AOCI认知，执行代理不得合并或回收。
-PROGRESS.md[SW6S]: F:记录M0至M6交付边界、Pi与Git波次收口证据、并行工作区身份及M3后续依赖 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0..M6,#26,#32/#37,#33/#36,#34/#35,#38/#39 | S:#26开放延期且Daemon路由关闭；M2七代理及M3仍有未交付范围。#38工作区表为PR构建快照；#39先复用M3a只读身份边界，跨模块契约单独合入，回退先快照、提交先预检。
+PROGRESS.md[SW6S]: F:记录里程碑交付边界、Pi与Git证据及M3b本PR交付API、验收边界和后续M3队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-git/README.md | A:M0..M6,#26,#32/#37,#33/#36,#38/#39/#40,open_local_project | S:M3b区分普通目录与GitWorktree并拒绝bare、损坏、元数据和权限错误，25项专项通过；Agent表是PR构建快照，永久队列从Init/Clone及Worktree清单开始。根依赖协议冻结，#26延期且Daemon路由关闭
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
