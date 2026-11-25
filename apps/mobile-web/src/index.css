@@ -95,6 +95,74 @@
   min-width: 44px;
 }
 
+/* ── 全端统一滚动条与自隐式横向滚动条 ──────────────────────────────────────── */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--soxu-interaction-scrollbar-thumb);
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active {
+  background-color: var(--soxu-interaction-scrollbar-thumb-hover);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--soxu-interaction-scrollbar-thumb) transparent;
+  }
+}
+
+/* 标签栏等专用：平时完全隐身，悬停、键盘聚焦或正在滚动时平滑浮现 */
+.soxu-auto-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.soxu-auto-scrollbar::-webkit-scrollbar-track,
+.soxu-auto-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.soxu-auto-scrollbar::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 9999px;
+  transition: background-color 150ms var(--soxu-ease-out);
+}
+
+.soxu-auto-scrollbar:hover::-webkit-scrollbar-thumb,
+.soxu-auto-scrollbar:focus-within::-webkit-scrollbar-thumb,
+.soxu-auto-scrollbar[data-scrolling="true"]::-webkit-scrollbar-thumb {
+  background-color: var(--soxu-interaction-scrollbar-thumb);
+}
+
+.soxu-auto-scrollbar:hover::-webkit-scrollbar-thumb:hover,
+.soxu-auto-scrollbar[data-scrolling="true"]::-webkit-scrollbar-thumb:hover {
+  background-color: var(--soxu-interaction-scrollbar-thumb-hover);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .soxu-auto-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  .soxu-auto-scrollbar:hover,
+  .soxu-auto-scrollbar:focus-within,
+  .soxu-auto-scrollbar[data-scrolling="true"] {
+    scrollbar-color: var(--soxu-interaction-scrollbar-thumb) transparent;
+  }
+}
+
 .soxu-no-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -179,20 +247,9 @@
   animation: soxu-pulse 1.8s var(--soxu-ease-in-out) infinite;
 }
 
-/* 细滚动条与桌面纯黑语法/终端类 */
-.soxu-scroll::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.soxu-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.soxu-scroll::-webkit-scrollbar-thumb {
-  background: var(--soxu-border-subtle);
-  border-radius: 9999px;
-}
-.soxu-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--soxu-border-strong);
+/* 保留 .soxu-scroll 作为语义显式类名，视觉规则继承全端统一滚动条 */
+.soxu-scroll {
+  overscroll-behavior: contain;
 }
 
 .syn-kw { color: var(--soxu-syntax-keyword); }

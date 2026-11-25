@@ -32,7 +32,7 @@ import {
   Terminal,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CodeDiffView, CodeSnippetView, type DiffRowItem } from "@/components/CodeBlockView";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { HoverExpandDock } from "@/components/HoverExpandDock";
@@ -50,6 +50,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -59,6 +60,7 @@ import {
   getPermissionMeta,
   reconcileAgentCapabilities,
 } from "@/lib/agent-capabilities";
+import { I18nProvider, useI18n, type I18nKey } from "@/lib/i18n";
 import {
   DEFAULT_PREFERENCES,
   applyPreferencesToDom,
@@ -129,30 +131,53 @@ function bucketDotClass(bucket: WorkspaceBucket): string {
   }
 }
 
-function bucketLabel(bucket: WorkspaceBucket): { label: string; variant: "warning" | "danger" | "running" | "accent" | "neutral" } {
+function bucketLabel(bucket: WorkspaceBucket): { labelKey: I18nKey; variant: "warning" | "danger" | "running" | "accent" | "neutral" } {
   switch (bucket) {
     case "needs_input":
-      return { label: "待批", variant: "warning" };
+      return { labelKey: "status.needsInput", variant: "warning" };
     case "failed":
-      return { label: "失败", variant: "danger" };
+      return { labelKey: "status.failed", variant: "danger" };
     case "running":
-      return { label: "运行中", variant: "running" };
+      return { labelKey: "status.running", variant: "running" };
     case "attention":
-      return { label: "新完成", variant: "accent" };
+      return { labelKey: "status.attention", variant: "accent" };
     case "done":
-      return { label: "空闲", variant: "neutral" };
+      return { labelKey: "status.done", variant: "neutral" };
   }
 }
 
 export function DesktopWorkbench() {
   const [prefs, setPrefs] = useState<SoxuPreferences>(loadPreferences);
-  const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(() => applyPreferencesToDom(prefs));
+  return (
+    <I18nProvider locale={prefs.locale}>
+      <DesktopWorkbenchInner prefs={prefs} setPrefs={setPrefs} />
+    </I18nProvider>
+  );
+}
 
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+function DesktopWorkbenchInner({
+  prefs,
+  setPrefs,
+}: {
+  prefs: SoxuPreferences;
+  setPrefs: React.Dispatch<React.SetStateAction<SoxuPreferences>>;
+}) {
+  const { t } = useI18n();
+  const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(() => applyPreferencesToDom(prefs));
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1280,
+  );
+  const isLeftDrawer = viewportWidth < 900;
+  const isRightDrawer = viewportWidth < 1120;
+
+  const [leftOpen, setLeftOpen] = useState(() => (typeof window !== "undefined" ? window.innerWidth >= 900 : true));
+  const [rightOpen, setRightOpen] = useState(() => (typeof window !== "undefined" ? window.innerWidth >= 1120 : true));
   const [leftWidth, setLeftWidth] = useState(prefs.leftSidebarWidth);
   const [rightWidth, setRightWidth] = useState(prefs.rightInspectorWidth);
   const [resizingSide, setResizingSide] = useState<"left" | "right" | null>(null);
+  const [tabsScrolling, setTabsScrolling] = useState(false);
+  const tabStripRef = useRef<HTMLDivElement>(null);
+  const tabScrollTimer = useRef<number | null>(null);
 
   const [rightTab, setRightTab] = useState<"diff" | "files" | "scripts" | "terminal">("diff");
   const [diffLayout, setDiffLayout] = useState<"unified" | "split">("unified");
@@ -240,6 +265,34 @@ export function DesktopWorkbench() {
   }, [prefs.leftSidebarWidth, prefs.rightInspectorWidth]);
 
   useEffect(() => {
+    const prevWidthRef = { leftWasDrawer: viewportWidth < 900, rightWasDrawer: viewportWidth < 1120 };
+    const onResize = () => {
+      const w = window.innerWidth;
+      setViewportWidth(w);
+      const nextLeftDrawer = w < 900;
+      const nextRightDrawer = w < 1120;
+      if (!prevWidthRef.leftWasDrawer && nextLeftDrawer) {
+        setLeftOpen(false);
+      }
+      if (!prevWidthRef.rightWasDrawer && nextRightDrawer) {
+        setRightOpen(false);
+      }
+      prevWidthRef.leftWasDrawer = nextLeftDrawer;
+      prevWidthRef.rightWasDrawer = nextRightDrawer;
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (tabScrollTimer.current !== null) {
+        window.clearTimeout(tabScrollTimer.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -298,6 +351,16 @@ export function DesktopWorkbench() {
       window.removeEventListener("pointerup", onUp);
     };
   }, [resizingSide, leftOpen, rightOpen, leftWidth, rightWidth]);
+
+  function markTabStripScrolling() {
+    setTabsScrolling(true);
+    if (tabScrollTimer.current !== null) {
+      window.clearTimeout(tabScrollTimer.current);
+    }
+    tabScrollTimer.current = window.setTimeout(() => {
+      setTabsScrolling(false);
+    }, 900);
+  }
 
   function flashToast(msg: string) {
     setToast(msg);
@@ -376,6 +439,7 @@ export function DesktopWorkbench() {
   function openWorkspaceTab(w: WorkspaceItem) {
     handleSelectCli(w.agent);
     setModel(w.model);
+    if (isLeftDrawer) setLeftOpen(false);
     const existing = tabs.find((t) => t.targetKind === "workspace" && t.targetId === w.id);
     if (existing) {
       setActiveTabId(existing.id);
@@ -396,6 +460,7 @@ export function DesktopWorkbench() {
   function openQuickChatTab(q: QuickChatItem) {
     handleSelectCli(q.agent);
     setModel(q.model);
+    if (isLeftDrawer) setLeftOpen(false);
     const existing = tabs.find((t) => t.targetKind === "quick" && t.targetId === q.id);
     if (existing) {
       setActiveTabId(existing.id);
@@ -580,31 +645,462 @@ export function DesktopWorkbench() {
     }, new Map<string, { path: string; items: WorkspaceItem[] }>()),
   );
 
+  // 左侧导航正文（宽屏平铺，窄屏自动作为左滑出抽屉内容复用）
+  const leftSidebarBody = (
+    <div className="flex-1 min-h-0 flex flex-col bg-[var(--soxu-surface-sidebar)] overflow-hidden">
+      <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-4 soxu-scroll">
+        {/* 1. 无项目快速对话区 */}
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center justify-between px-1.5 mb-0.5">
+            <span className="text-[11px] font-semibold tracking-wider text-[var(--soxu-text-tertiary)]">
+              {t("sidebar.quickChatsCount", { count: activeQuickChats.length })}
+            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => createQuickChat()}
+                  className="h-5 w-5 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)] cursor-pointer"
+                  aria-label={t("sidebar.newQuickChat")}
+                >
+                  <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("sidebar.newQuickChat")}</TooltipContent>
+            </Tooltip>
+          </div>
+
+          {activeQuickChats.map((qc) => {
+            const selected = activeTab?.targetKind === "quick" && activeTab.targetId === qc.id;
+            return (
+              <div
+                key={qc.id}
+                onClick={() => openQuickChatTab(qc)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openQuickChatTab(qc);
+                  }
+                }}
+                className={cn(
+                  "group w-full rounded-lg px-2 py-1.5 flex items-center justify-between gap-2 text-left text-xs transition-colors duration-150 cursor-pointer border",
+                  rowHeightClass,
+                  selected
+                    ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)]"
+                    : "border-transparent text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)]",
+                )}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={cn("h-2 w-2 rounded-full shrink-0", bucketDotClass(qc.bucket))} />
+                  <span className="truncate font-medium">{qc.title}</span>
+                </div>
+                <button
+                  type="button"
+                  title={t("sidebar.archiveAction")}
+                  aria-label={`${t("sidebar.archiveAction")} ${qc.title}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    archiveTarget("quick", qc.id, qc.title);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 h-5 w-5 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] shrink-0 cursor-pointer transition-opacity"
+                >
+                  <Archive className="h-3 w-3" strokeWidth={1.75} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 2. 项目文件夹 -> 工作树二级目录 */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between px-1.5">
+            <span className="text-[11px] font-semibold tracking-wider text-[var(--soxu-text-tertiary)]">
+              {t("sidebar.projectsCount", { count: projectGroups.length })}
+            </span>
+          </div>
+
+          {projectGroups.map(([projName, group]) => {
+            const isExpanded = openProjects[projName] ?? true;
+            return (
+              <div key={projName} className="flex flex-col gap-0.5">
+                <div className="group flex items-center justify-between rounded-lg px-1.5 py-1 hover:bg-[var(--soxu-interaction-hover)] transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => setOpenProjects((p) => ({ ...p, [projName]: !isExpanded }))}
+                    className="flex-1 min-w-0 flex items-center gap-1.5 text-left text-xs font-semibold text-[var(--soxu-text-primary)] cursor-pointer"
+                  >
+                    <ChevronRight
+                      className={cn("h-3.5 w-3.5 text-[var(--soxu-text-tertiary)] shrink-0 transition-transform duration-150", isExpanded && "rotate-90")}
+                      strokeWidth={1.75}
+                    />
+                    {isExpanded ? (
+                      <FolderOpen className="h-3.5 w-3.5 text-[var(--soxu-text-secondary)] shrink-0" strokeWidth={1.75} />
+                    ) : (
+                      <Folder className="h-3.5 w-3.5 text-[var(--soxu-text-secondary)] shrink-0" strokeWidth={1.75} />
+                    )}
+                    <span className="truncate">{projName}</span>
+                    <span className="text-[10.5px] soxu-mono font-normal text-[var(--soxu-text-tertiary)] truncate">
+                      {prefs.redactHomePath ? group.path : group.path.replace("~", "/home/dev")}
+                    </span>
+                  </button>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newWks: WorkspaceItem = {
+                            id: `wks-${Date.now().toString().slice(-4)}`,
+                            project: projName,
+                            projectPath: group.path,
+                            branch: `feat/wt-${Date.now().toString().slice(-3)}`,
+                            isolation: "worktree",
+                            agent: cli,
+                            model,
+                            bucket: "done",
+                            summary: "新建隔离工作树，已注入目录上下文",
+                            diffStat: "+0 -0",
+                          };
+                          setWorkspaces((prev) => [newWks, ...prev]);
+                          openWorkspaceTab(newWks);
+                          flashToast(`已在 ${projName} 下新建工作树 ${newWks.branch}`);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 h-5 w-5 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] cursor-pointer transition-opacity shrink-0"
+                        aria-label={`为项目 ${projName} 新建工作树`}
+                      >
+                        <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>在 {projName} 下新建隔离工作树</TooltipContent>
+                  </Tooltip>
+                </div>
+
+                {isExpanded && (
+                  <div className="ml-3 pl-2.5 border-l border-[var(--soxu-border-hairline)] flex flex-col gap-0.5 mt-0.5">
+                    {group.items.map((w) => {
+                      const selected = activeTab?.targetKind === "workspace" && activeTab.targetId === w.id;
+                      const b = bucketLabel(w.bucket);
+                      return (
+                        <div
+                          key={w.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openWorkspaceTab(w)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openWorkspaceTab(w);
+                            }
+                          }}
+                          className={cn(
+                            "group w-full rounded-lg px-2 py-1.5 flex items-center justify-between gap-2 text-left text-xs transition-colors duration-150 cursor-pointer border",
+                            rowHeightClass,
+                            selected
+                              ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)]"
+                              : "border-transparent text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)]",
+                          )}
+                        >
+                          <div className="min-w-0 flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className={cn("h-2 w-2 rounded-full shrink-0", bucketDotClass(w.bucket))} />
+                              {w.isolation === "worktree" ? (
+                                <GitBranch className="h-3 w-3 shrink-0 text-[var(--soxu-text-tertiary)]" strokeWidth={1.75} />
+                              ) : (
+                                <Folder className="h-3 w-3 shrink-0 text-[var(--soxu-text-tertiary)]" strokeWidth={1.75} />
+                              )}
+                              <span className="soxu-mono font-medium truncate">{w.branch}</span>
+                            </div>
+                            <div className="pl-3.5 text-[10.5px] soxu-tabular text-[var(--soxu-text-tertiary)] flex items-center gap-1.5">
+                              <span>{w.isolation === "worktree" ? t("sidebar.worktree") : t("sidebar.localRoot")}</span>
+                              <span>{w.diffStat}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {w.bucket !== "done" && <Badge variant={b.variant}>{t(b.labelKey)}</Badge>}
+                            <button
+                              type="button"
+                              title={t("sidebar.archiveAction")}
+                              aria-label={`${t("sidebar.archiveAction")} ${w.branch}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                archiveTarget("workspace", w.id, `${w.project} / ${w.branch}`);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 h-5 w-5 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] cursor-pointer transition-opacity"
+                            >
+                              <Archive className="h-3 w-3" strokeWidth={1.75} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 3. 已归档对话折叠区 */}
+        <Collapsible open={archivedOpen} onOpenChange={setArchivedOpen}>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="w-full px-1.5 py-1 flex items-center justify-between text-[11px] font-medium text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-secondary)] cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <Archive className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.archivedCount", { count: archivedItems.length })}</span>
+              </span>
+              <ChevronRight
+                className={cn("h-3.5 w-3.5 transition-transform duration-150", archivedOpen && "rotate-90")}
+                strokeWidth={1.75}
+              />
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="flex flex-col gap-1 pt-1">
+            {archivedItems.length === 0 ? (
+              <div className="px-2 py-2 text-[11px] text-[var(--soxu-text-ghost)]">{t("sidebar.noArchived")}</div>
+            ) : (
+              archivedItems.map((arc) => (
+                <div
+                  key={arc.id}
+                  className="rounded-lg px-2 py-1.5 bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-hairline)] flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-[var(--soxu-text-secondary)]">{arc.title}</div>
+                    <div className="text-[10px] text-[var(--soxu-text-tertiary)]">{arc.sub}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => restoreArchivedTarget(arc.kind, arc.id)}
+                    className="h-6 px-2 rounded text-[11px] text-[var(--soxu-semantic-accent)] hover:bg-[var(--soxu-interaction-hover)] cursor-pointer shrink-0 inline-flex items-center gap-1"
+                  >
+                    <ArchiveRestore className="h-3 w-3" strokeWidth={1.75} />
+                    <span>{t("sidebar.restore")}</span>
+                  </button>
+                </div>
+              ))
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+      </div>
+
+      {/* 左栏底部快捷工具 */}
+      <div className="border-t border-[var(--soxu-border-hairline)] p-2 flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-1 min-w-0">
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setModal("history")}>
+            <History className="h-3 w-3" strokeWidth={1.75} />
+            <span>{t("sidebar.importHistory")}</span>
+          </Button>
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setModal("schedules")}>
+            <Clock className="h-3 w-3" strokeWidth={1.75} />
+            <span>{t("sidebar.schedules")}</span>
+          </Button>
+        </div>
+        <span className="text-[11px] text-[var(--soxu-text-tertiary)] px-1.5 truncate">
+          {magpieMode === "magpie_managed" ? t("sidebar.gatewayManaged") : t("sidebar.gatewayDirect")}
+        </span>
+      </div>
+    </div>
+  );
+
+  // 右侧上下文与代码审阅正文（宽屏平铺，窄屏自动作为右滑出抽屉内容复用）
+  const rightInspectorBody = (
+    <div className="flex-1 min-h-0 flex flex-col bg-[var(--soxu-surface-sidebar)] overflow-hidden">
+      <div className="h-[38px] px-2.5 border-b border-[var(--soxu-border-hairline)] flex items-center justify-between gap-2 shrink-0">
+        <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as typeof rightTab)}>
+          <TabsList>
+            <TabsTrigger value="diff">{t("inspector.diff")}</TabsTrigger>
+            <TabsTrigger value="files">{t("inspector.files")}</TabsTrigger>
+            <TabsTrigger value="scripts">{t("inspector.scripts")}</TabsTrigger>
+            <TabsTrigger value="terminal">{t("inspector.terminal")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {isRightDrawer && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setRightOpen(false)}
+            aria-label={t("header.toggleRight")}
+            className="shrink-0"
+          >
+            <X className="h-4 w-4" strokeWidth={1.75} />
+          </Button>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3 soxu-scroll">
+        {activeTab?.targetKind !== "workspace" && rightTab !== "terminal" ? (
+          <div className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] p-5 text-center text-xs text-[var(--soxu-text-tertiary)] flex flex-col items-center gap-2.5 mt-4">
+            <Folder className="h-5 w-5 text-[var(--soxu-text-tertiary)]" strokeWidth={1.75} />
+            <div>{t("inspector.emptyTitle")}</div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const first = activeWorkspaces[0];
+                if (first) openWorkspaceTab(first);
+              }}
+            >
+              {t("tabs.newWorkspace")}
+            </Button>
+          </div>
+        ) : (
+          <>
+            {rightTab === "diff" && (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="inline-flex rounded-lg bg-[var(--soxu-surface-inset)] p-0.5 border border-[var(--soxu-border-hairline)]">
+                    {(["unified", "split"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setDiffLayout(m)}
+                        className={cn(
+                          "px-2.5 py-1 rounded-md text-[11px] cursor-pointer",
+                          diffLayout === m
+                            ? "bg-[var(--soxu-surface-raised)] text-[var(--soxu-text-primary)]"
+                            : "text-[var(--soxu-text-tertiary)]",
+                        )}
+                      >
+                        {m === "unified" ? t("inspector.diffUnified") : t("inspector.diffSplit")}
+                      </button>
+                    ))}
+                  </div>
+                  <Button size="sm" variant="default" onClick={() => setModal("commit")}>
+                    <GitCommit className="h-3.5 w-3.5" strokeWidth={1.75} />
+                    <span>{t("inspector.commitChanges")}</span>
+                  </Button>
+                </div>
+
+                <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] truncate">
+                  crates/soxu-drivers/src/lib.rs · {t("inspector.baseBranchLabel", { branch: prefs.defaultBranch })}
+                </div>
+
+                <CodeDiffView
+                  rows={DIFF_ROWS}
+                  layout={diffLayout}
+                  showLineNumbers={prefs.showLineNumbers}
+                  wrap={prefs.codeWordWrap}
+                />
+              </>
+            )}
+
+            {rightTab === "files" && (
+              <>
+                <div className="flex flex-col gap-0.5">
+                  {["AGENTS.md", "design-system/soxu/tokens.json", "crates/soxu-drivers/src/lib.rs", "crates/soxu-magpie/src/lib.rs"].map(
+                    (f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => setSelectedFile(f)}
+                        className={cn(
+                          "w-full rounded-lg px-2.5 py-1.5 text-left text-xs soxu-mono flex items-center gap-2 cursor-pointer",
+                          selectedFile === f
+                            ? "bg-[var(--soxu-interaction-selected)] text-[var(--soxu-text-primary)]"
+                            : "text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)]",
+                        )}
+                      >
+                        <FileCode2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                        <span className="truncate">{f}</span>
+                      </button>
+                    ),
+                  )}
+                </div>
+                <CodeSnippetView
+                  startLine={1}
+                  showLineNumbers={prefs.showLineNumbers}
+                  wrap={prefs.codeWordWrap}
+                  lines={[
+                    `// ${selectedFile}`,
+                    "pub enum EnvironmentMode {",
+                    "  MagpieManaged,",
+                    "  StandaloneNative,",
+                    "}",
+                  ]}
+                />
+              </>
+            )}
+
+            {rightTab === "scripts" && (
+              <div className="flex flex-col gap-2">
+                {scripts.map((s) => (
+                  <div
+                    key={s.name}
+                    className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] p-2.5 flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold soxu-mono">
+                        <span>{s.name}</span>
+                        {s.port && <Badge variant="accent">{s.port}</Badge>}
+                      </div>
+                      <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] truncate">{s.cmd}</div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant={s.running ? "secondary" : "default"}
+                      onClick={() =>
+                        setScripts((p) => p.map((x) => (x.name === s.name ? { ...x, running: !x.running } : x)))
+                      }
+                    >
+                      {s.running ? "停止" : "启动"}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {rightTab === "terminal" && (
+          <pre className="m-0 rounded-lg border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-terminal)] p-3 soxu-code-block leading-relaxed overflow-x-auto">
+            <div>
+              <span style={{ color: "var(--soxu-ansi-bright-green)" }}>dev@soxu</span>{" "}
+              <span style={{ color: "var(--soxu-ansi-blue)" }}>~/projects/Soxu</span>
+            </div>
+            <div>
+              <span style={{ color: "var(--soxu-ansi-green)" }}>OK</span> 全仓门禁验证已就绪
+            </div>
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <TooltipProvider delayDuration={220}>
       <div className="h-screen w-screen flex flex-col bg-[var(--soxu-surface-canvas)] text-[var(--soxu-text-primary)] overflow-hidden">
-        {/* 顶部标题栏：采用三栏对称 Grid 保证搜索框恒定水平居中 */}
-        <header className="h-[var(--soxu-size-titlebar-height)] min-h-[var(--soxu-size-titlebar-height)] bg-[var(--soxu-surface-sidebar)] border-b border-[var(--soxu-border-hairline)] px-3 grid grid-cols-[minmax(0,1fr)_minmax(200px,360px)_minmax(0,1fr)] items-center gap-3 select-none z-[var(--soxu-z-header)]">
-          <div className="flex items-center gap-2 min-w-0 justify-self-start">
-            <div className="flex items-center gap-2 px-1 shrink-0">
-              <span className="h-2 w-2 rounded-full bg-[var(--soxu-semantic-accent)]" aria-hidden="true" />
-              <span className="text-[13px] font-semibold tracking-tight">索序</span>
-            </div>
+        {/* 顶部标题栏：窄屏分轨防重叠；宽屏三栏对称 Grid 保证搜索框恒定水平居中 */}
+        <header className="h-[var(--soxu-size-titlebar-height)] min-h-[var(--soxu-size-titlebar-height)] bg-[var(--soxu-surface-sidebar)] border-b border-[var(--soxu-border-hairline)] px-2 sm:px-3 grid grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-[minmax(max-content,1fr)_minmax(150px,360px)_minmax(max-content,1fr)] items-center gap-1.5 sm:gap-3 select-none z-[var(--soxu-z-header)]">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 justify-self-start">
+            {/* Soxu 为品牌名，不做中文翻译，且前面严禁加任何状态圆点 */}
+            <span className="px-1 text-[13px] font-semibold tracking-tight text-[var(--soxu-text-primary)] shrink-0">
+              {t("brand.name")}
+            </span>
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant={leftOpen ? "secondary" : "ghost"} size="icon-sm" onClick={() => setLeftOpen((v) => !v)} aria-label="折叠左侧栏">
+                <Button
+                  variant={leftOpen ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  onClick={() => setLeftOpen((v) => !v)}
+                  aria-label={isLeftDrawer ? t("header.openLeftDrawer") : t("header.toggleLeft")}
+                  className="shrink-0"
+                >
                   <PanelLeft className="h-4 w-4" strokeWidth={1.75} />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>折叠或展开左侧导航栏 (Ctrl+B)</TooltipContent>
+              <TooltipContent>{isLeftDrawer ? t("header.openLeftDrawer") : `${t("header.toggleLeft")} (Ctrl+B)`}</TooltipContent>
             </Tooltip>
 
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-[var(--soxu-text-tertiary)] truncate min-w-0">
+            <span className="hidden lg:inline-flex items-center gap-1.5 text-xs text-[var(--soxu-text-tertiary)] truncate min-w-0">
               {activeTab?.targetKind === "quick" ? (
                 <>
                   <MessageSquare className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-                  <span className="truncate">快速对话</span>
+                  <span className="truncate">{t("header.quickChat")}</span>
                 </>
               ) : activeWorkspace ? (
                 <>
@@ -612,7 +1108,7 @@ export function DesktopWorkbench() {
                   <span className="soxu-mono truncate">{activeWorkspace.project} / {activeWorkspace.branch}</span>
                 </>
               ) : (
-                <span className="truncate">空闲工作台</span>
+                <span className="truncate">{t("header.idleWorkbench")}</span>
               )}
             </span>
           </div>
@@ -621,22 +1117,22 @@ export function DesktopWorkbench() {
           <button
             type="button"
             onClick={() => setModal("cmdk")}
-            className="h-[26px] w-full justify-self-center rounded-lg border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] px-2.5 flex items-center justify-between gap-2 text-xs text-[var(--soxu-text-tertiary)] hover:border-[var(--soxu-border-strong)] hover:text-[var(--soxu-text-secondary)] transition-colors cursor-pointer"
+            className="h-[26px] w-full max-w-[360px] min-w-0 justify-self-center rounded-lg border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] px-2 sm:px-2.5 flex items-center justify-between gap-1.5 text-xs text-[var(--soxu-text-tertiary)] hover:border-[var(--soxu-border-strong)] hover:text-[var(--soxu-text-secondary)] transition-colors cursor-pointer"
           >
-            <span className="flex items-center gap-1.5 truncate">
+            <span className="flex items-center gap-1.5 min-w-0">
               <Search className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-              <span className="truncate">搜索会话、文件或系统指令...</span>
+              <span className="truncate">{t("header.searchPlaceholder")}</span>
             </span>
-            <kbd className="soxu-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--soxu-surface-control)] text-[var(--soxu-text-secondary)] shrink-0">
+            <kbd className="hidden sm:inline-flex soxu-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--soxu-surface-control)] text-[var(--soxu-text-secondary)] shrink-0">
               Ctrl+K
             </kbd>
           </button>
 
-          {/* 右侧极简工具区：无角标悬停收纳 + 纯图标主题切换 + 设置齿轮 + 右栏开关 */}
-          <div className="flex items-center gap-1 justify-self-end">
+          {/* 右侧极简工具区：无角标悬停收纳（窄屏悬浮弹出）+ 纯图标主题切换 + 设置齿轮 + 右栏/抽屉开关 */}
+          <div className="flex items-center gap-1 justify-self-end shrink-0">
             <HoverExpandDock
               triggerIcon={<LayoutGrid className="h-4 w-4" strokeWidth={1.75} />}
-              triggerLabel="更多工作台工具（悬停自动展开）"
+              triggerLabel={t("header.moreTools")}
               expandDirection="left"
             >
               <Tooltip>
@@ -704,392 +1200,162 @@ export function DesktopWorkbench() {
                     setSettingsSection("appearance");
                     setSettingsOpen(true);
                   }}
-                  aria-label="打开设置界面"
+                  aria-label={t("header.settings")}
                 >
                   <Settings className="h-4 w-4" strokeWidth={1.75} />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>系统设置 (Ctrl+,)</TooltipContent>
+              <TooltipContent>{t("header.settings")} (Ctrl+,)</TooltipContent>
             </Tooltip>
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant={rightOpen ? "secondary" : "ghost"} size="icon-sm" onClick={() => setRightOpen((v) => !v)} aria-label="折叠右侧栏">
+                <Button
+                  variant={rightOpen ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  onClick={() => setRightOpen((v) => !v)}
+                  aria-label={isRightDrawer ? t("header.openRightDrawer") : t("header.toggleRight")}
+                >
                   <PanelRight className="h-4 w-4" strokeWidth={1.75} />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>折叠或展开右侧审阅栏 (Ctrl+J)</TooltipContent>
+              <TooltipContent>{isRightDrawer ? t("header.openRightDrawer") : `${t("header.toggleRight")} (Ctrl+J)`}</TooltipContent>
             </Tooltip>
           </div>
         </header>
 
-        {/* 主四区网格：左右侧栏支持拖拽调宽 */}
+        {/* 主四区网格：宽屏左右平铺支持拖拽调宽；窄屏左右栏自动收进抽屉 */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
-          {/* 左侧导航栏（无项目快速对话 + 项目文件夹 -> 工作树树形目录 + 归档） */}
-          <aside
-            aria-label="快速对话与项目工作树"
-            style={{ width: leftOpen ? `${leftWidth}px` : "0px" }}
-            className={cn(
-              "hidden md:flex flex-col bg-[var(--soxu-surface-sidebar)] overflow-hidden shrink-0",
-              !resizingSide && "transition-[width,opacity] duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)]",
-              leftOpen ? "opacity-100" : "opacity-0",
-            )}
-          >
-            <div style={{ width: `${leftWidth}px` }} className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-4 soxu-scroll">
-              {/* 1. 无项目快速对话区 */}
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center justify-between px-1.5 mb-0.5">
-                  <span className="text-[11px] font-semibold tracking-wider text-[var(--soxu-text-tertiary)]">
-                    快速对话 ({activeQuickChats.length})
-                  </span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => createQuickChat()}
-                        className="h-5 w-5 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)] cursor-pointer"
-                        aria-label="新建无项目快速对话"
-                      >
-                        <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>发起无项目自由对话</TooltipContent>
-                  </Tooltip>
-                </div>
-
-                {activeQuickChats.map((qc) => {
-                  const selected = activeTab?.targetKind === "quick" && activeTab.targetId === qc.id;
-                  return (
-                    <div
-                      key={qc.id}
-                      onClick={() => openQuickChatTab(qc)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          openQuickChatTab(qc);
-                        }
-                      }}
-                      className={cn(
-                        "group w-full rounded-lg px-2 py-1.5 flex items-center justify-between gap-2 text-left text-xs transition-colors duration-150 cursor-pointer border",
-                        rowHeightClass,
-                        selected
-                          ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)]"
-                          : "border-transparent text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)]",
-                      )}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className={cn("h-2 w-2 rounded-full shrink-0", bucketDotClass(qc.bucket))} />
-                        <span className="truncate font-medium">{qc.title}</span>
-                      </div>
-                      <button
-                        type="button"
-                        title="归档对话"
-                        aria-label={`归档快速对话 ${qc.title}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          archiveTarget("quick", qc.id, qc.title);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 h-5 w-5 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] shrink-0 cursor-pointer transition-opacity"
-                      >
-                        <Archive className="h-3 w-3" strokeWidth={1.75} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* 2. 项目文件夹 -> 工作树二级目录 */}
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between px-1.5">
-                  <span className="text-[11px] font-semibold tracking-wider text-[var(--soxu-text-tertiary)]">
-                    项目工作区 ({projectGroups.length})
-                  </span>
-                </div>
-
-                {projectGroups.map(([projName, group]) => {
-                  const isExpanded = openProjects[projName] ?? true;
-                  return (
-                    <div key={projName} className="flex flex-col gap-0.5">
-                      <div className="group flex items-center justify-between rounded-lg px-1.5 py-1 hover:bg-[var(--soxu-interaction-hover)] transition-colors">
-                        <button
-                          type="button"
-                          onClick={() => setOpenProjects((p) => ({ ...p, [projName]: !isExpanded }))}
-                          className="flex-1 min-w-0 flex items-center gap-1.5 text-left text-xs font-semibold text-[var(--soxu-text-primary)] cursor-pointer"
-                        >
-                          <ChevronRight
-                            className={cn("h-3.5 w-3.5 text-[var(--soxu-text-tertiary)] shrink-0 transition-transform duration-150", isExpanded && "rotate-90")}
-                            strokeWidth={1.75}
-                          />
-                          {isExpanded ? (
-                            <FolderOpen className="h-3.5 w-3.5 text-[var(--soxu-text-secondary)] shrink-0" strokeWidth={1.75} />
-                          ) : (
-                            <Folder className="h-3.5 w-3.5 text-[var(--soxu-text-secondary)] shrink-0" strokeWidth={1.75} />
-                          )}
-                          <span className="truncate">{projName}</span>
-                          <span className="text-[10.5px] soxu-mono font-normal text-[var(--soxu-text-tertiary)] truncate">
-                            {prefs.redactHomePath ? group.path : group.path.replace("~", "/home/dev")}
-                          </span>
-                        </button>
-
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const newWks: WorkspaceItem = {
-                                  id: `wks-${Date.now().toString().slice(-4)}`,
-                                  project: projName,
-                                  projectPath: group.path,
-                                  branch: `feat/wt-${Date.now().toString().slice(-3)}`,
-                                  isolation: "worktree",
-                                  agent: cli,
-                                  model,
-                                  bucket: "done",
-                                  summary: "新建隔离工作树，已注入目录上下文",
-                                  diffStat: "+0 -0",
-                                };
-                                setWorkspaces((prev) => [newWks, ...prev]);
-                                openWorkspaceTab(newWks);
-                                flashToast(`已在 ${projName} 下新建工作树 ${newWks.branch}`);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 h-5 w-5 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] cursor-pointer transition-opacity shrink-0"
-                              aria-label={`为项目 ${projName} 新建工作树`}
-                            >
-                              <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>在 {projName} 下新建隔离工作树</TooltipContent>
-                        </Tooltip>
-                      </div>
-
-                      {isExpanded && (
-                        <div className="ml-3 pl-2.5 border-l border-[var(--soxu-border-hairline)] flex flex-col gap-0.5 mt-0.5">
-                          {group.items.map((w) => {
-                            const selected = activeTab?.targetKind === "workspace" && activeTab.targetId === w.id;
-                            const b = bucketLabel(w.bucket);
-                            return (
-                              <div
-                                key={w.id}
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => openWorkspaceTab(w)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" || e.key === " ") {
-                                    e.preventDefault();
-                                    openWorkspaceTab(w);
-                                  }
-                                }}
-                                className={cn(
-                                  "group w-full rounded-lg px-2 py-1.5 flex items-center justify-between gap-2 text-left text-xs transition-colors duration-150 cursor-pointer border",
-                                  rowHeightClass,
-                                  selected
-                                    ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)]"
-                                    : "border-transparent text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)]",
-                                )}
-                              >
-                                <div className="min-w-0 flex flex-col gap-0.5">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className={cn("h-2 w-2 rounded-full shrink-0", bucketDotClass(w.bucket))} />
-                                    {w.isolation === "worktree" ? (
-                                      <GitBranch className="h-3 w-3 shrink-0 text-[var(--soxu-text-tertiary)]" strokeWidth={1.75} />
-                                    ) : (
-                                      <Folder className="h-3 w-3 shrink-0 text-[var(--soxu-text-tertiary)]" strokeWidth={1.75} />
-                                    )}
-                                    <span className="soxu-mono font-medium truncate">{w.branch}</span>
-                                  </div>
-                                  <div className="pl-3.5 text-[10.5px] soxu-tabular text-[var(--soxu-text-tertiary)] flex items-center gap-1.5">
-                                    <span>{w.isolation === "worktree" ? "工作树" : "主目录"}</span>
-                                    <span>{w.diffStat}</span>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0">
-                                  {w.bucket !== "done" && <Badge variant={b.variant}>{b.label}</Badge>}
-                                  <button
-                                    type="button"
-                                    title="归档对话"
-                                    aria-label={`归档分支 ${w.branch}`}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      archiveTarget("workspace", w.id, `${w.project} / ${w.branch}`);
-                                    }}
-                                    className="opacity-0 group-hover:opacity-100 h-5 w-5 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] cursor-pointer transition-opacity"
-                                  >
-                                    <Archive className="h-3 w-3" strokeWidth={1.75} />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* 3. 已归档对话折叠区 */}
-              <Collapsible open={archivedOpen} onOpenChange={setArchivedOpen}>
-                <CollapsibleTrigger asChild>
-                  <button
-                    type="button"
-                    className="w-full px-1.5 py-1 flex items-center justify-between text-[11px] font-medium text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-secondary)] cursor-pointer"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <Archive className="h-3.5 w-3.5" strokeWidth={1.75} />
-                      <span>已归档对话 ({archivedItems.length})</span>
-                    </span>
-                    <ChevronRight
-                      className={cn("h-3.5 w-3.5 transition-transform duration-150", archivedOpen && "rotate-90")}
-                      strokeWidth={1.75}
-                    />
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="flex flex-col gap-1 pt-1">
-                  {archivedItems.length === 0 ? (
-                    <div className="px-2 py-2 text-[11px] text-[var(--soxu-text-ghost)]">暂无已归档对话</div>
-                  ) : (
-                    archivedItems.map((arc) => (
-                      <div
-                        key={arc.id}
-                        className="rounded-lg px-2 py-1.5 bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-hairline)] flex items-center justify-between gap-2 text-xs"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-[var(--soxu-text-secondary)]">{arc.title}</div>
-                          <div className="text-[10px] text-[var(--soxu-text-tertiary)]">{arc.sub}</div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => restoreArchivedTarget(arc.kind, arc.id)}
-                          className="h-6 px-2 rounded text-[11px] text-[var(--soxu-semantic-accent)] hover:bg-[var(--soxu-interaction-hover)] cursor-pointer shrink-0 inline-flex items-center gap-1"
-                        >
-                          <ArchiveRestore className="h-3 w-3" strokeWidth={1.75} />
-                          <span>恢复</span>
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </CollapsibleContent>
-              </Collapsible>
-            </div>
-
-            {/* 左栏底部仅保留历史与调度快捷工具，不含常驻引导 */}
-            <div style={{ width: `${leftWidth}px` }} className="border-t border-[var(--soxu-border-hairline)] p-2 flex items-center justify-between">
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setModal("history")}>
-                  <History className="h-3 w-3" strokeWidth={1.75} />
-                  <span>导入历史</span>
-                </Button>
-                <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setModal("schedules")}>
-                  <Clock className="h-3 w-3" strokeWidth={1.75} />
-                  <span>定时任务</span>
-                </Button>
-              </div>
-              <span className="text-[11px] text-[var(--soxu-text-tertiary)] px-1.5">
-                {magpieMode === "magpie_managed" ? "协同网关" : "原生直连"}
-              </span>
-            </div>
-          </aside>
-
-          {/* 左侧拖拽调宽分隔条（9px 指针热区，双击重置默认宽度） */}
-          {leftOpen && (
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="调整左侧栏宽度"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                setResizingSide("left");
-              }}
-              onDoubleClick={() => updatePrefs({ leftSidebarWidth: DEFAULT_PREFERENCES.leftSidebarWidth })}
-              title="左右拖动调整宽度，双击恢复默认宽度"
-              className="hidden md:flex w-[9px] -mx-[4px] z-20 cursor-col-resize items-center justify-center group select-none shrink-0"
-            >
-              <div
+          {!isLeftDrawer && (
+            <>
+              <aside
+                aria-label={t("sidebar.title")}
+                style={{ width: leftOpen ? `${leftWidth}px` : "0px" }}
                 className={cn(
-                  "h-full w-px transition-colors duration-150",
-                  resizingSide === "left"
-                    ? "w-[2px] bg-[var(--soxu-semantic-running)]"
-                    : "bg-[var(--soxu-border-hairline)] group-hover:w-[2px] group-hover:bg-[var(--soxu-semantic-running)]",
+                  "flex flex-col bg-[var(--soxu-surface-sidebar)] overflow-hidden shrink-0",
+                  !resizingSide && "transition-[width,opacity] duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)]",
+                  leftOpen ? "opacity-100" : "opacity-0",
                 )}
-              />
-            </div>
+              >
+                <div style={{ width: `${leftWidth}px` }} className="flex-1 min-h-0 flex flex-col">
+                  {leftSidebarBody}
+                </div>
+              </aside>
+
+              {leftOpen && (
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="调整左侧栏宽度"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    setResizingSide("left");
+                  }}
+                  onDoubleClick={() => updatePrefs({ leftSidebarWidth: DEFAULT_PREFERENCES.leftSidebarWidth })}
+                  title="左右拖动调整宽度，双击恢复默认宽度"
+                  className="flex w-[9px] -mx-[4px] z-20 cursor-col-resize items-center justify-center group select-none shrink-0"
+                >
+                  <div
+                    className={cn(
+                      "h-full w-px transition-colors duration-150",
+                      resizingSide === "left"
+                        ? "w-[2px] bg-[var(--soxu-semantic-running)]"
+                        : "bg-[var(--soxu-border-hairline)] group-hover:w-[2px] group-hover:bg-[var(--soxu-semantic-running)]",
+                    )}
+                  />
+                </div>
+              )}
+            </>
           )}
 
           {/* 中央多代理会话画布 */}
-          <main className="flex-1 min-w-[380px] flex flex-col bg-[var(--soxu-surface-canvas)] overflow-hidden relative">
-            {/* 会话页签条（前置语义状态圆点 + 可归档与关闭） */}
-            <div role="tablist" className="h-[var(--soxu-size-tabbar-height)] min-h-[var(--soxu-size-tabbar-height)] bg-[var(--soxu-surface-sidebar)] border-b border-[var(--soxu-border-hairline)] px-2 flex items-end gap-0.5 overflow-x-auto soxu-no-scrollbar">
-              {tabs.map((t) => {
-                const active = activeTabId === t.id;
-                return (
-                  <div
-                    key={t.id}
-                    role="tab"
-                    tabIndex={0}
-                    aria-selected={active}
-                    onClick={() => setActiveTabId(t.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setActiveTabId(t.id);
-                      }
-                    }}
-                    className={cn(
-                      "group relative h-[31px] max-w-[230px] px-2.5 rounded-t-lg text-xs flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors duration-150 border border-b-0 select-none shrink-0",
-                      active
-                        ? "bg-[var(--soxu-surface-canvas)] text-[var(--soxu-text-primary)] border-[var(--soxu-border-hairline)]"
-                        : "bg-transparent text-[var(--soxu-text-tertiary)] border-transparent hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)]",
-                    )}
-                  >
-                    <span className={cn("h-2 w-2 rounded-full shrink-0", bucketDotClass(t.status))} />
-                    <span className="soxu-mono text-[10.5px] text-[var(--soxu-text-tertiary)]">{t.cli}</span>
-                    <span className={cn("truncate", t.draft && "italic")}>{t.title}</span>
+          <main className="flex-1 min-w-0 flex flex-col bg-[var(--soxu-surface-canvas)] overflow-hidden relative">
+            {/* 会话页签条：先自适应缩窄宽度，超出最小容量后再显隐底部横向滚动条；+ 按钮固定右侧 */}
+            <div className="h-[var(--soxu-size-tabbar-height)] min-h-[var(--soxu-size-tabbar-height)] bg-[var(--soxu-surface-sidebar)] border-b border-[var(--soxu-border-hairline)] px-2 flex items-end gap-1">
+              <div
+                ref={tabStripRef}
+                role="tablist"
+                data-scrolling={tabsScrolling ? "true" : undefined}
+                onScroll={markTabStripScrolling}
+                onWheel={(e) => {
+                  const el = tabStripRef.current;
+                  if (el && el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                    el.scrollLeft += e.deltaY;
+                    markTabStripScrolling();
+                  }
+                }}
+                className="flex-1 min-w-0 h-full flex items-end gap-0.5 overflow-x-auto overflow-y-hidden soxu-auto-scrollbar"
+              >
+                {tabs.map((tb) => {
+                  const active = activeTabId === tb.id;
+                  return (
+                    <div
+                      key={tb.id}
+                      role="tab"
+                      tabIndex={0}
+                      aria-selected={active}
+                      onClick={() => setActiveTabId(tb.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setActiveTabId(tb.id);
+                        }
+                      }}
+                      className={cn(
+                        "group relative h-[31px] flex-1 basis-[196px] max-w-[220px] min-w-[116px] px-2.5 rounded-t-lg text-xs flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors duration-150 border border-b-0 select-none",
+                        active
+                          ? "bg-[var(--soxu-surface-canvas)] text-[var(--soxu-text-primary)] border-[var(--soxu-border-hairline)]"
+                          : "bg-transparent text-[var(--soxu-text-tertiary)] border-transparent hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)]",
+                      )}
+                    >
+                      <span className={cn("h-2 w-2 rounded-full shrink-0", bucketDotClass(tb.status))} />
+                      <span className="soxu-mono text-[10.5px] text-[var(--soxu-text-tertiary)] shrink-0">{tb.cli}</span>
+                      <span className={cn("flex-1 min-w-0 truncate", tb.draft && "italic")}>{tb.title}</span>
 
-                    <div className="flex items-center gap-0.5 ml-1">
-                      <button
-                        type="button"
-                        title="归档对话"
-                        aria-label={`归档标签页 ${t.title}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          archiveTarget(t.targetKind, t.targetId, t.title);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 h-4 w-4 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] cursor-pointer transition-opacity"
-                      >
-                        <Archive className="h-2.5 w-2.5" strokeWidth={1.75} />
-                      </button>
-                      <button
-                        type="button"
-                        title="关闭标签页"
-                        aria-label={`关闭标签页 ${t.title}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          closeTab(t.id);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 group-aria-selected:opacity-75 hover:!opacity-100 h-4 w-4 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] cursor-pointer transition-opacity"
-                      >
-                        <X className="h-3 w-3" strokeWidth={1.75} />
-                      </button>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          title={t("tabs.archiveTab")}
+                          aria-label={`${t("tabs.archiveTab")} ${tb.title}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            archiveTarget(tb.targetKind, tb.targetId, tb.title);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 h-4 w-4 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] cursor-pointer transition-opacity"
+                        >
+                          <Archive className="h-2.5 w-2.5" strokeWidth={1.75} />
+                        </button>
+                        <button
+                          type="button"
+                          title={t("tabs.closeTab")}
+                          aria-label={`${t("tabs.closeTab")} ${tb.title}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            closeTab(tb.id);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 group-aria-selected:opacity-75 hover:!opacity-100 h-4 w-4 rounded flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] cursor-pointer transition-opacity"
+                        >
+                          <X className="h-3 w-3" strokeWidth={1.75} />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
 
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    className="mb-0.5 ml-1 shrink-0"
+                    className="mb-0.5 shrink-0"
                     onClick={() => createQuickChat()}
-                    aria-label="新建无项目快速对话"
+                    aria-label={t("sidebar.newQuickChat")}
                   >
                     <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>新建无项目快速对话</TooltipContent>
+                <TooltipContent>{t("sidebar.newQuickChat")}</TooltipContent>
               </Tooltip>
             </div>
 
@@ -1142,7 +1408,7 @@ export function DesktopWorkbench() {
             {/* 主滚动容器（对话正文与底部悬浮输入舱同在内部共用同一水平内边距与限宽，确保宽度 1:1 严格对齐并随侧栏拖拽同步缩放） */}
             <div className="flex-1 min-h-0 relative flex flex-col">
               <div className="flex-1 overflow-y-auto soxu-scroll flex flex-col justify-between">
-                <div className="px-6 pt-5 pb-6 flex-1">
+                <div className="px-3 sm:px-6 pt-5 pb-6 flex-1">
                   <div className="w-full max-w-[var(--soxu-layout-transcript-max-width)] mx-auto flex flex-col gap-5">
                     {!activeTab ? (
                       <div className="my-12 rounded-2xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] p-8 text-center flex flex-col items-center gap-4">
@@ -1150,15 +1416,13 @@ export function DesktopWorkbench() {
                           <MessageSquare className="h-5 w-5 text-[var(--soxu-semantic-accent)]" strokeWidth={1.75} />
                         </div>
                         <div>
-                          <h2 className="text-base font-semibold">所有会话标签均已关闭</h2>
-                          <p className="text-xs text-[var(--soxu-text-secondary)] mt-1">
-                            你可以随时发起无项目自由对话，或在左侧栏点选已有项目与工作树继续推进任务。
-                          </p>
+                          <h2 className="text-base font-semibold">{t("tabs.emptyTitle")}</h2>
+                          <p className="text-xs text-[var(--soxu-text-secondary)] mt-1">{t("tabs.emptyDesc")}</p>
                         </div>
                         <div className="flex flex-wrap items-center justify-center gap-2">
                           <Button variant="default" onClick={() => createQuickChat()}>
                             <Plus className="h-4 w-4" strokeWidth={1.75} />
-                            <span>新建无项目对话</span>
+                            <span>{t("tabs.newQuick")}</span>
                           </Button>
                           <Button
                             variant="secondary"
@@ -1168,7 +1432,7 @@ export function DesktopWorkbench() {
                             }}
                           >
                             <FolderOpen className="h-4 w-4" strokeWidth={1.75} />
-                            <span>打开项目工作树</span>
+                            <span>{t("tabs.newWorkspace")}</span>
                           </Button>
                         </div>
                       </div>
@@ -1177,9 +1441,9 @@ export function DesktopWorkbench() {
                         <div className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] px-3.5 py-2.5 flex items-center justify-between gap-3 text-xs">
                           <span className="flex items-center gap-2 text-[var(--soxu-text-secondary)] truncate">
                             <MessageSquare className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)] shrink-0" strokeWidth={1.75} />
-                            <span className="truncate">无项目快速对话 · 不绑定本地工作树，随时可自由交流或构思方案</span>
+                            <span className="truncate">{t("tabs.quickBanner")}</span>
                           </span>
-                          <Badge variant="neutral">轻量模式</Badge>
+                          <Badge variant="neutral">{t("tabs.quickModeBadge")}</Badge>
                         </div>
 
                         {activeQuickChat.messages.length === 0 ? (
@@ -1544,8 +1808,8 @@ export function DesktopWorkbench() {
                   </div>
                 </div>
 
-                {/* 底部悬浮三态输入舱：与上方内容处于同一 px-6 居中容器，宽度绝对对齐并随侧栏拖拽实时伸缩 */}
-                <div className="sticky bottom-0 z-10 px-6 pb-3.5 pt-2 bg-gradient-to-t from-[var(--soxu-surface-canvas)] via-[var(--soxu-surface-canvas)] to-transparent">
+                {/* 底部悬浮三态输入舱：与上方内容处于同一 px-3 sm:px-6 居中容器，宽度绝对对齐并随侧栏拖拽实时伸缩 */}
+                <div className="sticky bottom-0 z-10 px-3 sm:px-6 pb-3.5 pt-2 bg-gradient-to-t from-[var(--soxu-surface-canvas)] via-[var(--soxu-surface-canvas)] to-transparent">
                   <div className="w-full max-w-[var(--soxu-layout-composer-max-width)] mx-auto flex flex-col gap-1.5">
                     {lostControlToast && <div className="text-[11.5px] text-[var(--soxu-semantic-warning)] px-2">{lostControlToast}</div>}
 
@@ -1605,8 +1869,8 @@ export function DesktopWorkbench() {
                         }}
                         placeholder={
                           activeTab?.targetKind === "quick"
-                            ? "输入任意问题开启无项目自由对话，回车直接发送..."
-                            : "输入指令、按需要选择运行中纠偏模式或移交代理..."
+                            ? t("composer.placeholderQuick")
+                            : t("composer.placeholderWork")
                         }
                         className="w-full resize-none bg-transparent border-0 px-2 py-0.5 text-sm outline-none placeholder:text-[var(--soxu-text-ghost)]"
                       />
@@ -1723,11 +1987,11 @@ export function DesktopWorkbench() {
                             variant="ghost"
                             size="sm"
                             className="h-7 px-2 text-[11px] text-[var(--soxu-semantic-handoff)] rounded-full"
-                            onClick={() => setComposerText((t) => `@codex ${t}`)}
+                            onClick={() => setComposerText((cur) => `@codex ${cur}`)}
                             title="移交上下文至其他原生代理"
                           >
                             <AtSign className="h-3 w-3" strokeWidth={1.75} />
-                            <span>移交</span>
+                            <span>{t("composer.handoff")}</span>
                           </Button>
                         </div>
 
@@ -1757,7 +2021,11 @@ export function DesktopWorkbench() {
                                 setComposerMode(order[(cur + 1) % order.length]);
                               }}
                             >
-                              {composerMode === "steer" ? "热纠偏" : composerMode === "queue" ? "排队" : "打断重发"}
+                              {composerMode === "steer"
+                                ? t("composer.modeSteer")
+                                : composerMode === "queue"
+                                  ? t("composer.modeQueue")
+                                  : t("composer.modeInterrupt")}
                             </Button>
                           )}
 
@@ -1765,7 +2033,7 @@ export function DesktopWorkbench() {
                             size="icon"
                             variant="default"
                             onClick={sendPrompt}
-                            aria-label={composerText.trim() ? "发送指令" : "停止当前输出"}
+                            aria-label={composerText.trim() ? t("composer.send") : t("composer.stop")}
                             className="transition-transform duration-150 active:scale-90"
                           >
                             {composerText.trim() ? (
@@ -1821,199 +2089,69 @@ export function DesktopWorkbench() {
             </div>
           </main>
 
-          {/* 右侧拖拽调宽分隔条（9px 指针热区，双击重置默认宽度） */}
-          {rightOpen && (
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="调整右侧栏宽度"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                setResizingSide("right");
-              }}
-              onDoubleClick={() => updatePrefs({ rightInspectorWidth: DEFAULT_PREFERENCES.rightInspectorWidth })}
-              title="左右拖动调整宽度，双击恢复默认宽度"
-              className="hidden lg:flex w-[9px] -mx-[4px] z-20 cursor-col-resize items-center justify-center group select-none shrink-0"
-            >
-              <div
+          {/* 宽屏右侧拖拽调宽分隔条与审阅栏 */}
+          {!isRightDrawer && (
+            <>
+              {rightOpen && (
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="调整右侧栏宽度"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    setResizingSide("right");
+                  }}
+                  onDoubleClick={() => updatePrefs({ rightInspectorWidth: DEFAULT_PREFERENCES.rightInspectorWidth })}
+                  title="左右拖动调整宽度，双击恢复默认宽度"
+                  className="flex w-[9px] -mx-[4px] z-20 cursor-col-resize items-center justify-center group select-none shrink-0"
+                >
+                  <div
+                    className={cn(
+                      "h-full w-px transition-colors duration-150",
+                      resizingSide === "right"
+                        ? "w-[2px] bg-[var(--soxu-semantic-running)]"
+                        : "bg-[var(--soxu-border-hairline)] group-hover:w-[2px] group-hover:bg-[var(--soxu-semantic-running)]",
+                    )}
+                  />
+                </div>
+              )}
+
+              <aside
+                aria-label={t("inspector.title")}
+                style={{ width: rightOpen ? `${rightWidth}px` : "0px" }}
                 className={cn(
-                  "h-full w-px transition-colors duration-150",
-                  resizingSide === "right"
-                    ? "w-[2px] bg-[var(--soxu-semantic-running)]"
-                    : "bg-[var(--soxu-border-hairline)] group-hover:w-[2px] group-hover:bg-[var(--soxu-semantic-running)]",
+                  "flex flex-col bg-[var(--soxu-surface-sidebar)] overflow-hidden shrink-0",
+                  !resizingSide && "transition-[width,opacity] duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)]",
+                  rightOpen ? "opacity-100" : "opacity-0",
                 )}
-              />
-            </div>
+              >
+                <div style={{ width: `${rightWidth}px` }} className="flex-1 min-h-0 flex flex-col">
+                  {rightInspectorBody}
+                </div>
+              </aside>
+            </>
           )}
-
-          {/* 右侧上下文与代码审阅栏（支持拖拽调宽 + 行号右对齐不重复 + 纯中文标签） */}
-          <aside
-            aria-label="上下文与代码审阅栏"
-            style={{ width: rightOpen ? `${rightWidth}px` : "0px" }}
-            className={cn(
-              "hidden lg:flex flex-col bg-[var(--soxu-surface-sidebar)] overflow-hidden shrink-0",
-              !resizingSide && "transition-[width,opacity] duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)]",
-              rightOpen ? "opacity-100" : "opacity-0",
-            )}
-          >
-            <div style={{ width: `${rightWidth}px` }} className="flex-1 flex flex-col overflow-hidden">
-              <div className="h-[36px] px-2.5 border-b border-[var(--soxu-border-hairline)] flex items-center justify-between">
-                <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as typeof rightTab)}>
-                  <TabsList>
-                    <TabsTrigger value="diff">变更对比</TabsTrigger>
-                    <TabsTrigger value="files">文件树</TabsTrigger>
-                    <TabsTrigger value="scripts">脚本</TabsTrigger>
-                    <TabsTrigger value="terminal">终端</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3 soxu-scroll">
-                {activeTab?.targetKind !== "workspace" && rightTab !== "terminal" ? (
-                  <div className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] p-5 text-center text-xs text-[var(--soxu-text-tertiary)] flex flex-col items-center gap-2.5 mt-4">
-                    <Folder className="h-5 w-5 text-[var(--soxu-text-tertiary)]" strokeWidth={1.75} />
-                    <div>当前处于无项目自由对话模式，未挂载工作树目录</div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const first = activeWorkspaces[0];
-                        if (first) openWorkspaceTab(first);
-                      }}
-                    >
-                      打开项目工作树
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    {rightTab === "diff" && (
-                      <>
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="inline-flex rounded-lg bg-[var(--soxu-surface-inset)] p-0.5 border border-[var(--soxu-border-hairline)]">
-                            {(["unified", "split"] as const).map((m) => (
-                              <button
-                                key={m}
-                                type="button"
-                                onClick={() => setDiffLayout(m)}
-                                className={cn(
-                                  "px-2.5 py-1 rounded-md text-[11px] cursor-pointer",
-                                  diffLayout === m
-                                    ? "bg-[var(--soxu-surface-raised)] text-[var(--soxu-text-primary)]"
-                                    : "text-[var(--soxu-text-tertiary)]",
-                                )}
-                              >
-                                {m === "unified" ? "单栏" : "双栏"}
-                              </button>
-                            ))}
-                          </div>
-                          <Button size="sm" variant="default" onClick={() => setModal("commit")}>
-                            <GitCommit className="h-3.5 w-3.5" strokeWidth={1.75} />
-                            <span>提交变更</span>
-                          </Button>
-                        </div>
-
-                        <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)]">
-                          crates/soxu-drivers/src/lib.rs · 对比基准 {prefs.defaultBranch}
-                        </div>
-
-                        <CodeDiffView
-                          rows={DIFF_ROWS}
-                          layout={diffLayout}
-                          showLineNumbers={prefs.showLineNumbers}
-                          wrap={prefs.codeWordWrap}
-                        />
-                      </>
-                    )}
-
-                    {rightTab === "files" && (
-                      <>
-                        <div className="flex flex-col gap-0.5">
-                          {["AGENTS.md", "design-system/soxu/tokens.json", "crates/soxu-drivers/src/lib.rs", "crates/soxu-magpie/src/lib.rs"].map(
-                            (f) => (
-                              <button
-                                key={f}
-                                type="button"
-                                onClick={() => setSelectedFile(f)}
-                                className={cn(
-                                  "w-full rounded-lg px-2.5 py-1.5 text-left text-xs soxu-mono flex items-center gap-2 cursor-pointer",
-                                  selectedFile === f
-                                    ? "bg-[var(--soxu-interaction-selected)] text-[var(--soxu-text-primary)]"
-                                    : "text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)]",
-                                )}
-                              >
-                                <FileCode2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-                                <span className="truncate">{f}</span>
-                              </button>
-                            ),
-                          )}
-                        </div>
-                        <CodeSnippetView
-                          startLine={1}
-                          showLineNumbers={prefs.showLineNumbers}
-                          wrap={prefs.codeWordWrap}
-                          lines={[
-                            `// ${selectedFile}`,
-                            "pub enum EnvironmentMode {",
-                            "  MagpieManaged,",
-                            "  StandaloneNative,",
-                            "}",
-                          ]}
-                        />
-                      </>
-                    )}
-
-                    {rightTab === "scripts" && (
-                      <div className="flex flex-col gap-2">
-                        {scripts.map((s) => (
-                          <div
-                            key={s.name}
-                            className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] p-2.5 flex items-center justify-between gap-2"
-                          >
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5 text-xs font-semibold soxu-mono">
-                                <span>{s.name}</span>
-                                {s.port && <Badge variant="accent">{s.port}</Badge>}
-                              </div>
-                              <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] truncate">{s.cmd}</div>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant={s.running ? "secondary" : "default"}
-                              onClick={() =>
-                                setScripts((p) => p.map((x) => (x.name === s.name ? { ...x, running: !x.running } : x)))
-                              }
-                            >
-                              {s.running ? "停止" : "启动"}
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {rightTab === "terminal" && (
-                  <pre className="m-0 rounded-lg border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-terminal)] p-3 soxu-code-block leading-relaxed">
-                    <div>
-                      <span style={{ color: "var(--soxu-ansi-bright-green)" }}>dev@soxu</span>{" "}
-                      <span style={{ color: "var(--soxu-ansi-blue)" }}>~/projects/Soxu</span>
-                    </div>
-                    <div>
-                      <span style={{ color: "var(--soxu-ansi-green)" }}>OK</span> 全仓门禁验证已就绪
-                    </div>
-                  </pre>
-                )}
-              </div>
-            </div>
-          </aside>
         </div>
 
+        {/* 窄屏左/右滑出抽屉（替代平铺分栏，保证不挤压中间对话流也不导致元素重叠） */}
+        <Sheet open={isLeftDrawer && leftOpen} onOpenChange={setLeftOpen}>
+          <SheetContent side="left" rawBody srTitle={t("sidebar.title")}>
+            {leftSidebarBody}
+          </SheetContent>
+        </Sheet>
+
+        <Sheet open={isRightDrawer && rightOpen} onOpenChange={setRightOpen}>
+          <SheetContent side="right" rawBody srTitle={t("inspector.title")}>
+            {rightInspectorBody}
+          </SheetContent>
+        </Sheet>
+
         {/* 底部状态栏 */}
-        <footer className="h-[var(--soxu-size-statusbar-height)] min-h-[var(--soxu-size-statusbar-height)] bg-[var(--soxu-surface-sidebar)] border-t border-[var(--soxu-border-hairline)] px-3 flex items-center justify-between text-[11px] text-[var(--soxu-text-tertiary)] soxu-tabular">
-          <div className="flex items-center gap-4">
-            <span className="inline-flex items-center gap-1.5 soxu-mono">
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--soxu-semantic-accent)]" />
-              本地守护服务 127.0.0.1:7698 (游标 #1056)
+        <footer className="h-[var(--soxu-size-statusbar-height)] min-h-[var(--soxu-size-statusbar-height)] bg-[var(--soxu-surface-sidebar)] border-t border-[var(--soxu-border-hairline)] px-2.5 sm:px-3 flex items-center justify-between gap-2 text-[11px] text-[var(--soxu-text-tertiary)] soxu-tabular">
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+            <span className="inline-flex items-center gap-1.5 soxu-mono truncate">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--soxu-semantic-accent)] shrink-0" />
+              <span className="truncate">{t("footer.daemon", { addr: "127.0.0.1:7698", seq: 1056 })}</span>
             </span>
             <button
               type="button"
@@ -2021,19 +2159,19 @@ export function DesktopWorkbench() {
                 setSettingsSection("magpie");
                 setSettingsOpen(true);
               }}
-              className="hover:text-[var(--soxu-text-primary)] cursor-pointer transition-colors"
+              className="hidden sm:inline-flex hover:text-[var(--soxu-text-primary)] cursor-pointer transition-colors shrink-0"
             >
-              {magpieMode === "magpie_managed" ? "协同网关 127.0.0.1:3425 · 2ms" : "原生直连模式"}
+              {magpieMode === "magpie_managed" ? "协同网关 127.0.0.1:3425 · 2ms" : t("sidebar.gatewayDirect")}
             </button>
           </div>
-          <div className="flex items-center gap-3">
-            {toast && <span className="text-[var(--soxu-semantic-accent)] animate-in fade-in-0 duration-150">{toast}</span>}
+          <div className="flex items-center gap-3 shrink-0">
+            {toast && <span className="hidden md:inline text-[var(--soxu-semantic-accent)] animate-in fade-in-0 duration-150">{toast}</span>}
             <button
               type="button"
               onClick={() => setModal("pair")}
               className="hover:text-[var(--soxu-text-primary)] cursor-pointer transition-colors"
             >
-              2 台设备在线
+              {t("footer.devices", { count: 2 })}
             </button>
           </div>
         </footer>

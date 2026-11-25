@@ -36,7 +36,7 @@
 
 | 分区序号 | 分区名称 | Lucide 图标 | 细化配置项清单 |
 | :---: | :--- | :--- | :--- |
-| **1** | **外观与主题** | `Palette` | 主题模式（纯黑深色 / 纯净浅色 / 跟随系统）、界面密度与正文行距、时间戳显示风格（相对/绝对）、侧栏宽度重置与减弱动效开关 |
+| **1** | **外观与主题** | `Palette` | 主题模式（纯黑深色 / 纯净浅色 / 跟随系统）、**界面语言（可扩展国际化注册表：`zh-CN` / `zh-TW` / `en-US`）**、**主题强调色（6 款预设色板 + 自定义拾色器与 Hex 输入）**、界面密度与正文行距、时间戳显示风格、侧栏宽度重置与减弱动效开关 |
 | **2** | **字体与排版** | `Type` | 开源界面字体、UI 字号（`12~17px`）、**「代码块字体跟随界面字体」一键开关**、开源代码字体、代码字号（`11~17px`）、制表符宽度（2/4 空格）、显示代码行号与自动换行开关、连字（`liga/calt`）开关 + 实时混排预览 |
 | **3** | **代理与路由器** | `Cpu` | 协同/原生直连检测、后台健康探测间隔（15s/30s/60s）、上下文压缩建议阈值、各原生代理健康清单 |
 | **4** | **工作区与 Git** | `GitBranch` | 默认基准分支（可编辑）、隔离工作树创建目录规则（同级/集中管理）、跨工作树共享 Rust 编译缓存开关、关闭未提交工作树提醒、自动保存检查点与规范提交表情前缀开关 |
@@ -132,6 +132,9 @@ pub fn ease_fast_out(t: f32) -> f32 {
 ### 7.2 双端统一用户偏好 Schema（`preferences.json` / `localStorage`）
 桌面端与移动遥控端共用一致的偏好键名与默认值（支持跨端同步）：
 - `themeMode`: `"dark" | "light" | "system"`（默认 `"dark"` 即 ChatGPT Pure Black）；
+- `locale`: `string`（默认 `"zh-CN"`；由可扩展语言注册表 `registerLocalePack` 驱动，支持新增语种热注册）；
+- `accentPreset`: `"emerald" | "ocean" | "violet" | "amber" | "rose" | "cyan" | "custom"`（默认 `"emerald"`）；
+- `customAccentHex`: `string`（自定义十六进制颜色，如 `"#6366f1"`，当 `accentPreset === "custom"` 时同步注入 `--soxu-semantic-accent*` 与选区高亮）；
 - `density`: `"compact" | "comfortable"`（决定工作区树行高 `32px` vs `38px`）；
 - `uiFontPreset`: `"inter-noto" | "ibm-plex-noto" | "jakarta-noto" | "lxgw-wenkai" | "system-sans"`；
 - `codeFollowsUi`: `boolean`（默认 `false`；设为 `true` 时代码块与终端强行继承界面字体族）；

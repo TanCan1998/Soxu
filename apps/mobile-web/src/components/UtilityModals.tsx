@@ -4,6 +4,7 @@ import { GitCommitDialog } from "@/components/GitCommitDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useI18n } from "@/lib/i18n";
 import { NATIVE_HISTORY } from "@/mock-data";
 import type { ScheduleItem } from "@/types";
 
@@ -32,6 +33,7 @@ export function UtilityModals({
   onToggleSchedule,
   onFlashToast,
 }: UtilityModalsProps) {
+  const { t } = useI18n();
   const [cmdkQuery, setCmdkQuery] = useState("");
   const [onboardingStep, setOnboardingStep] = useState(1);
 
@@ -285,11 +287,11 @@ export function UtilityModals({
                 else {
                   setOnboardingStep(1);
                   onClose();
-                  onFlashToast("欢迎开始使用索序工作台");
+                  onFlashToast(t("onboarding.welcomeToast"));
                 }
               }}
             >
-              {onboardingStep === 3 ? "开始使用索序" : "下一步"}
+              {onboardingStep === 3 ? t("onboarding.cta") : "下一步"}
             </Button>
           </div>
         </DialogContent>

@@ -6,6 +6,7 @@ export type PermissionLevel = "plan" | "read-only" | "ask" | "auto-edit" | "full
 
 export type SheetKind =
   | null
+  | "search"
   | "pair"
   | "cli"
   | "model"

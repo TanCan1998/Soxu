@@ -35,6 +35,15 @@ if (!tokens.typography?.uiPresets || Object.keys(tokens.typography.uiPresets).le
 if (!tokens.typography?.codePresets || Object.keys(tokens.typography.codePresets).length < 5) {
   errors.push("tokens.json 缺少不少于 5 项的 typography.codePresets 开源代码字体预设");
 }
+if (!tokens.color?.dark?.interaction?.scrollbarThumb || !tokens.color?.light?.interaction?.scrollbarThumb) {
+  errors.push("tokens.json 缺少深浅双模式滚动条滑块颜色令牌 scrollbarThumb");
+}
+if (!tokens.accentPresets || Object.keys(tokens.accentPresets).length < 6) {
+  errors.push("tokens.json 缺少不少于 6 项的 accentPresets 主题强调色预设");
+}
+if (!tokens.i18n?.defaultLocale || !Array.isArray(tokens.i18n?.supportedLocales) || tokens.i18n.supportedLocales.length < 3) {
+  errors.push("tokens.json 缺少 i18n 默认语言与支持语言清单配置");
+}
 for (const motionKey of [
   "enterDuration",
   "exitDuration",
@@ -87,6 +96,7 @@ const requiredFiles = [
   "src/desktop-main.tsx",
   "src/desktop/DesktopWorkbench.tsx",
   "src/lib/utils.ts",
+  "src/lib/i18n.ts",
   "src/lib/preferences.ts",
   "src/lib/agent-capabilities.ts",
   "src/components/ThemeToggle.tsx",
@@ -142,14 +152,17 @@ if (!fs.existsSync(previewHtmlPath)) {
   }
 }
 
-// 5. 校验前端 TypeScript / TSX 源码禁止使用 Emoji 充当 UI 图标
+// 5. 校验前端 TypeScript / TSX 源码禁止使用 Emoji 充当 UI 图标，且严禁将品牌名 Soxu 翻译为“索序”
 const emojiRegex = /\p{Extended_Pictographic}/u;
-function scanNoEmoji(filePath) {
+function scanUiSource(filePath) {
   const rel = path.relative(repoRoot, filePath);
   const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
   lines.forEach((line, idx) => {
     if (emojiRegex.test(line)) {
       errors.push(`发现 UI 源码中疑似含 Emoji 图标 (${rel}:${idx + 1}): ${line.trim().slice(0, 60)}`);
+    }
+    if (line.includes("索序")) {
+      errors.push(`品牌名 Soxu 严禁中文翻译 (${rel}:${idx + 1}): ${line.trim().slice(0, 60)}`);
     }
   });
 }
@@ -159,15 +172,26 @@ function walkTs(dir) {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, ent.name);
     if (ent.isDirectory()) walkTs(full);
-    else if (/\.(ts|tsx)$/.test(ent.name)) scanNoEmoji(full);
+    else if (/\.(ts|tsx)$/.test(ent.name)) scanUiSource(full);
   }
 }
 if (fs.existsSync(mobileSrcDir)) walkTs(mobileSrcDir);
+
+for (const htmlRel of ["desktop.html", "index.html", "public/manifest.webmanifest"]) {
+  const htmlPath = path.join(webRoot, htmlRel);
+  if (fs.existsSync(htmlPath) && fs.readFileSync(htmlPath, "utf8").includes("索序")) {
+    errors.push(`HTML/PWA 清单中严禁将品牌名 Soxu 翻译为“索序”: apps/mobile-web/${htmlRel}`);
+  }
+}
+
+console.log(
+  errors.length === 0
+    ? "[design:verify] 令牌、七维规范、shadcn/ui 组件、品牌词纪律、单文件预览与零 Emoji 门禁全部通过！"
+    : "[design:verify] 检测结束（即将汇总错误）",
+);
 
 if (errors.length > 0) {
   console.error("[design:verify] 校验失败：");
   errors.forEach((e) => console.error(`  - ${e}`));
   process.exit(1);
 }
-
-console.log("[design:verify] 令牌、七维规范、shadcn/ui 组件、单文件预览与零 Emoji 门禁全部通过！");

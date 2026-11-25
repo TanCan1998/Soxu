@@ -21,7 +21,9 @@
   --soxu-interaction-hover: rgba(255, 255, 255, 0.05);
   --soxu-interaction-selected: rgba(255, 255, 255, 0.09);
   --soxu-interaction-pressed: rgba(255, 255, 255, 0.13);
-  --soxu-interaction-selection: rgba(59, 130, 246, 0.35);
+  --soxu-interaction-selection: rgba(25, 195, 125, 0.30);
+  --soxu-interaction-scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --soxu-interaction-scrollbar-thumb-hover: rgba(255, 255, 255, 0.30);
   --soxu-text-primary: #ececec;
   --soxu-text-secondary: #b4b4b4;
   --soxu-text-tertiary: #8e8e8e;
@@ -37,7 +39,8 @@
   --soxu-action-disabled-bg: #2a2a2a;
   --soxu-action-disabled-fg: #666666;
   --soxu-semantic-accent: #19c37d;
-  --soxu-semantic-accent-soft: rgba(25, 195, 125, 0.14);
+  --soxu-semantic-accent-soft: rgba(25, 195, 125, 0.15);
+  --soxu-semantic-accent-border: rgba(25, 195, 125, 0.38);
   --soxu-semantic-running: #3b82f6;
   --soxu-semantic-running-soft: rgba(59, 130, 246, 0.14);
   --soxu-semantic-running-border: rgba(59, 130, 246, 0.36);
@@ -224,7 +227,9 @@
   --soxu-interaction-hover: rgba(0, 0, 0, 0.04);
   --soxu-interaction-selected: rgba(0, 0, 0, 0.07);
   --soxu-interaction-pressed: rgba(0, 0, 0, 0.11);
-  --soxu-interaction-selection: rgba(37, 99, 235, 0.22);
+  --soxu-interaction-selection: rgba(16, 163, 127, 0.22);
+  --soxu-interaction-scrollbar-thumb: rgba(0, 0, 0, 0.18);
+  --soxu-interaction-scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
   --soxu-text-primary: #0d0d0d;
   --soxu-text-secondary: #5d5d5d;
   --soxu-text-tertiary: #757575;
@@ -241,6 +246,7 @@
   --soxu-action-disabled-fg: #9e9e9e;
   --soxu-semantic-accent: #10a37f;
   --soxu-semantic-accent-soft: rgba(16, 163, 127, 0.12);
+  --soxu-semantic-accent-border: rgba(16, 163, 127, 0.34);
   --soxu-semantic-running: #2563eb;
   --soxu-semantic-running-soft: rgba(37, 99, 235, 0.10);
   --soxu-semantic-running-border: rgba(37, 99, 235, 0.30);

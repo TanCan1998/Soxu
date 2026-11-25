@@ -1,12 +1,57 @@
+import type { I18nKey } from "@/lib/i18n";
 import type { PermissionLevel } from "@/types";
 
 export type ThemeMode = "dark" | "light" | "system";
 export type DensityMode = "compact" | "comfortable";
 export type UiFontPresetId = "inter-noto" | "ibm-plex-noto" | "jakarta-noto" | "lxgw-wenkai" | "system-sans";
 export type CodeFontPresetId = "jetbrains-mono" | "fira-code" | "maple-mono" | "ibm-plex-mono" | "cascadia-code";
+export type AccentPresetId = "emerald" | "ocean" | "violet" | "amber" | "rose" | "cyan" | "custom";
 export type LineHeightMode = "compact" | "normal" | "relaxed";
 export type TimestampFormatMode = "relative" | "absolute";
 export type WorktreeLocationMode = "sibling" | "central";
+
+export interface AccentPreset {
+  id: Exclude<AccentPresetId, "custom">;
+  labelKey: I18nKey;
+  darkHex: string;
+  lightHex: string;
+}
+
+export const ACCENT_PRESETS: AccentPreset[] = [
+  { id: "emerald", labelKey: "appearance.accentPresetEmerald", darkHex: "#19c37d", lightHex: "#10a37f" },
+  { id: "ocean", labelKey: "appearance.accentPresetOcean", darkHex: "#3b82f6", lightHex: "#2563eb" },
+  { id: "violet", labelKey: "appearance.accentPresetViolet", darkHex: "#8b5cf6", lightHex: "#7c3aed" },
+  { id: "amber", labelKey: "appearance.accentPresetAmber", darkHex: "#f59e0b", lightHex: "#d97706" },
+  { id: "rose", labelKey: "appearance.accentPresetRose", darkHex: "#f43f5e", lightHex: "#e11d48" },
+  { id: "cyan", labelKey: "appearance.accentPresetCyan", darkHex: "#06b6d4", lightHex: "#0891b2" },
+];
+
+export function normalizeHexColor(input: string, fallback = "#6366f1"): string {
+  const trimmed = input.trim();
+  const short = /^#?([0-9a-fA-F]{3})$/.exec(trimmed);
+  if (short) {
+    const [r, g, b] = short[1].split("");
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  const full = /^#?([0-9a-fA-F]{6})$/.exec(trimmed);
+  if (full) {
+    return `#${full[1].toLowerCase()}`;
+  }
+  return fallback;
+}
+
+function hexToRgbTuple(hex: string): [number, number, number] {
+  const clean = normalizeHexColor(hex).slice(1);
+  return [parseInt(clean.slice(0, 2), 16), parseInt(clean.slice(2, 4), 16), parseInt(clean.slice(4, 6), 16)];
+}
+
+export function resolveAccentHex(prefs: Pick<SoxuPreferences, "accentPreset" | "customAccentHex">, resolvedTheme: "dark" | "light"): string {
+  if (prefs.accentPreset === "custom") {
+    return normalizeHexColor(prefs.customAccentHex, "#6366f1");
+  }
+  const preset = ACCENT_PRESETS.find((p) => p.id === prefs.accentPreset) ?? ACCENT_PRESETS[0];
+  return resolvedTheme === "dark" ? preset.darkHex : preset.lightHex;
+}
 
 export interface FontPreset<T extends string> {
   id: T;
@@ -83,6 +128,9 @@ export const CODE_FONT_PRESETS: FontPreset<CodeFontPresetId>[] = [
 
 export interface SoxuPreferences {
   themeMode: ThemeMode;
+  locale: string;
+  accentPreset: AccentPresetId;
+  customAccentHex: string;
   density: DensityMode;
   uiLineHeight: LineHeightMode;
   timestampFormat: TimestampFormatMode;
@@ -114,6 +162,9 @@ export interface SoxuPreferences {
 
 export const DEFAULT_PREFERENCES: SoxuPreferences = {
   themeMode: "dark",
+  locale: "zh-CN",
+  accentPreset: "emerald",
+  customAccentHex: "#6366f1",
   density: "compact",
   uiLineHeight: "normal",
   timestampFormat: "relative",
@@ -180,6 +231,14 @@ export function applyPreferencesToDom(prefs: SoxuPreferences): "dark" | "light" 
   root.setAttribute("data-theme", resolved);
   root.setAttribute("data-density", prefs.density);
   root.setAttribute("data-reduce-motion", String(prefs.reduceMotion));
+  root.lang = prefs.locale || "zh-CN";
+
+  const accentHex = resolveAccentHex(prefs, resolved);
+  const [ar, ag, ab] = hexToRgbTuple(accentHex);
+  root.style.setProperty("--soxu-semantic-accent", accentHex);
+  root.style.setProperty("--soxu-semantic-accent-soft", `rgba(${ar}, ${ag}, ${ab}, ${resolved === "dark" ? 0.15 : 0.12})`);
+  root.style.setProperty("--soxu-semantic-accent-border", `rgba(${ar}, ${ag}, ${ab}, ${resolved === "dark" ? 0.38 : 0.34})`);
+  root.style.setProperty("--soxu-interaction-selection", `rgba(${ar}, ${ag}, ${ab}, ${resolved === "dark" ? 0.30 : 0.22})`);
 
   const uiStack = (UI_FONT_PRESETS.find((x) => x.id === prefs.uiFontPreset) ?? UI_FONT_PRESETS[0]).stack;
   const codeStack = (CODE_FONT_PRESETS.find((x) => x.id === prefs.codeFontPreset) ?? CODE_FONT_PRESETS[0]).stack;

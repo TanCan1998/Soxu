@@ -12,12 +12,16 @@ export function SheetContent({
   children,
   side = "bottom",
   tall = false,
+  rawBody = false,
+  srTitle,
   title,
   subtitle,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   side?: "bottom" | "right" | "left";
   tall?: boolean;
+  rawBody?: boolean;
+  srTitle?: string;
   title?: string;
   subtitle?: string;
 }) {
@@ -29,8 +33,8 @@ export function SheetContent({
           tall ? "max-h-[76dvh]" : "max-h-[58dvh]",
         )
       : side === "right"
-        ? "inset-y-0 right-0 h-full w-[min(360px,92vw)] border-l border-[var(--soxu-border-strong)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right duration-200"
-        : "inset-y-0 left-0 h-full w-[min(320px,88vw)] border-r border-[var(--soxu-border-strong)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left duration-200";
+        ? "inset-y-0 right-0 h-full w-[min(380px,92vw)] border-l border-[var(--soxu-border-strong)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right duration-200"
+        : "inset-y-0 left-0 h-full w-[min(300px,86vw)] border-r border-[var(--soxu-border-strong)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left duration-200";
 
   return (
     <DialogPrimitive.Portal>
@@ -43,6 +47,12 @@ export function SheetContent({
         )}
         {...props}
       >
+        {!title && (
+          <>
+            <DialogPrimitive.Title className="sr-only">{srTitle ?? "侧边抽屉面板"}</DialogPrimitive.Title>
+            <DialogPrimitive.Description className="sr-only">{srTitle ?? "侧边滑动面板"}</DialogPrimitive.Description>
+          </>
+        )}
         {side === "bottom" && (
           <div className="pt-2.5 pb-1 flex justify-center shrink-0">
             <div className="w-9 h-1 rounded-full bg-[var(--soxu-border-strong)]" />
@@ -66,7 +76,14 @@ export function SheetContent({
             </DialogPrimitive.Close>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2.5 soxu-scroll">{children}</div>
+        <div
+          className={cn(
+            "flex-1 min-h-0 flex flex-col",
+            rawBody ? "overflow-hidden" : "overflow-y-auto px-4 py-3 gap-2.5 soxu-scroll",
+          )}
+        >
+          {children}
+        </div>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   );

@@ -16,6 +16,8 @@ import {
   History,
   Layers,
   MessageSquare,
+  PanelLeft,
+  PanelRight,
   Plus,
   QrCode,
   RotateCcw,
@@ -26,10 +28,11 @@ import {
   Sparkles,
   Square,
   Terminal,
+  X,
 } from "lucide-react";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { CodeDiffView, CodeSnippetView } from "@/components/CodeBlockView";
+import { CodeDiffView, CodeSnippetView, type DiffRowItem } from "@/components/CodeBlockView";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { HoverExpandDock } from "@/components/HoverExpandDock";
 import { SettingsDialog, type SettingsSectionId } from "@/components/SettingsDialog";
@@ -46,6 +49,7 @@ import {
   getPermissionMeta,
   reconcileAgentCapabilities,
 } from "@/lib/agent-capabilities";
+import { I18nProvider, useI18n } from "@/lib/i18n";
 import {
   applyPreferencesToDom,
   loadPreferences,
@@ -134,8 +138,33 @@ function parseLinesToDiffRows(lines: string[]) {
   });
 }
 
+const INSPECTOR_DIFF_ROWS: DiffRowItem[] = [
+  { lineNum: 22, kind: "ctx", code: "pub enum NativeCliKind { Claude, Codex, Pi, OpenCode, Antigravity, Copilot, Qwen }" },
+  { kind: "del", code: "// 旧版仅在运行时返回可执行文件名" },
+  { lineNum: 23, kind: "add", code: "/// 返回驱动是否支持活跃回合中途热纠偏" },
+  { lineNum: 24, kind: "add", code: "#[inline]" },
+  { lineNum: 25, kind: "add", code: "pub const fn supports_live_steer(self) -> bool {" },
+  { lineNum: 26, kind: "add", code: "  matches!(self, Self::Pi | Self::Codex | Self::Claude)" },
+  { lineNum: 27, kind: "add", code: "}" },
+];
+
 function MobileApp() {
   const [prefs, setPrefs] = useState<SoxuPreferences>(loadPreferences);
+  return (
+    <I18nProvider locale={prefs.locale}>
+      <MobileAppInner prefs={prefs} setPrefs={setPrefs} />
+    </I18nProvider>
+  );
+}
+
+function MobileAppInner({
+  prefs,
+  setPrefs,
+}: {
+  prefs: SoxuPreferences;
+  setPrefs: React.Dispatch<React.SetStateAction<SoxuPreferences>>;
+}) {
+  const { t } = useI18n();
   const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(() => applyPreferencesToDom(prefs));
 
   const [sizeClass, setSizeClass] = useState<SizeClass>(() =>
@@ -180,6 +209,10 @@ function MobileApp() {
   const [highRiskUnlocked, setHighRiskUnlocked] = useState<Record<string, boolean>>({});
 
   const [sheet, setSheet] = useState<SheetKind>(null);
+  const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
+  const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
+  const [rightInspectorTab, setRightInspectorTab] = useState<"diff" | "scripts">("diff");
+  const [searchQuery, setSearchQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("appearance");
   const [pairCode, setPairCode] = useState<string>("");
@@ -193,7 +226,13 @@ function MobileApp() {
   }, [prefs]);
 
   useEffect(() => {
-    const onResize = () => setSizeClass(resolveSizeClass(window.innerWidth));
+    const onResize = () => {
+      const next = resolveSizeClass(window.innerWidth);
+      setSizeClass(next);
+      if (next === "wide") {
+        setLeftDrawerOpen(false);
+      }
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === ",") {
         e.preventDefault();
@@ -708,6 +747,7 @@ function MobileApp() {
                 onClick={() => {
                   setTargetKind("quick");
                   setSelectedQuickChatId(qc.id);
+                  setLeftDrawerOpen(false);
                   if (sizeClass !== "wide") setActiveTab("session");
                 }}
                 role="button"
@@ -827,6 +867,7 @@ function MobileApp() {
                           onClick={() => {
                             setTargetKind("workspace");
                             setSelectedWorkspaceId(w.id);
+                            setLeftDrawerOpen(false);
                             if (sizeClass !== "wide") setActiveTab("session");
                           }}
                           onKeyDown={(e) => {
@@ -994,61 +1035,79 @@ function MobileApp() {
   return (
     <TooltipProvider delayDuration={220}>
       <div className="min-h-dvh flex flex-col bg-[var(--soxu-surface-canvas)] text-[var(--soxu-text-primary)]">
-        {/* 顶部极简毛玻璃栏：无角标悬停收纳 + 纯图标主题切换 + 设置齿轮 */}
+        {/* 顶部极简毛玻璃栏：三轨分栏确保搜索框恒定居中、按钮不重叠；Soxu 前方绝无圆点 */}
         <header
-          className="sticky top-0 soxu-safe-top px-4 pb-2.5 backdrop-blur-md border-b border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-header-glass)]"
+          className="sticky top-0 soxu-safe-top px-2.5 sm:px-4 pb-2 backdrop-blur-md border-b border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-header-glass)]"
           style={{ zIndex: "var(--soxu-z-header)" }}
         >
-          <div className="max-w-[1280px] mx-auto flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <button
-                type="button"
-                onClick={() => setSheet("pair")}
-                className="soxu-touch rounded-full px-2.5 flex items-center gap-2 bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-subtle)] cursor-pointer hover:border-[var(--soxu-border-strong)] transition-colors"
-                style={{ minHeight: "36px" }}
-                aria-label="管理配对设备与扫码连接"
-              >
-                <span
-                  className={cn(
-                    "w-2 h-2 rounded-full soxu-live-dot",
-                    daemonOnline ? "bg-[var(--soxu-semantic-running)]" : "bg-[var(--soxu-semantic-accent)]",
-                  )}
-                />
-                <QrCode className="h-3.5 w-3.5" strokeWidth={1.75} />
-                <span className="text-xs font-semibold">索序</span>
-              </button>
+          <div className="max-w-[1280px] mx-auto grid grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-[minmax(max-content,1fr)_minmax(140px,320px)_minmax(max-content,1fr)] items-center gap-1.5 sm:gap-2.5">
+            <div className="flex items-center gap-1 sm:gap-2 min-w-0 justify-self-start">
+              {sizeClass !== "wide" && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setLeftDrawerOpen(true)}
+                  aria-label={t("header.openLeftDrawer")}
+                  className="shrink-0"
+                >
+                  <PanelLeft className="h-4 w-4" strokeWidth={1.75} />
+                </Button>
+              )}
+
+              <span className="px-1 text-xs sm:text-[13px] font-semibold tracking-tight text-[var(--soxu-text-primary)] shrink-0">
+                {t("brand.name")}
+              </span>
 
               <button
                 type="button"
                 onClick={simulateSeqCatchup}
-                className="text-left min-w-0 bg-transparent border-0 p-0 cursor-pointer"
+                className="hidden md:flex flex-col text-left min-w-0 bg-transparent border-0 p-0 cursor-pointer"
                 title="点击模拟断线重连后游标增量追平"
               >
-                <div className="text-[11.5px] soxu-mono soxu-tabular text-[var(--soxu-text-tertiary)] truncate">
-                  {daemonOnline ? "守护服务在线" : "遥控客户端"} · 游标 #{seqCursor}
+                <div className="text-[11px] soxu-mono soxu-tabular text-[var(--soxu-text-tertiary)] truncate">
+                  {daemonOnline ? t("mobile.daemonOnline") : t("mobile.remoteClient")} · {t("mobile.cursorPrefix", { seq: seqCursor })}
                 </div>
-                <div className="text-xs soxu-mono text-[var(--soxu-text-secondary)] truncate">
-                  {targetKind === "quick" ? `快速对话 / ${activeQuickChat.title}` : `${activeWorkspace.project} / ${activeWorkspace.branch}`}
+                <div className="text-[11.5px] soxu-mono text-[var(--soxu-text-secondary)] truncate max-w-[200px]">
+                  {targetKind === "quick" ? `${t("header.quickChat")} / ${activeQuickChat.title}` : `${activeWorkspace.project} / ${activeWorkspace.branch}`}
                 </div>
               </button>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0">
+            {/* 始终水平居中且防重叠的快速检索触发条 */}
+            <button
+              type="button"
+              onClick={() => setSheet("search")}
+              className="h-8 w-full max-w-[320px] min-w-0 justify-self-center rounded-full border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] px-2.5 flex items-center gap-1.5 text-xs text-[var(--soxu-text-tertiary)] hover:border-[var(--soxu-border-strong)] hover:text-[var(--soxu-text-secondary)] transition-colors cursor-pointer"
+              aria-label={t("header.searchCompact")}
+            >
+              <Search className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+              <span className="truncate">{t("header.searchCompact")}</span>
+            </button>
+
+            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0 justify-self-end">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setSheet("pair")}
+                aria-label={t("header.pair")}
+                title={t("header.pair")}
+                className="rounded-full"
+              >
+                <QrCode className="h-4 w-4" strokeWidth={1.75} />
+              </Button>
+
               <HoverExpandDock
                 triggerIcon={<SlidersHorizontal className="h-4 w-4" strokeWidth={1.75} />}
-                triggerLabel="展开快捷动作"
+                triggerLabel={t("header.moreTools")}
                 expandDirection="left"
               >
-                <Button variant="ghost" size="icon-sm" onClick={() => setSheet("pair")} title="扫码配对">
-                  <QrCode className="h-3.5 w-3.5" strokeWidth={1.75} />
-                </Button>
-                <Button variant="ghost" size="icon-sm" onClick={() => setSheet("history")} title="导入原生历史">
+                <Button variant="ghost" size="icon-sm" onClick={() => setSheet("history")} title={t("sidebar.importHistory")}>
                   <History className="h-3.5 w-3.5" strokeWidth={1.75} />
                 </Button>
-                <Button variant="ghost" size="icon-sm" onClick={() => setSheet("new-worktree")} title="新建工作树">
+                <Button variant="ghost" size="icon-sm" onClick={() => setSheet("new-worktree")} title={t("sidebar.worktree")}>
                   <GitBranch className="h-3.5 w-3.5" strokeWidth={1.75} />
                 </Button>
-                <Button variant="ghost" size="icon-sm" onClick={() => setSheet("new-quick-chat")} title="无项目自由对话">
+                <Button variant="ghost" size="icon-sm" onClick={() => setSheet("new-quick-chat")} title={t("sidebar.newQuickChat")}>
                   <MessageSquare className="h-3.5 w-3.5" strokeWidth={1.75} />
                 </Button>
               </HoverExpandDock>
@@ -1062,11 +1121,22 @@ function MobileApp() {
                   setSettingsSection("appearance");
                   setSettingsOpen(true);
                 }}
-                aria-label="打开设置界面"
-                title="系统设置 (Ctrl+,)"
+                aria-label={t("header.settings")}
+                title={`${t("header.settings")} (Ctrl+,)`}
                 className="rounded-full"
               >
                 <Settings className="h-4 w-4" strokeWidth={1.75} />
+              </Button>
+
+              <Button
+                variant={rightDrawerOpen ? "secondary" : "ghost"}
+                size="icon-sm"
+                onClick={() => setRightDrawerOpen(true)}
+                aria-label={t("header.openRightDrawer")}
+                title={t("header.openRightDrawer")}
+                className="rounded-full"
+              >
+                <PanelRight className="h-4 w-4" strokeWidth={1.75} />
               </Button>
             </div>
           </div>
@@ -1483,10 +1553,10 @@ function MobileApp() {
           >
             {(
               [
-                { id: "session", label: "会话", icon: MessageSquare },
-                { id: "workspaces", label: "工作区", icon: Folder },
-                { id: "approvals", label: "审批", icon: Shield, count: pendingApprovals.length },
-                { id: "scripts", label: "脚本", icon: Layers },
+                { id: "session", label: t("mobile.navSession"), icon: MessageSquare },
+                { id: "workspaces", label: t("mobile.navWorkspaces"), icon: Folder },
+                { id: "approvals", label: t("mobile.navApprovals"), icon: Shield, count: pendingApprovals.length },
+                { id: "scripts", label: t("mobile.navScripts"), icon: Layers },
               ] as const
             ).map((nav) => {
               const Icon = nav.icon;
@@ -1516,8 +1586,133 @@ function MobileApp() {
           </nav>
         )}
 
+        {/* 窄屏左侧工作区与快速对话抽屉 */}
+        <Sheet open={sizeClass !== "wide" && leftDrawerOpen} onOpenChange={setLeftDrawerOpen}>
+          <SheetContent side="left" rawBody srTitle={t("sidebar.title")}>
+            <div className="px-3.5 py-2.5 border-b border-[var(--soxu-border-hairline)] flex items-center justify-between gap-2 shrink-0 bg-[var(--soxu-surface-sidebar)]">
+              <span className="text-xs font-semibold truncate">{t("sidebar.title")}</span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setLeftDrawerOpen(false)}
+                aria-label={t("header.toggleLeft")}
+              >
+                <X className="h-4 w-4" strokeWidth={1.75} />
+              </Button>
+            </div>
+            <div className="flex-1 overflow-y-auto soxu-scroll bg-[var(--soxu-surface-sidebar)]">
+              {WorkspaceRail}
+            </div>
+          </SheetContent>
+        </Sheet>
+
+        {/* 右侧变更对比与受管脚本抽屉 */}
+        <Sheet open={rightDrawerOpen} onOpenChange={setRightDrawerOpen}>
+          <SheetContent side="right" rawBody srTitle={t("inspector.title")}>
+            <div className="px-3.5 py-2.5 border-b border-[var(--soxu-border-hairline)] flex items-center justify-between gap-2 shrink-0 bg-[var(--soxu-surface-sidebar)]">
+              <div className="inline-flex rounded-lg bg-[var(--soxu-surface-inset)] p-0.5 border border-[var(--soxu-border-hairline)]">
+                {(
+                  [
+                    { id: "diff", label: t("inspector.diff") },
+                    { id: "scripts", label: t("inspector.scripts") },
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setRightInspectorTab(item.id)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-md text-xs cursor-pointer transition-colors",
+                      rightInspectorTab === item.id
+                        ? "bg-[var(--soxu-surface-raised)] text-[var(--soxu-text-primary)] font-medium"
+                        : "text-[var(--soxu-text-tertiary)]",
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setRightDrawerOpen(false)}
+                aria-label={t("header.toggleRight")}
+              >
+                <X className="h-4 w-4" strokeWidth={1.75} />
+              </Button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3.5 flex flex-col gap-3 soxu-scroll bg-[var(--soxu-surface-sidebar)]">
+              {rightInspectorTab === "diff" ? (
+                <>
+                  <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] truncate">
+                    crates/soxu-drivers/src/lib.rs · {t("inspector.baseBranchLabel", { branch: prefs.defaultBranch })}
+                  </div>
+                  <CodeDiffView
+                    rows={INSPECTOR_DIFF_ROWS}
+                    layout="unified"
+                    showLineNumbers={prefs.showLineNumbers}
+                    wrap={prefs.codeWordWrap}
+                  />
+                </>
+              ) : (
+                ScriptsAndSchedulesView
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+
         {/* 底部抽屉集合 */}
         <Sheet open={sheet !== null} onOpenChange={(o) => !o && setSheet(null)}>
+          {sheet === "search" && (
+            <SheetContent title={t("header.searchCompact")} subtitle="快速定位工作树、自由对话或跳转设置" tall>
+              <input
+                autoFocus
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t("header.searchPlaceholder")}
+                className="w-full rounded-xl px-3 py-2.5 text-base bg-[var(--soxu-surface-composer)] border border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)] outline-none"
+              />
+              <div className="flex flex-col gap-1.5">
+                {[
+                  ...activeWorkspaces.map((w) => ({
+                    key: w.id,
+                    title: `${w.project} / ${w.branch}`,
+                    badge: w.agent,
+                    run: () => {
+                      setTargetKind("workspace");
+                      setSelectedWorkspaceId(w.id);
+                      setActiveTab("session");
+                      setSheet(null);
+                    },
+                  })),
+                  ...activeQuickChats.map((q) => ({
+                    key: q.id,
+                    title: q.title,
+                    badge: t("header.quickChat"),
+                    run: () => {
+                      setTargetKind("quick");
+                      setSelectedQuickChatId(q.id);
+                      setActiveTab("session");
+                      setSheet(null);
+                    },
+                  })),
+                ]
+                  .filter((item) => !searchQuery.trim() || item.title.toLowerCase().includes(searchQuery.toLowerCase()))
+                  .map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={item.run}
+                      className="w-full rounded-xl px-3 py-2.5 text-left text-xs flex items-center justify-between gap-2 bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)] cursor-pointer hover:border-[var(--soxu-border-strong)]"
+                    >
+                      <span className="truncate font-medium">{item.title}</span>
+                      <Badge variant="neutral">{item.badge}</Badge>
+                    </button>
+                  ))}
+              </div>
+            </SheetContent>
+          )}
           {sheet === "cli" && (
             <SheetContent title="切换原生代理驱动" subtitle="复用本机已登录认证与本地会话">
               {CLI_OPTIONS.map((c) => (

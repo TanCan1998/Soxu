@@ -80,9 +80,9 @@ export function HoverExpandDock({
         }
       }}
       className={cn(
-        "group/dock inline-flex items-center rounded-full border transition-all duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)]",
+        "group/dock relative inline-flex items-center rounded-full border transition-all duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)] shrink-0",
         isExpanded
-          ? "border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] px-1 py-0.5 gap-0.5"
+          ? "lg:border-[var(--soxu-border-subtle)] lg:bg-[var(--soxu-surface-card)] lg:px-1 lg:py-0.5 lg:gap-0.5 border-transparent bg-transparent p-0"
           : "border-transparent bg-transparent p-0",
         expandDirection === "right" ? "flex-row" : "flex-row-reverse",
         className,
@@ -109,7 +109,11 @@ export function HoverExpandDock({
       <div
         className={cn(
           "inline-flex items-center gap-0.5 overflow-hidden transition-all duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)]",
-          isExpanded ? "max-w-[420px] opacity-100 translate-x-0" : "max-w-0 opacity-0 pointer-events-none",
+          "max-lg:absolute max-lg:top-[calc(100%+6px)] max-lg:z-[var(--soxu-z-popover)] max-lg:rounded-full max-lg:border max-lg:border-[var(--soxu-border-strong)] max-lg:bg-[var(--soxu-surface-floating)] max-lg:px-1.5 max-lg:py-1",
+          expandDirection === "right" ? "max-lg:left-0" : "max-lg:right-0",
+          isExpanded
+            ? "max-lg:max-w-[calc(100vw-24px)] lg:max-w-[420px] opacity-100 translate-x-0"
+            : "max-w-0 opacity-0 pointer-events-none max-lg:p-0 max-lg:border-0",
           !isExpanded && (expandDirection === "right" ? "-translate-x-1.5" : "translate-x-1.5"),
         )}
       >

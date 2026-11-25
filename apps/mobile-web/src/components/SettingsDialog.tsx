@@ -1,7 +1,9 @@
 import {
+  Check,
   ChevronDown,
   Cpu,
   GitBranch,
+  Globe,
   Keyboard,
   Lock,
   Monitor,
@@ -26,10 +28,16 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { useI18n, type I18nKey } from "@/lib/i18n";
 import {
+  ACCENT_PRESETS,
   CODE_FONT_PRESETS,
   DEFAULT_PREFERENCES,
   UI_FONT_PRESETS,
+  normalizeHexColor,
+  resolveAccentHex,
+  resolveThemeColor,
+  type AccentPresetId,
   type CodeFontPresetId,
   type LineHeightMode,
   type SoxuPreferences,
@@ -56,14 +64,14 @@ interface SettingsDialogProps {
   onFlashToast: (msg: string) => void;
 }
 
-const SECTIONS: { id: SettingsSectionId; label: string; icon: typeof Palette }[] = [
-  { id: "appearance", label: "外观与布局", icon: Palette },
-  { id: "fonts", label: "字体与代码排版", icon: Type },
-  { id: "magpie", label: "代理与路由器", icon: Cpu },
-  { id: "git", label: "工作区与版本", icon: GitBranch },
-  { id: "security", label: "安全与审批红线", icon: ShieldAlert },
-  { id: "mobile", label: "移动遥控与配对", icon: Smartphone },
-  { id: "about", label: "快捷键与关于", icon: Keyboard },
+const SECTIONS: { id: SettingsSectionId; labelKey: I18nKey; icon: typeof Palette }[] = [
+  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette },
+  { id: "fonts", labelKey: "settings.section.fonts", icon: Type },
+  { id: "magpie", labelKey: "settings.section.magpie", icon: Cpu },
+  { id: "git", labelKey: "settings.section.git", icon: GitBranch },
+  { id: "security", labelKey: "settings.section.security", icon: ShieldAlert },
+  { id: "mobile", labelKey: "settings.section.mobile", icon: Smartphone },
+  { id: "about", labelKey: "settings.section.about", icon: Keyboard },
 ];
 
 export function SettingsDialog({
@@ -77,8 +85,10 @@ export function SettingsDialog({
   onOpenOnboarding,
   onFlashToast,
 }: SettingsDialogProps) {
+  const { locales, t } = useI18n();
   const [section, setSection] = useState<SettingsSectionId>(initialSection);
   const [tokensOpen, setTokensOpen] = useState(false);
+  const [customHexDraft, setCustomHexDraft] = useState(prefs.customAccentHex);
   const [pairCode, setPairCode] = useState("849 217");
   const [devices, setDevices] = useState([
     { id: "dev-1", name: "个人手机 · Safari 移动端", lastActive: "2 分钟前", ip: "192.168.1.108" },
@@ -89,24 +99,30 @@ export function SettingsDialog({
     if (open) setSection(initialSection);
   }, [open, initialSection]);
 
+  useEffect(() => {
+    setCustomHexDraft(prefs.customAccentHex);
+  }, [prefs.customAccentHex]);
+
   const activeUiPreset = UI_FONT_PRESETS.find((x) => x.id === prefs.uiFontPreset) ?? UI_FONT_PRESETS[0];
   const activeCodePreset = CODE_FONT_PRESETS.find((x) => x.id === prefs.codeFontPreset) ?? CODE_FONT_PRESETS[0];
+  const resolvedMode = resolveThemeColor(prefs.themeMode);
+  const activeAccentHex = resolveAccentHex(prefs, resolvedMode);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(880px,95vw)] h-[min(640px,90dvh)] p-0 overflow-hidden flex flex-col md:flex-row">
+      <DialogContent className="w-[min(880px,95vw)] h-[min(660px,90dvh)] p-0 overflow-hidden flex flex-col md:flex-row">
         <DialogHeader className="sr-only">
-          <DialogTitle>系统设置</DialogTitle>
-          <DialogDescription>细化调整界面外观、开源双字体排版、代理调度、工作树、安全审批与移动遥控</DialogDescription>
+          <DialogTitle>{t("settings.title")}</DialogTitle>
+          <DialogDescription>{t("settings.description")}</DialogDescription>
         </DialogHeader>
 
         {/* 左侧分区导航 */}
         <nav
-          aria-label="设置分区"
-          className="md:w-[220px] shrink-0 bg-[var(--soxu-surface-sidebar)] border-b md:border-b-0 md:border-r border-[var(--soxu-border-hairline)] p-3 flex md:flex-col gap-1 overflow-x-auto md:overflow-y-auto soxu-no-scrollbar"
+          aria-label={t("settings.title")}
+          className="md:w-[220px] shrink-0 bg-[var(--soxu-surface-sidebar)] border-b md:border-b-0 md:border-r border-[var(--soxu-border-hairline)] p-3 flex md:flex-col gap-1 overflow-x-auto md:overflow-y-auto soxu-auto-scrollbar"
         >
           <div className="hidden md:flex items-center justify-between px-2 pb-2.5 mb-1 border-b border-[var(--soxu-border-hairline)]">
-            <span className="text-xs font-semibold tracking-wide">系统设置</span>
+            <span className="text-xs font-semibold tracking-wide">{t("settings.title")}</span>
             <kbd className="soxu-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--soxu-surface-control)] text-[var(--soxu-text-tertiary)]">
               Ctrl+,
             </kbd>
@@ -127,29 +143,48 @@ export function SettingsDialog({
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                <span>{s.label}</span>
+                <span>{t(s.labelKey)}</span>
               </button>
             );
           })}
         </nav>
 
         {/* 右侧设置详细配置 */}
-        <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 soxu-scroll">
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 flex flex-col gap-5 soxu-scroll">
           {section === "appearance" && (
             <div className="flex flex-col gap-5 animate-in fade-in-0 duration-150">
               <div>
-                <h2 className="text-base font-semibold">外观主题与工作区布局</h2>
-                <p className="text-xs text-[var(--soxu-text-secondary)] mt-1">
-                  深色模式采用零色偏纯黑灰阶层级；主题切换触发平滑径向扩圆过渡动画。
-                </p>
+                <h2 className="text-base font-semibold">{t("appearance.heading")}</h2>
+                <p className="text-xs text-[var(--soxu-text-secondary)] mt-1">{t("appearance.subheading")}</p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {(
                   [
-                    { id: "dark", title: "纯黑深色", desc: "纯净 #000000 画布", icon: Moon, bg: "#000000", fg: "#ececec" },
-                    { id: "light", title: "纯净浅色", desc: "高对比 #FFFFFF 日光模式", icon: Sun, bg: "#ffffff", fg: "#0d0d0d" },
-                    { id: "system", title: "跟随系统", desc: "同步操作系统明暗设置", icon: Monitor, bg: "#171717", fg: "#ececec" },
+                    {
+                      id: "dark",
+                      title: t("appearance.themeDarkTitle"),
+                      desc: t("appearance.themeDarkDesc"),
+                      icon: Moon,
+                      bg: "#000000",
+                      fg: "#ececec",
+                    },
+                    {
+                      id: "light",
+                      title: t("appearance.themeLightTitle"),
+                      desc: t("appearance.themeLightDesc"),
+                      icon: Sun,
+                      bg: "#ffffff",
+                      fg: "#0d0d0d",
+                    },
+                    {
+                      id: "system",
+                      title: t("appearance.themeSystemTitle"),
+                      desc: t("appearance.themeSystemDesc"),
+                      icon: Monitor,
+                      bg: "#171717",
+                      fg: "#ececec",
+                    },
                   ] as const
                 ).map((item) => {
                   const Icon = item.icon;
@@ -182,11 +217,163 @@ export function SettingsDialog({
                 })}
               </div>
 
+              {/* 界面语言（可扩展国际化注册表） */}
+              <div className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium flex items-center gap-1.5">
+                    <Globe className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)] shrink-0" strokeWidth={1.75} />
+                    <span>{t("appearance.languageLabel")}</span>
+                  </div>
+                  <div className="text-[11px] text-[var(--soxu-text-tertiary)] mt-0.5">{t("appearance.languageHint")}</div>
+                </div>
+                <Select
+                  value={prefs.locale}
+                  onValueChange={(nextLocale) => {
+                    const matched = locales.find((l) => l.id === nextLocale);
+                    onUpdatePrefs({ locale: nextLocale });
+                    onFlashToast(t("appearance.localeChangedToast", { label: matched?.label ?? nextLocale }));
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-[210px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {locales.map((pack) => (
+                      <SelectItem key={pack.id} value={pack.id}>
+                        {pack.label}
+                        {pack.nativeNote ? ` (${pack.nativeNote})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* 主题强调色（预设色卡 + 自定义取色器与 Hex 输入） */}
+              <div className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] p-3.5 flex flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-medium">{t("appearance.accentHeading")}</div>
+                    <div className="text-[11px] text-[var(--soxu-text-tertiary)] mt-0.5">
+                      {t("appearance.accentSubheading")}
+                    </div>
+                  </div>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border"
+                    style={{
+                      color: activeAccentHex,
+                      backgroundColor: "var(--soxu-semantic-accent-soft)",
+                      borderColor: "var(--soxu-semantic-accent-border)",
+                    }}
+                  >
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: activeAccentHex }} />
+                    <span>{t("appearance.accentPreviewTag")}</span>
+                    <span className="soxu-mono">{activeAccentHex.toUpperCase()}</span>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {ACCENT_PRESETS.map((preset) => {
+                    const swatch = resolvedMode === "dark" ? preset.darkHex : preset.lightHex;
+                    const active = prefs.accentPreset === preset.id;
+                    const presetLabel = t(preset.labelKey);
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          onUpdatePrefs({ accentPreset: preset.id });
+                          onFlashToast(t("appearance.accentChangedToast", { label: presetLabel }));
+                        }}
+                        className={cn(
+                          "rounded-lg border px-2.5 py-2 flex items-center justify-between gap-2 text-xs cursor-pointer transition-colors",
+                          active
+                            ? "bg-[var(--soxu-surface-raised)] border-[var(--soxu-border-focus-ring)] text-[var(--soxu-text-primary)] font-medium"
+                            : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-secondary)] hover:border-[var(--soxu-border-strong)]",
+                        )}
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="h-3.5 w-3.5 rounded-full shrink-0 border border-black/20"
+                            style={{ backgroundColor: swatch }}
+                          />
+                          <span className="truncate">{presetLabel}</span>
+                        </span>
+                        {active && <Check className="h-3.5 w-3.5 shrink-0 text-[var(--soxu-semantic-accent)]" strokeWidth={2} />}
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const valid = normalizeHexColor(customHexDraft, prefs.customAccentHex);
+                      onUpdatePrefs({ accentPreset: "custom", customAccentHex: valid });
+                    }}
+                    className={cn(
+                      "rounded-lg border px-2.5 py-2 flex items-center justify-between gap-2 text-xs cursor-pointer transition-colors",
+                      prefs.accentPreset === "custom"
+                        ? "bg-[var(--soxu-surface-raised)] border-[var(--soxu-border-focus-ring)] text-[var(--soxu-text-primary)] font-medium"
+                        : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-secondary)] hover:border-[var(--soxu-border-strong)]",
+                    )}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="h-3.5 w-3.5 rounded-full shrink-0 border border-white/25"
+                        style={{ backgroundColor: normalizeHexColor(prefs.customAccentHex) }}
+                      />
+                      <span className="truncate">{t("appearance.accentCustom")}</span>
+                    </span>
+                    {prefs.accentPreset === "custom" && (
+                      <Check className="h-3.5 w-3.5 shrink-0 text-[var(--soxu-semantic-accent)]" strokeWidth={2} />
+                    )}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                  <label className="text-[11.5px] text-[var(--soxu-text-secondary)]" htmlFor="soxu-custom-accent-picker">
+                    {t("appearance.accentCustomInput")}
+                  </label>
+                  <input
+                    id="soxu-custom-accent-picker"
+                    type="color"
+                    value={normalizeHexColor(prefs.customAccentHex)}
+                    onChange={(e) => {
+                      const hex = normalizeHexColor(e.target.value);
+                      setCustomHexDraft(hex);
+                      onUpdatePrefs({ accentPreset: "custom" as AccentPresetId, customAccentHex: hex });
+                    }}
+                    className="h-8 w-10 rounded-md border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-control)] p-0.5 cursor-pointer"
+                    aria-label={t("appearance.accentCustomInput")}
+                  />
+                  <input
+                    type="text"
+                    value={customHexDraft}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCustomHexDraft(val);
+                      if (/^#?[0-9a-fA-F]{6}$/.test(val.trim())) {
+                        onUpdatePrefs({
+                          accentPreset: "custom",
+                          customAccentHex: normalizeHexColor(val),
+                        });
+                      }
+                    }}
+                    onBlur={() => {
+                      const valid = normalizeHexColor(customHexDraft, prefs.customAccentHex);
+                      setCustomHexDraft(valid);
+                    }}
+                    placeholder="#6366f1"
+                    maxLength={7}
+                    className="h-8 w-28 rounded-lg border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-composer)] px-2.5 text-xs soxu-mono text-[var(--soxu-text-primary)] outline-none focus:border-[var(--soxu-border-focus-ring)]"
+                  />
+                </div>
+              </div>
+
               <Separator />
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium">正文排版行距</label>
+                  <label className="text-xs font-medium">{t("appearance.lineHeight")}</label>
                   <Select
                     value={prefs.uiLineHeight}
                     onValueChange={(v) => onUpdatePrefs({ uiLineHeight: v as LineHeightMode })}
@@ -195,15 +382,15 @@ export function SettingsDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="compact">紧凑阅读 (1.38 倍)</SelectItem>
-                      <SelectItem value="normal">标准平衡 (1.50 倍)</SelectItem>
-                      <SelectItem value="relaxed">舒展呼吸 (1.68 倍)</SelectItem>
+                      <SelectItem value="compact">{t("appearance.lineHeightCompact")}</SelectItem>
+                      <SelectItem value="normal">{t("appearance.lineHeightNormal")}</SelectItem>
+                      <SelectItem value="relaxed">{t("appearance.lineHeightRelaxed")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium">消息时间戳格式</label>
+                  <label className="text-xs font-medium">{t("appearance.timestampFormat")}</label>
                   <Select
                     value={prefs.timestampFormat}
                     onValueChange={(v) => onUpdatePrefs({ timestampFormat: v as TimestampFormatMode })}
@@ -212,8 +399,8 @@ export function SettingsDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="relative">相对时间（例如 2 分钟前）</SelectItem>
-                      <SelectItem value="absolute">精确时刻（例如 07:45:12）</SelectItem>
+                      <SelectItem value="relative">{t("appearance.timestampRelative")}</SelectItem>
+                      <SelectItem value="absolute">{t("appearance.timestampAbsolute")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -221,10 +408,8 @@ export function SettingsDialog({
 
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <div className="text-xs font-medium">高密度工作区列表</div>
-                  <div className="text-[11.5px] text-[var(--soxu-text-tertiary)]">
-                    项目与工作树行采用 32 像素紧凑高度（关闭切换为 38 像素舒适高度）
-                  </div>
+                  <div className="text-xs font-medium">{t("appearance.densityTitle")}</div>
+                  <div className="text-[11.5px] text-[var(--soxu-text-tertiary)]">{t("appearance.densityDesc")}</div>
                 </div>
                 <Switch
                   checked={prefs.density === "compact"}
@@ -234,17 +419,18 @@ export function SettingsDialog({
 
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <div className="text-xs font-medium">减弱界面动画效果</div>
-                  <div className="text-[11.5px] text-[var(--soxu-text-tertiary)]">
-                    关闭主题径向渐变与折叠过渡，瞬时响应所有交互状态切换
-                  </div>
+                  <div className="text-xs font-medium">{t("appearance.reduceMotionTitle")}</div>
+                  <div className="text-[11.5px] text-[var(--soxu-text-tertiary)]">{t("appearance.reduceMotionDesc")}</div>
                 </div>
                 <Switch checked={prefs.reduceMotion} onCheckedChange={(v) => onUpdatePrefs({ reduceMotion: v })} />
               </div>
 
               <div className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] px-3.5 py-2.5 flex items-center justify-between gap-3">
                 <div className="text-xs text-[var(--soxu-text-secondary)]">
-                  当前侧栏宽度：左栏 {prefs.leftSidebarWidth}px，右栏 {prefs.rightInspectorWidth}px
+                  {t("appearance.sidebarWidths", {
+                    left: prefs.leftSidebarWidth,
+                    right: prefs.rightInspectorWidth,
+                  })}
                 </div>
                 <Button
                   size="sm"
@@ -254,11 +440,11 @@ export function SettingsDialog({
                       leftSidebarWidth: DEFAULT_PREFERENCES.leftSidebarWidth,
                       rightInspectorWidth: DEFAULT_PREFERENCES.rightInspectorWidth,
                     });
-                    onFlashToast("已将左右侧栏宽度重置为默认值");
+                    onFlashToast(t("appearance.resetWidthsToast"));
                   }}
                 >
                   <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  <span>重置栏宽</span>
+                  <span>{t("appearance.resetWidths")}</span>
                 </Button>
               </div>
             </div>
@@ -796,7 +982,7 @@ export function SettingsDialog({
             <div className="flex flex-col gap-4 animate-in fade-in-0 duration-150">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-base font-semibold">快捷键与关于索序</h2>
+                  <h2 className="text-base font-semibold">{t("about.heading")}</h2>
                   <p className="text-xs text-[var(--soxu-text-secondary)] mt-1">
                     通信协议第 1 版 · 原生桌面引擎与内嵌响应式移动终端
                   </p>

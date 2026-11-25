@@ -1,7 +1,8 @@
-# Soxu（索序）全端设计系统主规范 · MASTER.md
+# Soxu 全端设计系统主规范 · MASTER.md
 
 > **唯一真相源状态**：M0.5 正式版 · 默认深色主题对标 **ChatGPT Pure Black（纯黑中性灰阶体系）**  
 > **适用范围**：`crates/soxu-desktop`（GPUI 原生桌面工作台）与 `apps/mobile-web`（`soxu-daemon` 内嵌响应式移动遥控 PWA）  
+> **品牌纪律**：`Soxu` 为专有品牌名称，全端一律保持原文 `Soxu` 不作中文翻译，且严禁在 `Soxu` 文字前加任何状态圆点或徽标。  
 > **机器令牌源**：[`tokens.json`](tokens.json) → 由 `node scripts/sync-design-tokens.mjs` 编译产出 [`tokens.css`](tokens.css) 与 `apps/mobile-web/src/tokens.generated.css`
 
 ---
@@ -114,7 +115,9 @@ Soxu 服务于高频并行操控多个本地编码 Agent（`claude`、`codex`、
 | 属性 / 字段 / 宏 | `syntax.property` / `macro` | `#7EE787` / `#56D4DD` | `#116329` / `#0969DA` | Struct 字段、`#[derive(...)]` 与宏调用 |
 | Diff 新增 / 删除背景 | `syntax.diffAddBg` / `diffDelBg` | `14%` 翠绿 / `14%` 绯红 | `12%` 翠绿 / `11%` 绯红 | 行号槽 `Gutter` 采用双倍浓度（`26%`/`22%`）形成清晰视觉边缘 |
 
-### 5.2 纯黑 PTY 终端 ANSI 16 色规范（`ansi.*`）
+- **代码块与 Diff 滚动纪律**：代码片段与差异对比视图（Unified / Split）仅在整块最底部渲染唯一一条整体横向滚动条，严禁为逐行单独出现横向滚动条；开启滚动时左侧行号槽采用固定粘性定位（`sticky left-0`）配合不透明底色防止代码文字透叠。
+- **全端统一细滚动条规范**：全局纵向与横向滚动条统一 `6px` 宽/高、透明轨道与 `9999px` 胶囊圆角滑块，深浅色模式通过 `--soxu-interaction-scrollbar-thumb` 自适应调节对比度；会话标签条采用 `.soxu-auto-scrollbar`（`4px` 高），平时隐藏、悬停或滚动时浮现。
+- **纯黑 PTY 终端 ANSI 16 色规范（`ansi.*`）**：
 - 终端面板底色锁定 `--soxu-surface-terminal`（Dark `#050505` / Light `#F7F7F8`），保留细微 `1px` `--soxu-border-subtle` 外框；
 - 重点校准传统终端最容易失明的 **ANSI Black (`#262626`)**、**BrightBlack (`#737373`)** 与 **ANSI Blue (`#60A5FA`)**，确保 Git diff 输出、Cargo 编译进度条与 Test Summary 在纯黑屏上字字清晰。
 
