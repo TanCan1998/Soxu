@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-25T05:17:46Z",
+  "updated_at": "2026-11-25T06:00:03Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -95,9 +95,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "788321a7525beea27183c4d88f78b6c63f8a31bdf4c94cfd695342d638b33798",
-      "size": 47425,
-      "normalized_sha256": "788321a7525beea27183c4d88f78b6c63f8a31bdf4c94cfd695342d638b33798"
+      "sha256": "9c53507799ecdb29a34367a845bd79f90112c86978560203d2be8aaa6f1cea0f",
+      "size": 48795,
+      "normalized_sha256": "9c53507799ecdb29a34367a845bd79f90112c86978560203d2be8aaa6f1cea0f"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -539,9 +539,27 @@
     },
     "crates/soxu-magpie/src/lib.rs": {
       "role": "index",
-      "sha256": "b644cfb9c8bd67a39e97bc861e02c46f8f9f46eed871d35a312f6027767d2d00",
-      "size": 1979,
-      "normalized_sha256": "b644cfb9c8bd67a39e97bc861e02c46f8f9f46eed871d35a312f6027767d2d00"
+      "sha256": "4086b32563066d1dcee95ce548ccc29cc45c76f7f6e4d582e138c60eb03642aa",
+      "size": 5217,
+      "normalized_sha256": "4086b32563066d1dcee95ce548ccc29cc45c76f7f6e4d582e138c60eb03642aa"
+    },
+    "crates/soxu-magpie/src/magpie.rs": {
+      "role": "index",
+      "sha256": "abb8cc7d246c2e674950f7817e6eeb98fd71770fdc65361d8622538ffd28bda5",
+      "size": 4965,
+      "normalized_sha256": "abb8cc7d246c2e674950f7817e6eeb98fd71770fdc65361d8622538ffd28bda5"
+    },
+    "crates/soxu-magpie/src/native.rs": {
+      "role": "index",
+      "sha256": "6fcdbdc69f8a52bdfad89a0e78d40ec5dd3e26e8c5b38a21e10272f7cd17dc3a",
+      "size": 6152,
+      "normalized_sha256": "6fcdbdc69f8a52bdfad89a0e78d40ec5dd3e26e8c5b38a21e10272f7cd17dc3a"
+    },
+    "crates/soxu-magpie/src/tests.rs": {
+      "role": "index",
+      "sha256": "7fb1d8cf52db19f4e972c5be936989c41271aa7770361aab46a3e08cacc270e6",
+      "size": 10098,
+      "normalized_sha256": "7fb1d8cf52db19f4e972c5be936989c41271aa7770361aab46a3e08cacc270e6"
     },
     "crates/soxu-protocol/Cargo.toml": {
       "role": "index",
