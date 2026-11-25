@@ -7,7 +7,7 @@
 .gitleaks.toml[FS7T]: F:扩展 Gitleaks 默认规则，检测硬编码的 Windows、macOS 和 Linux 用户目录路径，并按文件路径匹配 Magpie 或 Paseo 本地凭据及密钥文件 | R:code:scripts/verify-commits-and-privacy.ps1 | A:hardcoded-windows-user-home,hardcoded-unix-user-home,magpie-or-paseo-local-secret-file | S:两条用户目录规则均要求用户名至少两个字符且后接路径分隔符，各有独立的用户名白名单；全局白名单精确排除本配置和校验脚本。
 AGENTS.md[SG9S]: F:定义 Soxu 仓库的多 Agent 协作规范，涵盖安全红线、分支回收、并行隔离、提交门禁、AGY/Codex 切换及 AOCI 维护 | R:code:scripts/check-all.ps1,code:scripts/paseo-ctl.ps1,code:.agents/skills/paseo-orchestrator/SKILL.md,code:docs/ops/PROGRESS.md,code:docs/ops/DECISIONS.md | A:Owned Paths,Git Emoji 提交规范,Stateless Handoff,AOCI 仓库认知 | S:未合并分支或 main 删支须报批，已合入特性分支默认用 --delete-branch 与 workspace archive 自动回收；测试禁改真实用户目录；压缩重载后提交 Attestation。
 CLAUDE.md[SG5T]: F:要求阅读并严格遵守仓库根目录 AGENTS.md 中的安全红线、架构边界、最新稳定版优先原则、Git Emoji 提交规范与跨对话无损交接协议 | R:code:AGENTS.md | A:- | S:-
-Cargo.lock[FV7L]: F:锁定 Cargo 构建解析出的依赖版本与依赖关系，并记录注册表来源和校验和 | R:- | A:Cargo.lock v4 | S:由 Cargo 自动生成，更新依赖时使用 Cargo。同名包可并存多个版本，依赖引用中用于区分版本的后缀须保留。
+Cargo.lock[FV7L]: F:锁定 Cargo 构建解析出的工作区 Rust 依赖树（含 rusqlite bundled、tokio-tungstenite、rand、base64）与校验和 | R:- | A:Cargo.lock v4 | S:由 Cargo 自动生成，更新依赖时使用 Cargo。同名包可并存多个版本，依赖引用中用于区分版本的后缀须保留。
 Cargo.toml[FV8T]: F:定义 Soxu 的 Cargo 工作区成员、共享包元数据、依赖版本（含 rusqlite bundled/WS/哈希）及 lint 策略 | R:code:crates/soxu-protocol/Cargo.toml,code:crates/soxu-core/Cargo.toml,code:crates/soxu-magpie/Cargo.toml,code:crates/soxu-drivers/Cargo.toml,code:crates/soxu-git/Cargo.toml | A:workspace,workspace.package,workspace.dependencies,workspace.lints | S:resolver=3，MSRV 1.99，rusqlite 启用 bundled 避免系统缺 sqlite3 编不过；workspace lints 禁止 unsafe_code 并对 dbg_macro/todo/unwrap_used 告警
 README.md[SG6T]: F:介绍 Soxu 桌面工作台与 React 19 + shadcn/ui 移动遥控端的核心能力，概览仓库结构并提供研发与用户文档入口 | R:code:AGENTS.md,code:Cargo.toml,code:docs/ops/PROGRESS.md,code:docs/ops/DECISIONS.md,code:docs/dev/architecture.md | A:- | S:未安装 Magpie 时自动扫描各 CLI 的原生配置目录，作为发现模型与路由配置的降级路径。
 mise.toml[FC6T]: F:声明仓库开发工具版本并配置 Cargo 构建缓存目录 | R:- | A:tools.rust,tools.node,tools.pnpm,env.CARGO_TARGET_DIR | S:缓存路径以 config_root 为基准指向上级目录的 .cargo-target/soxu，供主工作区与多 Agent Worktree 复用，避免硬编码个人盘符。
@@ -50,10 +50,11 @@ types.ts[DG6S]: F:定义工作树、快速对话、移交选型配置、输入�
 desktop-main.tsx[EU5T]: F:桌面工作台预览原型与单文件构建的 React 19 挂载入口 | R:code:apps/mobile-web/src/desktop/DesktopWorkbench.tsx,code:apps/mobile-web/src/index.css | A:#app | S:仅用于构建离线桌面预览与 dev:desktop 调试，与移动端 main.tsx 共用共享组件与令牌
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-cli/===
-Cargo.toml[FV6T]: F:声明 soxu-cli 包、soxu 命令的构建入口及其依赖 | R:code:crates/soxu-cli/src/main.rs | A:soxu-cli,soxu | S:版本、Rust 版本要求、语言版本、许可证、lint 规则及全部依赖均继承自工作区
+Cargo.toml[FV6T]: F:声明 soxu-cli 包、soxu 二进制入口及 clap/serde/tokio/内部协议与发现工作区依赖 | R:code:crates/soxu-cli/src/main.rs | A:soxu-cli,soxu | S:版本、Rust 版本要求、语言版本、许可证、lint 规则及全部依赖均继承自工作区
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-cli/src/===
-main.rs[EU6T]: F:解析 Soxu 命令行子命令，显示 CLI 与协议版本并诊断 Magpie 环境模式 | R:- | A:soxu version,soxu doctor | S:doctor 优先使用 USERPROFILE，其未设置时才使用 HOME，并在选定目录下查找 .config/magpie；两者均未设置时直接采用 StandaloneNative。
+main.rs[EU7M]: F:解析 Soxu CLI 子命令（version/doctor/status/chat/pair/events），诊断 Magpie 状态并远程控制守护进程 | R:code:crates/soxu-cli/src/client.rs,code:crates/soxu-protocol/src/rpc.rs,code:crates/soxu-magpie/src/lib.rs | A:soxu version,soxu doctor,soxu status,soxu chat new,soxu pair,soxu events | S:监听地址按 --addr -> SOXU_LISTEN -> 127.0.0.1:7698 解析；doctor 探测守护进程离线时不报错失败，友好输出离线提示
+client.rs[EN6S]: F:实现基于 tokio TcpStream 的轻量异步 HTTP/1.1 JSON 客户端与响应解码器，供 soxu-cli 与守护进程通信 | R:code:crates/soxu-cli/src/main.rs | A:DaemonHttpClient,parse_http_response | S:每次请求发送 Connection: close 并兼容 Content-Length 与 chunked 分块传输解码；非 2xx 状态码直接返回错误
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-core/===
 Cargo.toml[FV5T]: F:声明 soxu-core crate 的包元数据、lint 设置和依赖 | R:code:Cargo.toml | A:soxu-core | S:版本、edition、最低 Rust 版本、许可证、lint 配置及全部依赖声明均继承自工作区
@@ -68,10 +69,15 @@ queue.rs[DW6S]: F:维护活跃回合待发队列 FIFO 秩序及 Queue 到 Steer/
 redline.rs[DS8S]: F:实现高危破坏性命令拦截、全局 CLI/Magpie 配置目录保护及跨端审批幂等与红线裁决校验 | R:code:crates/soxu-protocol/src/domain.rs,code:crates/soxu-protocol/src/error.rs | A:RedlineAssessment,assess_command_safety,validate_approval_resolution | S:命中递归删除/强推/系统盘变更或全局配置路径即强锁 allow_session_permitted=false；重复审批返 Conflict
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/===
-Cargo.toml[FV5T]: F:声明 soxu-daemon 包及其工作区依赖，涵盖异步运行、HTTP 服务、资源嵌入和仓库内部组件 | R:code:Cargo.toml | A:soxu-daemon | S:包的版本、Rust edition、最低 Rust 版本、许可证和 lint 规则均继承工作区设置。
+Cargo.toml[FV5T]: F:声明 soxu-daemon 包及其工作区依赖（axum、rusqlite、sha2、base64、rand）与 WS 端到端测试依赖 | R:code:Cargo.toml,code:crates/soxu-daemon/src/lib.rs | A:soxu-daemon,dependencies,dev-dependencies | S:全部生产与 dev 依赖均继承根工作区版本锁定；集成测试通过 tempfile 与 tokio-tungstenite 驱动
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/src/===
-main.rs[EG7T]: F:启动 Soxu 守护进程的 HTTP 服务，提供返回守护进程版本、协议版本和 Magpie 环境检测结果的健康检查 | R:- | A:main,build_router,GET /api/health,SOXU_LISTEN | S:SOXU_LISTEN 缺失或无法解码为 Unicode 时默认监听 127.0.0.1:7698，绑定失败直接返回错误；Magpie 配置目录优先取 USERPROFILE，仅在其未设置时取 HOME，再拼接 .config/magpie
+main.rs[EG7T]: F:启动持久化 Soxu 守护进程 HTTP/WS 服务，依据监听地址决定全接口远程鉴权策略 | R:code:crates/soxu-daemon/src/lib.rs,code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/server.rs | A:main,SOXU_LISTEN,SOXU_DATA_DIR | S:SOXU_DATA_DIR 缺省时取 USERPROFILE/HOME 下 .soxu；绑定非回环地址时自动开启全量接口强制鉴权
+lib.rs[CG7T]: F:重导出 soxu-daemon 核心模块（pairing、server、state、store），供可执行入口与集成测试共用 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-daemon/src/server.rs,code:crates/soxu-daemon/src/store.rs,code:crates/soxu-daemon/src/pairing.rs | A:DaemonState,SqliteStore,build_router | S:所有外部集成测试通过本库入口直接构建无端口硬编码的临时守护实例
+pairing.rs[AI7S]: F:管理移动遥控一次性扫码 #offer= 载荷、6 位动态配对码、防重放认领、Token SHA-256 哈希及空闲锁定 | R:code:crates/soxu-protocol/src/pairing.rs,code:crates/soxu-protocol/src/error.rs | A:PairingManager,PairingManager::hash_token,PairingManager::create_offer,PairingManager::claim,PairingManager::is_idle_locked | S:认领后立即标记 used=true 阻断重放且仅将 Bearer 令牌的 SHA-256 哈希落盘，不持久化明文令牌；默认有效期 300 秒
+server.rs[EN8M]: F:实现 Axum HTTP（/api/health/snapshot/events/rpc）与 WebSocket（/ws）协议握手、after_seq 追平及鉴权路由 | R:code:crates/soxu-daemon/src/state.rs,code:crates/soxu-protocol/src/rpc.rs,code:crates/soxu-protocol/src/events.rs | A:build_router,health_handler,snapshot_handler,events_handler,rpc_handler,ws_handler | S:WS 先订阅 broadcast 再读快照与 after_seq 补发并按 seq 去重防漏；ClaimPairing 允许匿名认领，其余携带 Bearer 须校验未吊销
+state.rs[AB9L]: F:维护守护进程运行态，协调 SqliteStore/CoreOrchestrator/PairingManager 处理全量 RPC 命令并广播单调事件流 | R:code:crates/soxu-daemon/src/store.rs,code:crates/soxu-daemon/src/pairing.rs,code:crates/soxu-core/src/orchestrator.rs,code:crates/soxu-magpie/src/lib.rs | A:DaemonState,DaemonState::open,DaemonState::handle_rpc,DaemonState::authenticate_bearer,DaemonState::register_pending_approval | S:open(None) 使用内存库供隔离测试；审批注册自动经红线评估强锁高危态，每次状态变更先落盘分配 seq 再发 broadcast
+store.rs[PD8L]: F:基于 SQLite WAL 实现项目/工作区/快速对话/消息/草稿/审批/偏好/设备与单调 seq 事件日志持久化 | R:code:crates/soxu-core/src/buckets.rs,code:crates/soxu-core/src/drafts.rs,code:crates/soxu-protocol/src/domain.rs | A:SqliteStore,SqliteStore::open,SqliteStore::append_event,SqliteStore::query_events_after,SqliteStore::save_draft_if_newer | S:开启 WAL 与 NORMAL 同步；paired_devices 仅存 token_sha256；save_draft_if_newer 在库层拦截 <= 已存代次的过期草稿写入
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-desktop/===
 Cargo.toml[FC5T]: F:声明 soxu-desktop 包并通过工作区引入核心、协议、序列化、错误处理和追踪依赖 | R:code:Cargo.toml | A:soxu-desktop | S:包的版本、Rust 版本下限、edition、许可证和 lint 规则均继承工作区配置
@@ -117,7 +123,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录项目核心架构决策（ADR-001~006），包含 GPUI + Daemon、Native CLI 复用、Magpie 发现及 React 19 + shadcn/ui M0.5 决策 | R:code:AGENTS.md,code:design-system/soxu/MASTER.md | A:ADR-001,ADR-002,ADR-003,ADR-005,ADR-006 | S:已拍板方案不可无故推翻；明确全局 CLI 目录只读、M0.5 强制使用 shadcn/ui + Tailwind v4 与开源双字体
-PROGRESS.md[SW6T]: F:记录 Soxu M0–M6 里程碑路线图、Paseo 串并行波次顺序、参考库索引及当前 M1 推进队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1 | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:PR #4 已合入且开启合并自动删支；当前完成 M1 Wave 1.1(#5) 契约冻结，下一步并行推进 Wave 1.2a(#6) 与 Wave 1.2b(#7)
+PROGRESS.md[SW6T]: F:记录 Soxu M0–M6 里程碑路线图、Paseo 串并行波次顺序及 M1 收口后 M2 双路启动队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1 | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:M1(#5/#6/#7) 已全部完成并合入 main；下一步双路并行启动 M2(soxu-magpie 与 soxu-drivers)
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
