@@ -87,9 +87,14 @@ main.rs[EU4T]: F:Soxu 桌面工作台占位入口，启动时打印应用版本�
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/===
 Cargo.toml[FV5T]: F:声明驱动 crate 的包信息、工作区 lint 设置和依赖 | R:code:Cargo.toml | A:soxu-drivers | S:-
+README.md[SE6T]: F:说明 Daemon 如何启动七种 CLI、接收流式事件和控制结果、导入历史，并记录各适配器已核对的证据与复测命令 | R:code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/src/history.rs | A:逐驱动证据,验证命令 | S:能力表描述适配器契约；实机已登录推理和完整回环续接由 Codex 验证，其他驱动以各自的上游接口与夹具为证。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/src/===
-lib.rs[IE6T]: F:定义支持进程复用的本机原生 Agent CLI 类型及其在系统 PATH 中的默认可执行文件名 | R:- | A:NativeCliKind,NativeCliKind::binary_name | S:类型以 snake_case 序列化，序列化值与可执行文件名并不总相同，例如 antigravity 对应 agy。
+lib.rs[IE6T]: F:定义七种本机原生 Agent CLI 及其程序名，公开进程控制、能力协商、流式事件和只读历史发现入口 | R:code:crates/soxu-drivers/src/events.rs,code:crates/soxu-drivers/src/history.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/src/process.rs | A:NativeCliKind,NativeCliKind::ALL,NativeCliKind::binary_name | S:保持 snake_case 序列化标识与已有程序名映射，例如 antigravity 对应 agy。
+events.rs[IM8L]: F:将七种 CLI 原生流式记录解码为会话、文本、工具状态、控制应答、遥测与轮次结果 | R:code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/lib.rs | A:Decoder,DriverEvent,Outcome,Telemetry,UsageScope | S:遥测按上下文、模型步骤、工具调用、轮次与运行划分语义范围，缺项保留 None。增量文本与终态汇总避免重复，进程失败可覆盖协议成功。
+history.rs[ID7M]: F:从显式原生历史目录只读提取五种 CLI 的会话标识和定位元数据，并为支持的会话生成 Resume 或 Fork 选择器 | R:code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/src/lib.rs | A:HistoryEntry,HistoryListing,discover_history,resume,fork | S:扫描跳过链接或 Windows reparse point，限制深度、目录项和单文件探测字节；Pi 以原生会话文件路径选择，其他适配器用原生 ID。
+invocation.rs[IE8M]: F:声明七种 CLI 的适配能力和轮次请求契约，验证会话选项并转换为原生参数及输入通道 | R:code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/lib.rs | A:Capabilities,ControlSupport,Persistence,RunTarget,RunRequest,SessionMode | S:Pi 原生支持排队与纠偏，其余由调用方排队且不支持纠偏；临时会话不能续接或分叉。Codex 续接时用全局配置覆盖保持只读沙箱，提示词通过 stdin。
+process.rs[IW8L]: F:用 Tokio 发现和启动可信原生 CLI，处理有界 JSONL 事件、Pi RPC 控制、终态与直接子进程回收 | R:code:crates/soxu-drivers/src/events.rs,code:crates/soxu-drivers/src/invocation.rs | A:NativeDriver,RunningTurn,TurnControl,Control,DriverError | S:Windows 拒绝脚本 shim；程序与工作目录使用绝对路径并直接传参。记录上限 4 MiB，stderr 不进入事件流；取消与接收端丢弃均触发直接子进程回收。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/===
 Cargo.toml[FV5T]: F:声明 soxu-git crate 的包元数据、lint 规则和依赖 | R:code:Cargo.toml | A:soxu-git | S:版本、Rust edition、最低 Rust 版本、许可证、lint 规则和全部依赖均继承自工作区
@@ -126,7 +131,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录项目核心架构决策（ADR-001~006），包含 GPUI + Daemon、Native CLI 复用、Magpie 发现及 React 19 + shadcn/ui M0.5 决策 | R:code:AGENTS.md,code:design-system/soxu/MASTER.md | A:ADR-001,ADR-002,ADR-003,ADR-005,ADR-006 | S:已拍板方案不可无故推翻；明确全局 CLI 目录只读、M0.5 强制使用 shadcn/ui + Tailwind v4 与开源双字体
-PROGRESS.md[SW6T]: F:记录 Soxu M0–M6 里程碑路线图、Paseo 串并行波次顺序及 M1 收口后 M2 双路启动队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1 | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:M1(#5/#6/#7) 已全部完成并合入 main；下一步双路并行启动 M2(soxu-magpie 与 soxu-drivers)
+PROGRESS.md[SW6T]: F:记录 Soxu M0–M6 里程碑路线图、Paseo 串并行开发顺序、活跃工作区和跨会话接手队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:M2 双态发现和原生驱动已合入，下一步接入 Daemon 和 soxu doctor；Codex 已验证真实对话与回环续接，逐驱动验证范围见驱动说明。
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
