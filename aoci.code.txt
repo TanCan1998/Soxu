@@ -106,7 +106,10 @@ lib.rs[LR5T]: F:定义与对话轮次绑定的 Git 检查点摘要，记录检�
 Cargo.toml[FV5T]: F:声明soxu-magpie包及其工作区依赖 | R:code:Cargo.toml | A:soxu-magpie | S:包版本、Rust版本、edition、许可证和lint规则均继承自工作区
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-magpie/src/===
-lib.rs[IE6T]: F:根据配置目录判定 Magpie 协同或原生独立模式，并定义 MCP 与 Skill 的路由模式 | R:- | A:EnvironmentMode,McpRouteMode,SkillRouteMode,detect_mode_from_config_dir | S:library.json 或 gateway.json 任一为文件即启用协同模式，不读取内容；三个模式枚举均以 snake_case 序列化。
+lib.rs[IE7S]: F:暴露 Magpie 协同与原生独立模式的只读发现接口，组合网关与路由配置、七类 CLI 探测和脱敏环境摘要 | R:code:crates/soxu-magpie/src/magpie.rs,code:crates/soxu-magpie/src/native.rs | A:EnvironmentDiscovery,EnvironmentPresence,ProbeStatus,discover_environment,discover_environment_with,detect_mode_from_config_dir | S:旧模式入口仍只判断两个标记文件是否存在；新入口也接受 PATH 中的 Magpie 命令。公开环境摘要只报告允许列出的变量是否设置。
+magpie.rs[IC6S]: F:将 Magpie 网关登记和 Library 的 MCP、Skill 默认路由及条目配置汇总为固定状态与计数 | R:code:crates/soxu-magpie/src/lib.rs | A:MagpieDiscovery,RouteSummary,read_metadata,routes | S:网关登记不证明连通，路由配置不证明已应用。只读指定 JSON 文件并限制单文件 8 MiB；开关缺失或类型不符时保留未知。
+native.rs[IE6M]: F:为七种原生 CLI 分别探测 PATH 入口候选和标准配置目录，支持各自的显式目录覆盖 | R:code:crates/soxu-magpie/src/lib.rs | A:NativeAgent,NativeCli,SearchPaths,config_dirs,first_available | S:配置目录探测仅检查可读取性。Windows 识别脚本入口候选，Unix 要求执行位；候选不代表进程可安全启动或认证成功。
+tests.rs[TE5M]: F:以临时夹具验证 Magpie 双态、无效路由字段、七类 CLI 目录与覆盖、输出脱敏及序列化回环 | R:code:crates/soxu-magpie/src/lib.rs,code:crates/soxu-magpie/src/magpie.rs,code:crates/soxu-magpie/src/native.rs | A:Fixture,discover_environment_with | S:脱敏同时验证 JSON 和 Debug，环境读取器收到允许列表以外的变量请求即失败。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-protocol/===
 Cargo.toml[FN6T]: F:声明 soxu-protocol 协议库包并配置其依赖 | R:code:Cargo.toml | A:soxu-protocol | S:版本、Rust 版本下限、语言版本、许可证、 lint 规则及全部依赖声明均继承自工作区
@@ -128,7 +131,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录项目核心架构决策（ADR-001~006），包含 GPUI + Daemon、Native CLI 复用、Magpie 发现及 React 19 + shadcn/ui M0.5 决策 | R:code:AGENTS.md,code:design-system/soxu/MASTER.md | A:ADR-001,ADR-002,ADR-003,ADR-005,ADR-006 | S:已拍板方案不可无故推翻；明确全局 CLI 目录只读、M0.5 强制使用 shadcn/ui + Tailwind v4 与开源双字体
-PROGRESS.md[SW6T]: F:记录 Soxu M0–M6 里程碑路线图、Paseo 串并行波次顺序及 M1 收口后 M2 双路启动队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1 | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:M1(#5/#6/#7) 已全部完成并合入 main；下一步双路并行启动 M2(soxu-magpie 与 soxu-drivers)
+PROGRESS.md[SW6T]: F:记录 Soxu M0–M6 里程碑路线图、Paseo 串并行开发顺序、活跃工作区和跨会话接手队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:M2 双态发现和原生驱动已合入，下一步接入 Daemon 和 soxu doctor；Codex 已验证真实对话与回环续接，逐驱动验证范围见驱动说明。
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用

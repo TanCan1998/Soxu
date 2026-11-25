@@ -6,7 +6,8 @@
 
 ## 1. 当前总体状态
 
-- **当前所处阶段**：`M0`、`M0.5`（PR `#4`）与 **`M1: Protocol v1, Domain Core & Daemon Spine`（`#5` / `#6` / `#7`）已全部完成并合入 `main`**；仓库已全面启用合并自动删支（`delete_branch_on_merge = true`）与 Paseo Worktree 自动回收。下一步基于最新 `main` 双路并行启动 **`M2: Magpie Discovery & 7 Native CLI Drivers`**。
+- `M0`、`M0.5`（PR `#4`）与 **`M1: Protocol v1, Domain Core & Daemon Spine`（`#5` / `#6` / `#7`）已全部完成并合入 `main`**。**`M2: Magpie Discovery & 7 Native CLI Drivers`** 的双态发现（`#11`）和原生驱动（`#12`）已合入，下一步接入 Daemon 与 `soxu doctor`。
+- 仓库已启用合并自动删支（`delete_branch_on_merge = true`）与 Paseo Worktree 回收。
 - **参考项目与索引进度（已全部完成）**：
   - [x] 拉取参考项目至 `.refs/`：`paseo`（7,818 文件）、`codeg`（3,324 文件）、`padu`（1,157 文件）
   - [x] **AOCI 认知索引已全部原子入库**：`padu`（方案 A 全量 **1,086** 条）、`paseo`（方案 B 宏观核心 **202** 条）、`codeg`（方案 B 宏观核心 **177** 条）、`Soxu` 主仓（全量对齐）
@@ -21,7 +22,7 @@
 | **M0** | Bootstrap & Engineering Governance | ✅ 已完成 | 仓库骨架（Rust 2024 + PWA）、`.githooks` + `gitleaks` 隐私与 Emoji 门禁、最新 Actions CI、三层文档、Paseo `git` 项目绑定 |
 | **M0.5** | Pure Black Design System & Dual Prototypes | ✅ 已完成 | 纯黑 7 级海拔 `tokens.json` + `shadcn/ui` 变量、MASTER + 7 份分页面规范、React 19 + `shadcn/ui` + Tailwind v4 双端原型与 7 分区独立设置、单文件桌面预览 `preview.html`、移动遥控 PWA 原型（PR `#4`） |
 | **M1** | Protocol v1, Domain Core & Daemon Spine | ✅ 已完成 | `soxu-protocol` 全量 RPC/WS `seq` 契约、`soxu-core` 状态桶/能力协商/安全红线/队列草稿、`soxu-daemon` SQLite WAL 持久化 + WS 增量追平 + `#offer=`/6 位码鉴权、`soxu-cli` 闭环（`#5` / `#6` / `#7`） |
-| **M2** | Magpie Discovery & 7 Native CLI Drivers | ⏳ 待启动 | `soxu-magpie` 双态只读拓扑 + 原生降级扫描 + 启动环境脱敏透视；`soxu-drivers` 7 大原生 CLI 流式驱动、`Queue`/`Steer`/`Interrupt`、11 项遥测采集、本地历史 Resume/Fork 导入（无项目与本地对话率先跑通） |
+| **M2** | Magpie Discovery & 7 Native CLI Drivers | 两项实现已合入，待接线 | `soxu-magpie` 双态只读拓扑、原生降级扫描与启动环境脱敏；`soxu-drivers` 适配七种流式格式，按驱动能力提供控制、遥测及本地历史 Resume/Fork |
 | **M3** | Git Worktree Pool, Checkpoints & Commit Engine | ⏳ 待启动 | `soxu-git` 三合一项目接入、Worktree 隔离池 + `direct` MCP 上下文挂载 + 工作区损坏恢复、三基准 Diff、Checkpoint 三选一安全回退（含 Safety Stash）、拆分式 Git Emoji 提交与门禁预检 |
 | **M4** | Live Mobile PWA & GPUI Workbench Foundation | ⏳ 待启动 | **双轨 100% 正交并行**：`apps/mobile-web` 去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对与 13 组视口验收；`soxu-desktop` GPUI 令牌编译器、双开源字体联动、可扩展 `i18n`、7 层焦点栈与四栏自适应壳层 |
 | **M5** | GPUI Core Views: Transcript, Composer & Inspector | ⏳ 待启动 | `soxu-desktop` 三路并行落地：`<=8.3Hz` 虚拟对话流 + 5 类工具卡/审批卡/提问卡 + 20px 轮次导航轨、760px 同步宽输入舱 + `@agent` 移交 + 三色圆环统计、右栏 Diff/Files、7 分区设置与核心业务模态框 |
@@ -50,6 +51,9 @@
 
 ## 3. 活跃工作区与智能调度策略
 
+- 当前无进行中的 M2 实现工作区或 PR。
+- `#11` 的七项测试及 Windows 只读烟测通过。`#12` 的七种流式格式通过夹具验证，Codex 无项目和本地目录的真实对话通过登录烟测，原生 Resume/Fork 通过回环测试。各驱动的验证范围见 [`soxu-drivers/README.md`](../../crates/soxu-drivers/README.md)。
+
 - **当前并发上限**：参考库索引阶段采用 `3~4` 路独立仓库并行初始化；后续进入 M0.5 顶层规范与各阶段契约冻结时回归 `1` 路串行，M1–M6 接口冻结后的正交模块实现采用 `2~3` 路 Paseo Worktree 并行。
 - **双桌面端主控协同（AGY ⇄ Codex 随时切换）**：本机 AGY 桌面端与 Codex 桌面端已同时导入 `Soxu` 项目，宿主配置与工作树写操作相互隔离，仓库认知（`AGENTS.md` / `aoci.txt` / `.agents/skills/paseo-orchestrator`）与 Paseo 守护进程状态池全面共享；任意时刻均可使用 `pwsh -NoProfile -File scripts/paseo-ctl.ps1` 在两端之间无损切换控制 Paseo。
 - **主力 Agent 与模型路由池**（通过 Paseo 调度，经 Magpie 网关路由）：
@@ -61,8 +65,6 @@
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 基于最新 `main` 创建 **M2（Magpie Discovery & 7 Native CLI Drivers）** 任务议题，并双路并行拉起 Paseo 隔离 Worktree：
-   - **M2a（`crates/soxu-magpie/**`）**：Magpie 双态只读拓扑、原生降级扫描与启动环境脱敏透视；
-   - **M2b（`crates/soxu-drivers/**`）**：7 大原生 CLI 流式驱动、`Queue`/`Steer`/`Interrupt`、11 项遥测采集与本地历史 Resume/Fork 导入。
-2. 合流接入 `soxu-daemon` 与 `soxu doctor`，率先跑通无项目与本地目录真实 CLI 对话。
+1. 将发现与驱动 API 接入 `soxu-daemon` 和 `soxu doctor`。
+2. 经 Daemon 验证无项目与本地目录的真实 CLI 对话，并核对诊断信息及控制能力降级。
 
