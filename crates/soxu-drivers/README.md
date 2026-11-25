@@ -51,6 +51,18 @@ Daemon 把 `CLAUDE_CONFIG_DIR` 设置为自身数据目录下的 `claude`，并�
 和 `soxu chat stop` 投递或停止。Daemon 使用 Claude Code 的安全和受限模式，
 关闭工具、MCP、斜杠命令与项目自定义，续接成功的会话时沿用原生 UUID。
 
+## Daemon 本机 Qwen Code 只读对话
+
+将 `SOXU_QWEN_NODE` 指向真实 Node 可执行文件，并将 `SOXU_QWEN_ENTRY` 指向
+Qwen 安装包内处理请求的 `cli.js`，两者均使用绝对路径。Windows 上的 `cli-entry.js`
+会派生另一个进程。直接启动 `cli.js` 能让停止操作回收处理当前轮次的进程。
+Daemon 将 Qwen 的配置、运行数据与历史隔离到自身数据目录的 `qwen` 子目录。
+
+此接线使用 OpenAI 兼容认证，从 Daemon 启动环境读取 `OPENAI_API_KEY`、
+`OPENAI_BASE_URL` 和 `OPENAI_MODEL`。使用 `soxu chat new --agent qwen --read-only`
+创建快聊。Daemon 使用 Qwen 的最小与安全模式，按名称排除已实测的内置工具，并将
+本轮工具调用预算设为零。若模型仍返回工具调用，回合失败并暂停队列。
+
 ## 逐驱动证据
 
 下列本机版本是本次核对的版本。常规隔离测试验证七种事件格式。实际登录推理已
@@ -65,7 +77,7 @@ Daemon 把 `CLAUDE_CONFIG_DIR` 设置为自身数据目录下的 `claude`，并�
 | OpenCode | `run --standalone --format json`；`text`、`tool_use`、`step_finish`；步骤、token、缓存、成本和工具执行时长 | `--session` / `--fork`；上游 `packages/cli/src/run/{run,noninteractive}.ts` 与夹具。本机不在 PATH，SQLite 历史扫描不可用 |
 | Antigravity 1.5.16 | `--print --output-format stream-json`；`init`、`step_update`、`result`；步骤、时长、轮次与 token | 已知会话 ID 可使用 `--conversation`；本机帮助、Google Antigravity *Headless mode* 与夹具。历史扫描和 Fork 不可用 |
 | Copilot 1.0.114 | `--output-format json --stream on`；助手增量、轮次结束与有报告的用量、上下文和延迟 | `session-state/<id>/events.jsonl`，`--resume=<id>`；本机帮助、GitHub *Streaming session events*、配置目录参考与夹具。Fork 不可用 |
-| Qwen Code 0.28.0 | `--output-format stream-json --include-partial-messages`；助手增量与 `result` 用量 | 项目 `chats/<id>.jsonl`，`--resume` / `--fork-session`；本机帮助、Qwen *Headless Mode*、`chatRecordingService.ts` 与夹具 |
+| Qwen Code 0.28.0 | `--output-format stream-json --include-partial-messages`；助手增量与 `result` 用量 | 项目 `chats/<id>.jsonl`，`--resume` / `--fork-session`；真实 Qwen 经 Daemon 通过两轮回环续接，模型请求不带工具，额外的工具请求被拦截 |
 
 ## 验证命令
 

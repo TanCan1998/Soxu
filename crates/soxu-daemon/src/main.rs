@@ -50,18 +50,7 @@ fn configure_pi(session_dir: PathBuf) -> Result<NativeDriver, DriverError> {
     let program = std::env::var_os("SOXU_PI_EXE").ok_or(DriverError::BinaryNotFound)?;
     let mut prefix = Vec::new();
     if let Some(entry) = std::env::var_os("SOXU_PI_ENTRY") {
-        let path = Path::new(&entry);
-        if !path.is_absolute()
-            || !path.extension().is_some_and(|ext| {
-                ["js", "mjs", "cjs"]
-                    .iter()
-                    .any(|allowed| ext.eq_ignore_ascii_case(allowed))
-            })
-            || !path.is_file()
-        {
-            return Err(DriverError::InvalidRequest("SOXU_PI_ENTRY"));
-        }
-        prefix.push(entry);
+        prefix.push(validate_js_entry(entry, "SOXU_PI_ENTRY")?);
     }
     prefix.extend([
         OsString::from("--session-dir"),
@@ -75,6 +64,22 @@ fn configure_pi(session_dir: PathBuf) -> Result<NativeDriver, DriverError> {
         return Err(DriverError::Unsupported("Windows Pi 入口为 Scoop 包装器"));
     }
     Ok(driver)
+}
+
+fn validate_js_entry(entry: OsString, parameter: &'static str) -> Result<OsString, DriverError> {
+    let path = Path::new(&entry);
+    if path.is_absolute()
+        && path.extension().is_some_and(|ext| {
+            ["js", "mjs", "cjs"]
+                .iter()
+                .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+        })
+        && path.is_file()
+    {
+        Ok(entry)
+    } else {
+        Err(DriverError::InvalidRequest(parameter))
+    }
 }
 
 fn configure_claude(config_dir: PathBuf) -> Result<NativeDriver, DriverError> {
@@ -91,6 +96,51 @@ fn configure_claude(config_dir: PathBuf) -> Result<NativeDriver, DriverError> {
     Ok(driver
         .with_env("CLAUDE_CONFIG_DIR", Some(config_dir.into_os_string()))
         .with_env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", Some("1".into())))
+}
+
+fn configure_qwen(config_dir: PathBuf) -> Result<NativeDriver, DriverError> {
+    let program = std::env::var_os("SOXU_QWEN_NODE").ok_or(DriverError::BinaryNotFound)?;
+    let entry = std::env::var_os("SOXU_QWEN_ENTRY")
+        .ok_or(DriverError::InvalidRequest("SOXU_QWEN_ENTRY"))?;
+    let entry = validate_js_entry(entry, "SOXU_QWEN_ENTRY")?;
+    let driver = NativeDriver::with_program(
+        NativeCliKind::QwenCode,
+        program.into(),
+        [
+            "--expose-gc".into(),
+            entry,
+            "--auth-type".into(),
+            "openai".into(),
+        ],
+    )?;
+    if !driver.program().is_file() {
+        return Err(DriverError::BinaryNotFound);
+    }
+    if cfg!(windows) && driver.program().with_extension("shim").is_file() {
+        return Err(DriverError::Unsupported("Windows Node 入口为 Scoop 包装器"));
+    }
+    std::fs::create_dir_all(&config_dir).map_err(|_| DriverError::InvalidRequest("QWEN_HOME"))?;
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(config_dir.join("settings.json"))
+    {
+        Ok(mut settings) => std::io::Write::write_all(&mut settings, b"{}\n")
+            .map_err(|_| DriverError::InvalidRequest("QWEN_HOME"))?,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(_) => return Err(DriverError::InvalidRequest("QWEN_HOME")),
+    }
+    Ok(driver
+        .with_env(
+            "QWEN_RUNTIME_DIR",
+            Some(config_dir.join("runtime").into_os_string()),
+        )
+        .with_env(
+            "QWEN_CONVERSATIONS_DIR",
+            Some(config_dir.join("conversations").into_os_string()),
+        )
+        .with_env("QWEN_HOME", Some(config_dir.into_os_string()))
+        .with_env("QWEN_CODE_RELAUNCH_ARGS", None))
 }
 
 #[tokio::main]
@@ -125,6 +175,10 @@ async fn main() -> anyhow::Result<()> {
             (
                 NativeCliKind::ClaudeCode,
                 configure_claude(native_root.join("claude")),
+            ),
+            (
+                NativeCliKind::QwenCode,
+                configure_qwen(native_root.join("qwen")),
             ),
         ],
     )?);
