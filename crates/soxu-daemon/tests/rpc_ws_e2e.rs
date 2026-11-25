@@ -320,6 +320,17 @@ async fn native_copilot_read_only_rpc_resume_cancel_fifo_and_restart() {
     .await;
 }
 
+#[tokio::test]
+async fn native_opencode_read_only_rpc_resume_cancel_fifo_and_restart() {
+    assert_read_only_rpc_flow(
+        NativeCliKind::OpenCode,
+        "OpenCode",
+        "opencode.cjs",
+        "ses_dedf8357effemZrzPmvFfyljxn",
+    )
+    .await;
+}
+
 async fn assert_read_only_rpc_flow(
     kind: NativeCliKind,
     label: &str,
@@ -499,12 +510,15 @@ fn bind_local_fixture(dir: &TempDir, state: &DaemonState) -> SessionTarget {
 }
 
 #[tokio::test]
-async fn native_copilot_rejects_bound_directory() {
+async fn quick_chat_only_drivers_reject_bound_directories() {
+    assert_bound_directory_rejected(NativeCliKind::Copilot, "copilot.cjs").await;
+    assert_bound_directory_rejected(NativeCliKind::OpenCode, "opencode.cjs").await;
+}
+
+async fn assert_bound_directory_rejected(kind: NativeCliKind, fixture: &str) {
     let dir = TempDir::new().expect("create test data dir");
-    let kind = NativeCliKind::Copilot;
     let (addr, state, handle) =
-        spawn_daemon_with_drivers(&dir, None, kind, Some(native_fixture(kind, "copilot.cjs")))
-            .await;
+        spawn_daemon_with_drivers(&dir, None, kind, Some(native_fixture(kind, fixture))).await;
     let create = RpcCommand::CreateSession {
         target: bind_local_fixture(&dir, &state),
         title: None,

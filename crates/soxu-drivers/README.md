@@ -75,6 +75,18 @@ Daemon 通过 stdin 投递用户文本，关闭内置 MCP、交互提问、项�
 并使用空工具白名单。Copilot 续接成功后沿用同一原生 UUID。当前只读接线限于快聊，
 项目目录会话需要先验证原生项目钩子的隔离行为。
 
+## Daemon 本机 OpenCode 只读快聊
+
+将 `SOXU_OPENCODE_EXE` 指向已验证的 OpenCode `1.19.6` 平台可执行文件。
+在 Daemon 启动环境的 `OPENCODE_CONFIG_CONTENT` 中提供可信的 `model` 和
+`provider` 配置。Daemon 只采用这两项顶层配置，固定全拒绝工具权限，并隔离
+OpenCode 配置、数据库、缓存与状态到 Daemon 的 `opencode` 子目录。
+
+使用 `soxu chat new --agent opencode --read-only` 创建快聊。Daemon 以
+`--pure run --format json` 启动真实进程并通过 stdin 投递文本，禁用项目配置、
+外部插件和自动更新。轮次成功后保存 `ses_` 原生 ID，后续使用 `--session`
+续接。当前开放本机快聊。
+
 ## 逐驱动证据
 
 下列本机版本是本次核对的版本。常规隔离测试验证七种事件格式。实际登录推理已
@@ -86,7 +98,7 @@ Daemon 通过 stdin 投递用户文本，关闭内置 MCP、交互提问、项�
 | Codex 0.172.0 | `exec --json`；`thread.started`、`item.completed`、`turn.completed`；轮次、输入输出和缓存 token | `rollout-*.jsonl`，`exec resume/fork`；已登录烟测与回环续接通过 |
 | Pi 1.5.2 | `--mode rpc`；`message_update`、`agent_settled`；模型步骤、token、成本、上下文 | Session JSONL，`--session` / `--fork`；真实 Pi 经 Daemon 接回环模型夹具，通过两轮流式续接并沿用同一会话 ID |
 | Claude Code 2.1.331 | `--print --output-format stream-json --verbose`；部分文本、`result`、报告的轮次、token 与美元成本 | `projects/<cwd>/<id>.jsonl`，`--resume` / `--fork-session`；真实 Claude Code 经 Daemon 接本机模型夹具，两轮回复使用同一 UUID，记录落在隔离目录 |
-| OpenCode | `run --standalone --format json`；`text`、`tool_use`、`step_finish`；步骤、token、缓存、成本和工具执行时长 | `--session` / `--fork`；上游 `packages/cli/src/run/{run,noninteractive}.ts` 与夹具。本机不在 PATH，SQLite 历史扫描不可用 |
+| OpenCode 1.19.6 | `run --format json`、stdin；`text`、`tool_use`、`step_finish`；步骤、token、缓存、成本和工具执行时长 | `--session` / `--fork`；真实 OpenCode 经 Daemon 验证两轮回环、零工具、同一原生 ID 和停止后模型连接断开。SQLite 历史扫描不可用 |
 | Antigravity 1.5.16 | `--print --output-format stream-json`；`init`、`step_update`、`result`；步骤、时长、轮次与 token | 已知会话 ID 可使用 `--conversation`；本机帮助、Google Antigravity *Headless mode* 与夹具。历史扫描和 Fork 不可用 |
 | Copilot 1.0.114 | `--output-format json --stream on`、stdin；助手增量、最终 `result`、有报告的用量、上下文和延迟 | `session-state/<id>/events.jsonl`，`--resume=<id>`；真实 Copilot 经 Daemon 通过两轮回环续接，沿用同一 UUID，且模型请求均无工具。Fork 不可用 |
 | Qwen Code 0.28.0 | `--output-format stream-json --include-partial-messages`；助手增量与 `result` 用量 | 项目 `chats/<id>.jsonl`，`--resume` / `--fork-session`；真实 Qwen 经 Daemon 通过两轮回环续接，模型请求不带工具，额外的工具请求被拦截 |

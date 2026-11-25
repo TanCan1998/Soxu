@@ -35,6 +35,7 @@ enum ReadOnlyAgent {
     Claude,
     Qwen,
     Copilot,
+    OpenCode,
 }
 
 impl ReadOnlyAgent {
@@ -48,6 +49,9 @@ impl ReadOnlyAgent {
                 "copilot" if matches!(session.target, SessionTarget::QuickChat { .. }) => {
                     return Ok(Self::Copilot);
                 }
+                "opencode" if matches!(session.target, SessionTarget::QuickChat { .. }) => {
+                    return Ok(Self::OpenCode);
+                }
                 "copilot" => {
                     return Err(turn_error(
                         ErrorCode::DriverUnavailable,
@@ -55,12 +59,19 @@ impl ReadOnlyAgent {
                         "请创建 Copilot 只读快速对话",
                     ));
                 }
+                "opencode" => {
+                    return Err(turn_error(
+                        ErrorCode::DriverUnavailable,
+                        "OpenCode 只读当前仅支持本机快速对话",
+                        "请创建 OpenCode 只读快速对话",
+                    ));
+                }
                 _ => {}
             }
         }
         Err(turn_error(
             ErrorCode::DriverUnavailable,
-            "当前只接通未归档的 Codex、Pi、Claude Code、Qwen Code 与 Copilot 只读会话",
+            "目前支持 Codex、Pi、Claude Code、Qwen Code、Copilot 与 OpenCode 的未归档只读会话",
             "请选择已配置的代理与只读权限，或新建只读快速对话",
         ))
     }
@@ -72,6 +83,7 @@ impl ReadOnlyAgent {
             Self::Claude => "Claude Code",
             Self::Qwen => "Qwen Code",
             Self::Copilot => "Copilot",
+            Self::OpenCode => "OpenCode",
         }
     }
 
@@ -82,6 +94,17 @@ impl ReadOnlyAgent {
             Self::Claude => NativeCliKind::ClaudeCode,
             Self::Qwen => NativeCliKind::QwenCode,
             Self::Copilot => NativeCliKind::Copilot,
+            Self::OpenCode => NativeCliKind::OpenCode,
+        }
+    }
+
+    fn valid_session_id(self, id: &str) -> bool {
+        if self == Self::OpenCode {
+            id.strip_prefix("ses_").is_some_and(|suffix| {
+                suffix.len() == 26 && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            })
+        } else {
+            Uuid::parse_str(id).is_ok()
         }
     }
 
@@ -101,6 +124,9 @@ impl ReadOnlyAgent {
             Self::Claude => "请通过 SOXU_CLAUDE_EXE 指定可信 Claude Code 可执行文件",
             Self::Qwen => "请通过 SOXU_QWEN_NODE 和 SOXU_QWEN_ENTRY 指定可信 Node 和 Qwen JS 入口",
             Self::Copilot => "请通过 SOXU_COPILOT_EXE 指定可信 Copilot 平台可执行文件",
+            Self::OpenCode => {
+                "请通过 SOXU_OPENCODE_EXE 指定可信 OpenCode，并设置只读快聊的模型配置"
+            }
         };
         turn_error(ErrorCode::DriverUnavailable, error.to_string(), advice)
     }
@@ -159,6 +185,7 @@ impl DaemonState {
                 NativeCliKind::ClaudeCode,
                 NativeCliKind::QwenCode,
                 NativeCliKind::Copilot,
+                NativeCliKind::OpenCode,
             ] {
                 let (Some(driver), Some(agent)) = (
                     drivers.get(&kind),
@@ -478,7 +505,7 @@ impl DaemonState {
             let mut pending_id = None;
             while let Some(event) = turn.next_event().await {
                 match event {
-                    DriverEvent::Session { id } if Uuid::parse_str(&id).is_ok() => match agent {
+                    DriverEvent::Session { id } if agent.valid_session_id(&id) => match agent {
                         ReadOnlyAgent::Codex => self
                             .record_native_session_id(&assistant.session_id, id)
                             .map_err(|_| "原生会话标识无法落盘".to_owned())?,

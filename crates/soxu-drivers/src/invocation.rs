@@ -184,10 +184,7 @@ pub(crate) fn invocation(
             ],
             Input::Rpc,
         ),
-        OpenCode => (
-            &["run", "--standalone", "--format", "json"],
-            Input::Argument,
-        ),
+        OpenCode => (&["run", "--format", "json"], Input::Text),
         Antigravity => (
             &[
                 "--output-format",
@@ -293,7 +290,6 @@ pub(crate) fn invocation(
     }
     match kind {
         Codex => args.push("-".into()),
-        OpenCode => args.extend(["--".into(), OsString::from(&request.prompt)]),
         Antigravity => args.push(format!("--print={}", request.prompt).into()),
         _ => {}
     }
