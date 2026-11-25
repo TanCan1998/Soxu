@@ -56,14 +56,14 @@
 
 ### 3.1 当前 Pi / Git 并行波次（2026-11-25 北京时间盘点）
 
-以下身份与状态来自本轮 `gh issue view 26/32/33/34`、`gh pr list` 和 `paseo-ctl.ps1 project ls / workspace ls / ls --json`。盘点时三项 Issue 均开放、三个执行 Agent 均为 `running`，GitHub 无开放 PR；这是派发快照，不是验收结论。新 PR 及后续状态须实时复查，合入收口时由主控安排更新本看板。
+以下身份与状态来自本轮 `gh issue view 26/32/33/34`、`gh pr list` 和 `paseo-ctl.ps1 project ls / workspace ls / ls --json`。首次派发盘点时三项 Issue 均开放、三个执行 Agent 均为 `running`，GitHub 无开放 PR。**19:46 北京时间复查**：三个 Agent 仍为 `running`，治理 PR [`#35`](https://github.com/TanCan1998/Soxu/pull/35) 已创建且开放，`#32` / `#33` 尚无 PR；本地完整门禁及 AOCI 已通过，PR `#35` 等待主控审查，云端门禁尚在运行。这是时点快照，不是业务验收结论。新 PR 及后续状态须实时复查，合入收口时由主控安排更新本看板。
 
 - **主控边界**：Soxu 项目为 `prj_24ffa03410264684`，主控工作台为 `wks_21203a9ef0f5e2e5`（`main`）。主控只分配、监督与审查，不直接编码；执行代理自行完成实现、测试、提交推送与建 PR，不合并 PR、不归档工作区、不修改主检出。
 - **PiDeck 参考基线**：`#32` 派发记录指定 `ayuayue/PiDeck@b9a095e063845c80574c5517994c6fcf2be60f25`；具体原生 Pi 文件、可借鉴决策及模拟/实机证据由该执行代理在 PR 中报告，不把参考库的 ACP 设计移植进 Soxu。
 
 | Issue / 工作线 | 隔离分支 | Workspace | Agent | 派发配置 / 盘点状态 |
 | :--- | :--- | :--- | :--- | :--- |
-| `#34` 治理先行 | `docs/34-parallel-wave` | `wks_540110c51aea6f11` | `308c1ebb-ddc9-4055-8cdd-c213c4034e87` | Codex / Sol / medium；`running`，PR 待创建 |
+| `#34` 治理先行 | `docs/34-parallel-wave` | `wks_540110c51aea6f11` | `308c1ebb-ddc9-4055-8cdd-c213c4034e87` | Codex / Sol / medium；`running`，PR `#35` 待主控审查 |
 | `#32` M2j Pi 原生纠偏 | `feat/32-pi-native-steer` | `wks_b7f3663147388206` | `74d002f4-7107-41e0-a290-872c33f56eee` | Codex / Astra / high；`running`，PR 待创建 |
 | `#33` M3a Git 只读底座 | `feat/33-git-readonly-probe` | `wks_8f142f393281bfad` | `48cafea4-3d96-4950-83f8-79d5d5263e4e` | Codex / Sol / high；`running`，PR 待创建 |
 
@@ -108,7 +108,7 @@
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 主控先审查并合入 `#34` 治理 PR，确认本波次角色、Owned Paths、AGY 延期与串行合入顺序；执行代理不自行合并或回收。
+1. 主控先审查并合入 `#34` 的治理 PR `#35`，确认本波次角色、Owned Paths、AGY 延期与串行合入顺序；执行代理不自行合并或回收。
 2. `#32` 独立完成 PiDeck 原生 Pi 参考报告、Pi active/settled 与 RPC ack 校验、纠偏成功不重复排队及拒绝/停止/持久化回归；完整门禁和 AOCI 对齐后提交 PR，由主控审查。
 3. `#33` 同时完成 Git 仓库身份与 `porcelain=v2 -z` 只读探测，覆盖 linked worktree、detached/unborn、特殊文件名及错误输入；在 `#32` 之后吸收最新 `main`、复跑门禁并交主控串行审查合入。Worktree 池、Diff、Checkpoint 与提交引擎后续另行派发。
 4. `#26` 暂缓且保持开放，保留全部已合入防护和探针，Daemon 路由保持关闭。待用户/主控恢复该线时再验证原生入口、配置来源、启动竞态、运行期保护及取消边界，不占用当前主线前置队列。
