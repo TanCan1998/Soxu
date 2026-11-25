@@ -7,7 +7,8 @@
 ## 一、安全红线（最高优先级）
 
 1. **高危与破坏性操作停机报批**：
-   - 在执行任何可能破坏仓库外文件、删除持久数据、修改系统全局配置、删除远端分支/仓库、重置未合并提交或安装未指定软件的命令（如 `Remove-Item -Recurse`、`rmdir`、`del`、`git push --force`、`gh repo delete`、`Set-ExecutionPolicy`）之前：**必须立即停止执行**，向用户清晰说明该命令将做什么、影响范围与回退方式，**等待用户明确回复「同意」后方可调用工具执行**。
+   - 在执行任何可能破坏仓库外文件、删除持久数据、修改系统全局配置、删除**未合并**的远端分支或 `main` 保护分支、删除仓库、重置未合并提交或安装未指定软件的命令（如 `Remove-Item -Recurse`、`rmdir`、`del`、`git push --force`、`gh repo delete`、`Set-ExecutionPolicy`）之前：**必须立即停止执行**，向用户清晰说明该命令将做什么、影响范围与回退方式，**等待用户明确回复「同意」后方可调用工具执行**。
+   - **已合入 `main` 的特性分支自动清理**：仓库已启用合并后自动删除分支（`delete_branch_on_merge = true`），所有 PR 合入统一执行 `gh pr merge <num> --squash --delete-branch` 并同步通过 Paseo `workspace archive` 与 `git branch -d` 回收隔离工作树与本地分支，不保留冗余历史分支。
 2. **用户本机生态零破坏（Magpie & 原生 CLI 保护）**：
    - **严禁直接覆写或篡改**用户主目录下的全局 Agent 配置文件（如 `~/.claude/settings.json`、`~/.codex/config.toml`、`~/.pi/agent/settings.json`、`~/.config/opencode/opencode.json`、`~/.config/magpie/*`），以免破坏 Magpie 的 `applied.json` 接管状态与网关路由。
    - 测试 Magpie 与原生 CLI 发现/适配逻辑时，**一律使用临时夹具目录（Fixture TempDir）**，严禁拿真实用户配置目录做写操作测试。
