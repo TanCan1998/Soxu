@@ -165,11 +165,13 @@
   --soxu-z-rail: 15;
   --soxu-z-header: 20;
   --soxu-z-popover: 40;
-  --soxu-z-drawer: 50;
+  --soxu-z-drawer-scrim: 50;
+  --soxu-z-drawer: 55;
   --soxu-z-modal-scrim: 60;
   --soxu-z-modal: 70;
   --soxu-z-palette: 80;
-  --soxu-z-toast: 90;
+  --soxu-z-floating: 95;
+  --soxu-z-toast: 100;
 
   /* Motion (1:1 GPUI Portable) */
   --soxu-motion-press: 100ms;

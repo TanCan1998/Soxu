@@ -20,6 +20,7 @@ import {
   Type,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { AgentIcon } from "@/components/AgentIcon";
 import { CodeSnippetView } from "@/components/CodeBlockView";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -718,9 +719,12 @@ export function SettingsDialog({
                       !c.available && "opacity-50",
                     )}
                   >
-                    <div>
-                      <div className="text-xs font-semibold soxu-mono">{c.id}</div>
-                      <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)]">命令名: {c.bin}</div>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <AgentIcon agent={c.id} className="h-4 w-4 shrink-0" />
+                      <div>
+                        <div className="text-xs font-semibold soxu-mono">{c.id}</div>
+                        <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)]">命令名: {c.bin}</div>
+                      </div>
                     </div>
                     <Badge variant={c.available ? "accent" : "neutral"}>{c.available ? `v${c.ver}` : "未安装"}</Badge>
                   </div>

@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { AgentIcon } from "@/components/AgentIcon";
 import { CodeDiffView, CodeSnippetView, type DiffRowItem } from "@/components/CodeBlockView";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { HoverExpandDock } from "@/components/HoverExpandDock";
@@ -574,8 +575,11 @@ function MobileAppInner({
             />
             <div className="min-w-0">
               <div className="text-sm font-semibold truncate">{item.toolKind}</div>
-              <div className="text-xs soxu-mono text-[var(--soxu-text-tertiary)] truncate">
-                {item.branch} · {item.agent}
+              <div className="flex items-center gap-1.5 text-xs soxu-mono text-[var(--soxu-text-tertiary)] truncate">
+                <span className="truncate">{item.branch}</span>
+                <span>·</span>
+                <AgentIcon agent={item.agent} className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{item.agent}</span>
               </div>
             </div>
           </div>
@@ -732,7 +736,14 @@ function MobileAppInner({
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-semibold text-[var(--soxu-text-secondary)]">快速对话 (无项目)</span>
-          <Button variant="outline" size="sm" onClick={() => setSheet("new-quick-chat")}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setLeftDrawerOpen(false);
+              setSheet("new-quick-chat");
+            }}
+          >
             <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
             <span>新对话</span>
           </Button>
@@ -768,6 +779,7 @@ function MobileAppInner({
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className={cn("h-2 w-2 rounded-full shrink-0", meta.dotClass)} />
+                  <AgentIcon agent={qc.agent} className="h-3.5 w-3.5 shrink-0" />
                   <span className="text-xs font-medium truncate">{qc.title}</span>
                 </div>
                 <button
@@ -793,11 +805,25 @@ function MobileAppInner({
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-semibold text-[var(--soxu-text-secondary)]">项目与工作树</span>
           <div className="flex items-center gap-1.5">
-            <Button variant="outline" size="sm" onClick={() => setSheet("history")}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setLeftDrawerOpen(false);
+                setSheet("history");
+              }}
+            >
               <History className="h-3.5 w-3.5" strokeWidth={1.75} />
               <span>历史</span>
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => setSheet("new-worktree")}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setLeftDrawerOpen(false);
+                setSheet("new-worktree");
+              }}
+            >
               <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
               <span>工作树</span>
             </Button>
@@ -906,8 +932,11 @@ function MobileAppInner({
                           </div>
                           <div className="text-[11.5px] text-[var(--soxu-text-secondary)] truncate">{w.summary}</div>
                           <div className="flex items-center justify-between text-[11px] text-[var(--soxu-text-tertiary)] soxu-mono">
-                            <span>
-                              {w.isolation === "worktree" ? "工作树" : "主目录"} · {w.agent}
+                            <span className="inline-flex items-center gap-1.5">
+                              <span>{w.isolation === "worktree" ? "工作树" : "主目录"}</span>
+                              <span>·</span>
+                              <AgentIcon agent={w.agent} className="h-3 w-3 shrink-0" />
+                              <span>{w.agent}</span>
                             </span>
                             <span className="soxu-tabular">{w.diffStat}</span>
                           </div>
@@ -978,7 +1007,14 @@ function MobileAppInner({
               <div className="text-xs soxu-mono text-[var(--soxu-text-tertiary)] truncate mt-0.5">{scr.cmd}</div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <Button variant="outline" size="sm" onClick={() => setSheet({ kind: "script-log", name: scr.name })}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setRightDrawerOpen(false);
+                  setSheet({ kind: "script-log", name: scr.name });
+                }}
+              >
                 日志
               </Button>
               <Button
@@ -1226,7 +1262,10 @@ function MobileAppInner({
                             </div>
                           ) : (
                             <article key={m.id} className="flex flex-col gap-2">
-                              <div className="text-xs font-semibold text-[var(--soxu-text-secondary)]">{m.author}</div>
+                              <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--soxu-text-secondary)]">
+                                <AgentIcon agent={m.author} className="h-3.5 w-3.5 shrink-0" />
+                                <span>{m.author}</span>
+                              </div>
                               <p className="text-sm m-0 leading-relaxed text-[var(--soxu-text-primary)]">{m.text}</p>
                             </article>
                           ),
@@ -1260,6 +1299,7 @@ function MobileAppInner({
                           return (
                             <article key={turn.id} className="flex flex-col gap-2.5">
                               <div className="flex items-center gap-2 text-xs text-[var(--soxu-text-tertiary)]">
+                                <AgentIcon agent={turn.author} className="h-4 w-4 shrink-0" />
                                 <span className="font-semibold text-[var(--soxu-text-secondary)]">{turn.author}</span>
                                 {turn.badge && <Badge variant="handoff">{turn.badge}</Badge>}
                               </div>
@@ -1455,7 +1495,7 @@ function MobileAppInner({
                     {/* 操作权限与代理/模型完全常驻不折叠 */}
                     <div className="flex flex-wrap items-center gap-1 min-w-0">
                       <Button variant="ghost" size="sm" onClick={() => setSheet("cli")} className="h-7 px-2 text-[11.5px] soxu-mono">
-                        <Terminal className="h-3 w-3" strokeWidth={1.75} />
+                        <AgentIcon agent={cli} className="h-3.5 w-3.5 shrink-0" />
                         <span>{cli}</span>
                         <ChevronDown className="h-3 w-3" strokeWidth={1.75} />
                       </Button>
@@ -1706,7 +1746,10 @@ function MobileAppInner({
                       onClick={item.run}
                       className="w-full rounded-xl px-3 py-2.5 text-left text-xs flex items-center justify-between gap-2 bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)] cursor-pointer hover:border-[var(--soxu-border-strong)]"
                     >
-                      <span className="truncate font-medium">{item.title}</span>
+                      <span className="flex items-center gap-2 min-w-0">
+                        <AgentIcon agent={item.badge === t("header.quickChat") ? cli : item.badge} className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate font-medium">{item.title}</span>
+                      </span>
                       <Badge variant="neutral">{item.badge}</Badge>
                     </button>
                   ))}
@@ -1729,10 +1772,13 @@ function MobileAppInner({
                       : "bg-[var(--soxu-surface-card-muted)] border-[var(--soxu-border-subtle)]",
                   )}
                 >
-                  <div>
-                    <div className="text-sm font-semibold">{c.id}</div>
-                    <div className="text-xs soxu-mono text-[var(--soxu-text-tertiary)]">
-                      {c.bin} · v{c.ver}
+                  <div className="flex items-center gap-2.5">
+                    <AgentIcon agent={c.id} className="h-5 w-5 shrink-0" />
+                    <div>
+                      <div className="text-sm font-semibold">{c.id}</div>
+                      <div className="text-xs soxu-mono text-[var(--soxu-text-tertiary)]">
+                        {c.bin} · v{c.ver}
+                      </div>
                     </div>
                   </div>
                   {cli === c.id ? (
@@ -1834,10 +1880,13 @@ function MobileAppInner({
                   onClick={() => handleHandoff(c.id)}
                   className="w-full rounded-xl p-3 text-left flex items-center justify-between gap-2 bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)] cursor-pointer"
                 >
-                  <div>
-                    <div className="text-sm font-semibold">@{c.id}</div>
-                    <div className="text-xs soxu-mono text-[var(--soxu-text-tertiary)]">
-                      {c.bin} · v{c.ver}
+                  <div className="flex items-center gap-2.5">
+                    <AgentIcon agent={c.id} className="h-5 w-5 shrink-0" />
+                    <div>
+                      <div className="text-sm font-semibold">@{c.id}</div>
+                      <div className="text-xs soxu-mono text-[var(--soxu-text-tertiary)]">
+                        {c.bin} · v{c.ver}
+                      </div>
                     </div>
                   </div>
                   <Badge variant="handoff">移交</Badge>
@@ -1936,8 +1985,11 @@ function MobileAppInner({
                 >
                   <div className="min-w-0">
                     <div className="text-sm font-semibold truncate">{item.title}</div>
-                    <div className="text-xs soxu-mono text-[var(--soxu-text-tertiary)] truncate">
-                      {item.cli} · {item.project} · {item.updatedAt} · {item.turns} 轮
+                    <div className="flex items-center gap-1.5 text-xs soxu-mono text-[var(--soxu-text-tertiary)] truncate">
+                      <AgentIcon agent={item.cli} className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">
+                        {item.cli} · {item.project} · {item.updatedAt} · {item.turns} 轮
+                      </span>
                     </div>
                   </div>
                   <Button

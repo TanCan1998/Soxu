@@ -1,5 +1,6 @@
 import { Clock, Cpu, QrCode, RotateCcw, Search, Sparkles } from "lucide-react";
 import { useState } from "react";
+import { AgentIcon } from "@/components/AgentIcon";
 import { GitCommitDialog } from "@/components/GitCommitDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -237,7 +238,10 @@ export function UtilityModals({
                 className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] p-3 text-left hover:border-[var(--soxu-border-strong)] hover:bg-[var(--soxu-interaction-selected)] cursor-pointer transition-colors"
               >
                 <div className="flex items-center justify-between text-[11px] text-[var(--soxu-text-tertiary)]">
-                  <span className="soxu-mono font-semibold text-[var(--soxu-text-primary)]">{h.cli}</span>
+                  <span className="inline-flex items-center gap-1.5 soxu-mono font-semibold text-[var(--soxu-text-primary)]">
+                    <AgentIcon agent={h.cli} className="h-3.5 w-3.5 shrink-0" />
+                    <span>{h.cli}</span>
+                  </span>
                   <span>
                     {h.turns} 轮 · {h.updatedAt}
                   </span>

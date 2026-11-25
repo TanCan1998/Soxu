@@ -3,7 +3,6 @@ import {
   ArchiveRestore,
   ArrowUp,
   AtSign,
-  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -33,6 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { AgentIcon } from "@/components/AgentIcon";
 import { CodeDiffView, CodeSnippetView, type DiffRowItem } from "@/components/CodeBlockView";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { HoverExpandDock } from "@/components/HoverExpandDock";
@@ -692,8 +692,9 @@ function DesktopWorkbenchInner({
                     : "border-transparent text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)]",
                 )}
               >
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0">
                   <span className={cn("h-2 w-2 rounded-full shrink-0", bucketDotClass(qc.bucket))} />
+                  <AgentIcon agent={qc.agent} className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate font-medium">{qc.title}</span>
                 </div>
                 <button
@@ -814,6 +815,10 @@ function DesktopWorkbenchInner({
                             </div>
                             <div className="pl-3.5 text-[10.5px] soxu-tabular text-[var(--soxu-text-tertiary)] flex items-center gap-1.5">
                               <span>{w.isolation === "worktree" ? t("sidebar.worktree") : t("sidebar.localRoot")}</span>
+                              <span className="inline-flex items-center gap-1 soxu-mono">
+                                <AgentIcon agent={w.agent} className="h-3 w-3 shrink-0" />
+                                <span>{w.agent}</span>
+                              </span>
                               <span>{w.diffStat}</span>
                             </div>
                           </div>
@@ -890,11 +895,27 @@ function DesktopWorkbenchInner({
       {/* 左栏底部快捷工具 */}
       <div className="border-t border-[var(--soxu-border-hairline)] p-2 flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-1 min-w-0">
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setModal("history")}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => {
+              if (isLeftDrawer) setLeftOpen(false);
+              setModal("history");
+            }}
+          >
             <History className="h-3 w-3" strokeWidth={1.75} />
             <span>{t("sidebar.importHistory")}</span>
           </Button>
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setModal("schedules")}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => {
+              if (isLeftDrawer) setLeftOpen(false);
+              setModal("schedules");
+            }}
+          >
             <Clock className="h-3 w-3" strokeWidth={1.75} />
             <span>{t("sidebar.schedules")}</span>
           </Button>
@@ -969,7 +990,14 @@ function DesktopWorkbenchInner({
                       </button>
                     ))}
                   </div>
-                  <Button size="sm" variant="default" onClick={() => setModal("commit")}>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    onClick={() => {
+                      if (isRightDrawer) setRightOpen(false);
+                      setModal("commit");
+                    }}
+                  >
                     <GitCommit className="h-3.5 w-3.5" strokeWidth={1.75} />
                     <span>{t("inspector.commitChanges")}</span>
                   </Button>
@@ -1309,6 +1337,7 @@ function DesktopWorkbenchInner({
                       )}
                     >
                       <span className={cn("h-2 w-2 rounded-full shrink-0", bucketDotClass(tb.status))} />
+                      <AgentIcon agent={tb.cli} className="h-3.5 w-3.5 shrink-0" />
                       <span className="soxu-mono text-[10.5px] text-[var(--soxu-text-tertiary)] shrink-0">{tb.cli}</span>
                       <span className={cn("flex-1 min-w-0 truncate", tb.draft && "italic")}>{tb.title}</span>
 
@@ -1368,7 +1397,7 @@ function DesktopWorkbenchInner({
                     key={sa.id}
                     className="inline-flex items-center gap-1.5 h-5 px-2 rounded-full bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-secondary)] soxu-mono shrink-0"
                   >
-                    <Bot className="h-3 w-3 text-[var(--soxu-semantic-accent)]" strokeWidth={1.75} />
+                    <AgentIcon agent={sa.cli} className="h-3.5 w-3.5 shrink-0" />
                     <span>
                       {sa.cli} · {sa.role} ({sa.duration})
                     </span>
@@ -1461,7 +1490,7 @@ function DesktopWorkbenchInner({
                             ) : (
                               <div key={m.id} className="flex flex-col gap-2">
                                 <div className="flex items-center gap-2 text-xs font-semibold">
-                                  <Cpu className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)]" strokeWidth={1.75} />
+                                  <AgentIcon agent={m.author} className="h-4 w-4 shrink-0" />
                                   <span>{m.author}</span>
                                 </div>
                                 <p className="m-0 leading-relaxed text-[var(--soxu-text-primary)]">{m.text}</p>
@@ -1482,7 +1511,7 @@ function DesktopWorkbenchInner({
                         <div id="turn-2" className="group/msg flex flex-col gap-2.5">
                           <div className="flex items-center justify-between gap-2 text-xs">
                             <div className="flex items-center gap-2 font-semibold">
-                              <Cpu className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)]" strokeWidth={1.75} />
+                              <AgentIcon agent={cli} className="h-4 w-4 shrink-0" />
                               <span>{cli}</span>
                               <span className="soxu-mono font-normal text-[var(--soxu-text-tertiary)]">
                                 {model} · {THINKING_LABELS[thinking] ?? thinking}
@@ -1797,7 +1826,10 @@ function DesktopWorkbenchInner({
                               </div>
                             ) : (
                               <div key={t.id} className="flex flex-col gap-1.5 animate-in fade-in-0 duration-200">
-                                <div className="text-xs font-semibold text-[var(--soxu-text-secondary)]">{t.author}</div>
+                                <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--soxu-text-secondary)]">
+                                  <AgentIcon agent={t.author} className="h-3.5 w-3.5 shrink-0" />
+                                  <span>{t.author}</span>
+                                </div>
                                 <p className="m-0 leading-relaxed">{t.text}</p>
                               </div>
                             ),
@@ -1882,9 +1914,9 @@ function DesktopWorkbenchInner({
                             <DropdownMenuTrigger asChild>
                               <button
                                 type="button"
-                                className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-[var(--soxu-surface-control)] hover:bg-[var(--soxu-interaction-selected)] text-[11.5px] soxu-mono text-[var(--soxu-text-primary)] cursor-pointer transition-colors"
+                                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-[var(--soxu-surface-control)] hover:bg-[var(--soxu-interaction-selected)] text-[11.5px] soxu-mono text-[var(--soxu-text-primary)] cursor-pointer transition-colors"
                               >
-                                <Terminal className="h-3 w-3 text-[var(--soxu-text-tertiary)]" strokeWidth={1.75} />
+                                <AgentIcon agent={cli} className="h-3.5 w-3.5 shrink-0" />
                                 <span>{cli}</span>
                                 <ChevronDown className="h-3 w-3 text-[var(--soxu-text-tertiary)]" strokeWidth={1.75} />
                               </button>
@@ -1894,7 +1926,10 @@ function DesktopWorkbenchInner({
                               <DropdownMenuSeparator />
                               {CLI_OPTIONS.filter((c) => c.available).map((c) => (
                                 <DropdownMenuItem key={c.id} onClick={() => handleSelectCli(c.id)}>
-                                  <span className="soxu-mono">{c.id}</span>
+                                  <span className="inline-flex items-center gap-2">
+                                    <AgentIcon agent={c.id} className="h-4 w-4 shrink-0" />
+                                    <span className="soxu-mono">{c.id}</span>
+                                  </span>
                                   <Badge variant="neutral">v{c.ver}</Badge>
                                 </DropdownMenuItem>
                               ))}

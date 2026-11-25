@@ -38,7 +38,7 @@ export function SheetContent({
 
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-[var(--soxu-z-modal-scrim)] bg-[var(--soxu-surface-scrim)] backdrop-blur-[2px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 duration-150" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-[var(--soxu-z-drawer-scrim)] bg-[var(--soxu-surface-scrim)] backdrop-blur-[2px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 duration-150" />
       <DialogPrimitive.Content
         className={cn(
           "fixed z-[var(--soxu-z-drawer)] flex flex-col bg-[var(--soxu-surface-card)] text-[var(--soxu-text-primary)] outline-none",

@@ -174,7 +174,7 @@ export function GitCommitDialog({ open, onOpenChange, branch = "feat/12-native-d
                     <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.75} />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuContent align="end" className="w-52 max-h-64 overflow-y-auto soxu-scroll">
                   <DropdownMenuLabel>快速选择模块范围</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {SCOPE_PRESETS.map((sp) => (

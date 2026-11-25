@@ -39,7 +39,7 @@ export function SelectContent({
         position={position}
         sideOffset={4}
         className={cn(
-          "z-[var(--soxu-z-toast)] max-h-64 min-w-[12rem] overflow-hidden rounded-xl border border-[var(--soxu-border-strong)] bg-[var(--soxu-surface-floating)] p-1 text-[var(--soxu-text-primary)] animate-in fade-in-0 zoom-in-95 duration-150",
+          "z-[var(--soxu-z-floating)] pointer-events-auto max-h-64 min-w-[12rem] overflow-hidden rounded-xl border border-[var(--soxu-border-strong)] bg-[var(--soxu-surface-floating)] p-1 text-[var(--soxu-text-primary)] animate-in fade-in-0 zoom-in-95 duration-150",
           className,
         )}
         {...props}

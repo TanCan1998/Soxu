@@ -100,6 +100,7 @@ const requiredFiles = [
   "src/lib/preferences.ts",
   "src/lib/agent-capabilities.ts",
   "src/components/ThemeToggle.tsx",
+  "src/components/AgentIcon.tsx",
   "src/components/HoverExpandDock.tsx",
   "src/components/ContextUsageRing.tsx",
   "src/components/CodeBlockView.tsx",

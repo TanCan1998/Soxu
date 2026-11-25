@@ -142,7 +142,7 @@ Soxu 服务于高频并行操控多个本地编码 Agent（`claude`、`codex`、
 | `sizing.turnNavRailWidth` | `20px` | 对话区右侧边缘轮次迷你刻线导航轨宽度 |
 
 ### 6.2 Z-Index 层叠秩序（`zIndex`）
-`base(0)` → `sticky(10)`（移动顶/底浮动舱） → `rail(15)`（轮次导航轨） → `header(20)`（顶栏） → `popover(40)`（`@agent`/模型选择浮层） → `drawer(50)`（移动 Bottom Sheet / 历史导入抽屉） → `modalScrim(60)` → `modal(70)`（扫码配对/Checkpoint/提交弹窗） → `palette(80)`（`Cmd+K` 命令面板） → `toast(90)`（游标追平/自动回退轻提示）。
+`base(0)` → `sticky(10)`（移动顶/底浮动舱） → `rail(15)`（轮次导航轨） → `header(20)`（顶栏） → `popover(40)`（内联工具坞浮层） → `drawerScrim(50)`（抽屉模糊遮罩） → `drawer(55)`（移动 Bottom Sheet 与左右侧滑抽屉） → `modalScrim(60)` → `modal(70)`（扫码配对/Checkpoint/提交弹窗） → `palette(80)`（`Cmd+K` 命令面板） → `floating(95)`（弹窗/抽屉内穿透下拉与选择器） → `toast(100)`（全局轻提示）。
 
 ---
 
