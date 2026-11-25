@@ -88,14 +88,14 @@ main.rs[EU4T]: F:Soxu 桌面工作台占位入口，启动时打印应用版本�
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/===
 Cargo.toml[FV5T]: F:声明驱动 crate 的包信息、工作区 lint 设置和依赖 | R:code:Cargo.toml | A:soxu-drivers | S:-
-README.md[SE6S]: F:说明七种CLI启动控制、历史、Daemon配置、实机探针及可信资产启动门禁 | R:code:crates/soxu-daemon/src/native_assets.rs,code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs | A:逐驱动证据,空工具代理与钩子实测,钩子故障与资产完整性 | S:AGY过滤仍含manage_task，钩子配置缺失或篡改可放行。可选资产绑定在首轮/续接/FIFO启动前重验，但不证明原生入口、配置来源或运行期隔离；AGY路由未开放。
+README.md[SE6M]: F:说明七种CLI配置控制与历史、PiDeck参考、Pi纠偏及实机复验、AGY资产门禁边界 | R:code:crates/soxu-daemon/src/state/native.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-daemon/tests/rpc_ws_e2e.rs | A:PiDeck参考与验证,逐驱动证据,钩子故障与资产完整性 | S:Pi实测为1.5.2与localhost模型夹具，不证明公网推理；最终测试用工作树target。AGY仍含manage_task，钩子缺失篡改可放行；资产门禁不消除启动竞态或证明运行期隔离，路由关闭。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/src/===
 lib.rs[IE6T]: F:定义七种本机原生 Agent CLI 及其程序名，公开进程控制、能力协商、流式事件和只读历史发现入口 | R:code:crates/soxu-drivers/src/events.rs,code:crates/soxu-drivers/src/history.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/src/process.rs | A:NativeCliKind,NativeCliKind::ALL,NativeCliKind::binary_name | S:保持 snake_case 序列化标识与已有程序名映射，例如 antigravity 对应 agy。
 events.rs[IM8L]: F:将七种 CLI 原生流式记录解码为会话、文本、工具状态、控制应答、遥测与轮次结果 | R:code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/lib.rs | A:Decoder,DriverEvent,Outcome,Telemetry,UsageScope | S:遥测按语义范围分流且缺项保留 None，增量与汇总避免重放。Copilot 续接可从顶层 result 取得 ID，非零 exitCode 覆盖助手轮次结束的成功回退。
 history.rs[ID7M]: F:从显式原生历史目录只读提取五种 CLI 的会话标识和定位元数据，并为支持的会话生成 Resume 或 Fork 选择器 | R:code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/src/lib.rs | A:HistoryEntry,HistoryListing,discover_history,resume,fork | S:扫描跳过链接或 Windows reparse point，限制深度、目录项和单文件探测字节；Pi 以原生会话文件路径选择，其他适配器用原生 ID。
 invocation.rs[IE8M]: F:声明七种 CLI 适配能力与请求契约，验证会话选择并构造原生参数和输入通道 | R:code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/lib.rs | A:Capabilities,ControlSupport,Persistence,RunTarget,RunRequest,SessionMode | S:Antigravity 关闭斜杠展开时 plan 无效，改用会话级严格权限与六类全拒绝规则，仍非零工具。OpenCode 经 stdin 投递，不加不兼容的 standalone。Copilot 使用未注册工具白名单，Qwen 预算为零，Codex 续接覆盖只读。
-process.rs[IW8L]: F:用 Tokio 发现和启动可信原生 CLI，处理有界 JSONL 事件、Pi RPC 控制、终态与直接子进程回收 | R:code:crates/soxu-drivers/src/events.rs,code:crates/soxu-drivers/src/invocation.rs | A:NativeDriver,RunningTurn,TurnControl,Control,DriverError | S:Windows 拒绝脚本 shim；程序与工作目录使用绝对路径并直接传参。记录上限 4 MiB，stderr 不进入事件流；取消与接收端丢弃均触发直接子进程回收。
+process.rs[IW8L]: F:用Tokio启动可信原生CLI，转发有界JSONL与Pi控制应答，投影active状态并回收直接子进程 | R:code:crates/soxu-drivers/src/events.rs,code:crates/soxu-drivers/src/invocation.rs | A:NativeDriver,RunningTurn,TurnControl,Control,DriverError | S:is_active仅Pi确认agent_start且未settled取消关闭时为真。写入后无ack退出不伪造拒绝，未发送请求可拒绝。settled后等待stats及pending ack最多2秒。记录限4MiB，stderr不入流；Windows拒绝shim，取消仅回收直接子进程。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/===
 Cargo.toml[FV5T]: F:声明 soxu-git crate 的包元数据、lint 规则和依赖 | R:code:Cargo.toml | A:soxu-git | S:版本、Rust edition、最低 Rust 版本、许可证、lint 规则和全部依赖均继承自工作区
@@ -199,5 +199,5 @@ i18n.ts[CL7L]: F:可扩展前端国际化注册表与 React 上下文，覆盖 z
 SKILL.md[SW7S]: F:定义跨 AGY 与 Codex 桌面端自动发现的 Paseo 协同编排技能、隔离共享矩阵及 30 秒切换流程 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:paseo.json,code:docs/ops/PROGRESS.md | A:paseo-orchestrator,Control Plane,Worktree Isolation | S:要求双端统一通过 paseo-ctl.ps1 调用 Paseo 并隔离宿主全局配置，禁止双端同时在主检出目录并发写业务源码
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/src/state/===
-native.rs[AW8L]: F:调度本机回环六类只读原生回合，管理续接、取消、FIFO、流式落盘及可选启动资产门禁 | R:code:crates/soxu-daemon/src/store.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-daemon/src/native_assets.rs,code:crates/soxu-protocol/src/rpc.rs | A:DaemonState::with_native_driver_set,DaemonState::with_native_asset_guard,handle_transport_rpc,SubmitTurn,StopTurn | S:Copilot/OpenCode仅快聊；后者ID为ses_加26位ASCII字母数字，其余UUID。Codex收到即保存ID，其他成功后保存；先落盘再广播。绑定校验覆盖每次实际启动，拒绝不写新消息且保留队列；未绑定沿用旧行为，AGY仍关闭。
+native.rs[AW8L]: F:调度回环六类只读原生回合、Pi纠偏、续接、Stop和FIFO，持久化用户消息及确认结果，执行可选启动门禁 | R:code:crates/soxu-daemon/src/store.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-daemon/src/native_assets.rs,code:crates/soxu-protocol/src/rpc.rs | A:with_native_driver_set,with_native_asset_guard,handle_transport_rpc,SubmitTurn,StopTurn | S:仅本机已配置Pi在active时发送steer，单回合仅一条待确认。ack只证明接收，超时、退出或重启时待确认转未知，不自动重发。停止暂停FIFO；资产拒绝保留队首。Codex立即存ID，其余成功后保存。AGY仍关闭。
 
