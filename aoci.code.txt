@@ -87,13 +87,13 @@ main.rs[EU4T]: F:Soxu 桌面工作台占位入口，启动时打印应用版本�
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/===
 Cargo.toml[FV5T]: F:声明驱动 crate 的包信息、工作区 lint 设置和依赖 | R:code:Cargo.toml | A:soxu-drivers | S:-
-README.md[SE6S]: F:说明七种 CLI 的启动控制、流式事件、历史接口与实机证据，以及五类非 Codex 驱动的 Daemon 只读配置 | R:code:crates/soxu-daemon/src/main.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/src/history.rs | A:Daemon 本机 OpenCode 只读快聊,逐驱动证据,验证命令 | S:OpenCode 实测 1.19.6 使用 --pure 与 stdin，两轮沿用 ses_ ID，停止断开模型连接；历史扫描不可用。Copilot 仅快聊。取消范围是直接子进程。
+README.md[SE6S]: F:说明七种 CLI 的启动控制、流式事件、历史接口、Daemon 配置与实机安全边界 | R:code:crates/soxu-daemon/src/main.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs | A:逐驱动证据,Antigravity 只读边界调查,验证命令 | S:Antigravity 1.5.17 的续接、写入拒绝和取消已验证，但仍声明 15 种工具，Daemon 未开放。成功终态可包含被拒绝工具。探针复制 EXE 并隔离用户目录，不触碰真实配置。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-drivers/src/===
 lib.rs[IE6T]: F:定义七种本机原生 Agent CLI 及其程序名，公开进程控制、能力协商、流式事件和只读历史发现入口 | R:code:crates/soxu-drivers/src/events.rs,code:crates/soxu-drivers/src/history.rs,code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/src/process.rs | A:NativeCliKind,NativeCliKind::ALL,NativeCliKind::binary_name | S:保持 snake_case 序列化标识与已有程序名映射，例如 antigravity 对应 agy。
 events.rs[IM8L]: F:将七种 CLI 原生流式记录解码为会话、文本、工具状态、控制应答、遥测与轮次结果 | R:code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/lib.rs | A:Decoder,DriverEvent,Outcome,Telemetry,UsageScope | S:遥测按语义范围分流且缺项保留 None，增量与汇总避免重放。Copilot 续接可从顶层 result 取得 ID，非零 exitCode 覆盖助手轮次结束的成功回退。
 history.rs[ID7M]: F:从显式原生历史目录只读提取五种 CLI 的会话标识和定位元数据，并为支持的会话生成 Resume 或 Fork 选择器 | R:code:crates/soxu-drivers/src/invocation.rs,code:crates/soxu-drivers/src/lib.rs | A:HistoryEntry,HistoryListing,discover_history,resume,fork | S:扫描跳过链接或 Windows reparse point，限制深度、目录项和单文件探测字节；Pi 以原生会话文件路径选择，其他适配器用原生 ID。
-invocation.rs[IE8M]: F:声明七种 CLI 适配能力和轮次请求契约，验证会话选择并构造原生参数与输入通道 | R:code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/lib.rs | A:Capabilities,ControlSupport,Persistence,RunTarget,RunRequest,SessionMode | S:OpenCode 使用 run --format json 与 stdin，不加 1.19.6 不支持的 --standalone。Copilot 使用未注册名称工具白名单；Qwen 工具调用预算为零。Pi 禁用工具、扩展和 MCP，Claude 叠加受限模式与空工具，Codex 续接覆盖只读。
+invocation.rs[IE8M]: F:声明七种 CLI 适配能力与请求契约，验证会话选择并构造原生参数和输入通道 | R:code:crates/soxu-drivers/src/process.rs,code:crates/soxu-drivers/src/lib.rs | A:Capabilities,ControlSupport,Persistence,RunTarget,RunRequest,SessionMode | S:Antigravity 关闭斜杠展开时 plan 无效，改用会话级严格权限与六类全拒绝规则，仍非零工具。OpenCode 经 stdin 投递，不加不兼容的 standalone。Copilot 使用未注册工具白名单，Qwen 预算为零，Codex 续接覆盖只读。
 process.rs[IW8L]: F:用 Tokio 发现和启动可信原生 CLI，处理有界 JSONL 事件、Pi RPC 控制、终态与直接子进程回收 | R:code:crates/soxu-drivers/src/events.rs,code:crates/soxu-drivers/src/invocation.rs | A:NativeDriver,RunningTurn,TurnControl,Control,DriverError | S:Windows 拒绝脚本 shim；程序与工作目录使用绝对路径并直接传参。记录上限 4 MiB，stderr 不进入事件流；取消与接收端丢弃均触发直接子进程回收。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/===
@@ -131,7 +131,7 @@ contributing.md[SV5T]: F:规定开发工具链初始化、全工作区检查、�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录项目核心架构决策（ADR-001~006），包含 GPUI + Daemon、Native CLI 复用、Magpie 发现及 React 19 + shadcn/ui M0.5 决策 | R:code:AGENTS.md,code:design-system/soxu/MASTER.md | A:ADR-001,ADR-002,ADR-003,ADR-005,ADR-006 | S:已拍板方案不可无故推翻；明确全局 CLI 目录只读、M0.5 强制使用 shadcn/ui + Tailwind v4 与开源双字体
-PROGRESS.md[SW6T]: F:记录 Soxu 里程碑、Paseo 并行交付顺序、验收证据和跨会话队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:Copilot 快聊经 #24 合入，项目信任可恢复钩子。#25 验证 OpenCode 隔离，#26 跟踪 Antigravity 的工具隔离；已验证 Gemini 回环，但关闭斜杠展开会使 plan 失效。
+PROGRESS.md[SW6T]: F:记录里程碑、Paseo 并行交付顺序、实机验收边界和跨会话队列 | R:code:AGENTS.md,code:scripts/paseo-ctl.ps1,code:crates/soxu-drivers/README.md | A:M0,M0.5,M1..M6,Paseo Worktree 编排主线 | S:OpenCode 快聊经 #27 合入，M2h 完成但 M2 未完成。#26 的 Antigravity 续接、写入拒绝和取消通过，仍声明工具，路由保持关闭；Copilot 项目钩子隔离尚未闭合。
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
