@@ -29,11 +29,18 @@ import {
   Square,
   Terminal,
   X,
+  Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentIcon } from "@/components/AgentIcon";
 import { CodeDiffView, CodeSnippetView, type DiffRowItem } from "@/components/CodeBlockView";
-import { ComposerChipBar, ComposerHandoffMenu, ComposerPlusMenu } from "@/components/ComposerActionMenus";
+import {
+  ComposerChipBar,
+  ComposerHandoffMenu,
+  ComposerPermissionButton,
+  ComposerPlusMenu,
+  ComposerTurnBehaviorGroup,
+} from "@/components/ComposerActionMenus";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { HoverExpandDock } from "@/components/HoverExpandDock";
 import { SessionStatsPopover } from "@/components/SessionStatsPopover";
@@ -84,6 +91,7 @@ import {
 import type {
   ApprovalItem,
   ComposerChip,
+  HandoffSelection,
   PermissionLevel,
   QuickChatItem,
   SessionTelemetryStats,
@@ -363,6 +371,24 @@ function DesktopWorkbenchInner({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  useEffect(() => {
+    const onAltShortcut = (e: KeyboardEvent) => {
+      if (e.altKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        const perms = getAgentProfile(cli).permissions;
+        if (perms.length === 0) return;
+        setPermLevel((prev) => {
+          const idx = perms.findIndex((p) => p.id === prev);
+          const next = perms[(idx + 1) % perms.length];
+          flashToast(`操作权限已调整为「${next.label}」`);
+          return next.id;
+        });
+      }
+    };
+    window.addEventListener("keydown", onAltShortcut);
+    return () => window.removeEventListener("keydown", onAltShortcut);
+  }, [cli]);
+
   // 左右侧栏自由拖拽调宽
   useEffect(() => {
     if (!resizingSide) return;
@@ -445,13 +471,13 @@ function DesktopWorkbenchInner({
     window.setTimeout(() => setLostControlToast((cur) => (cur === text ? null : cur)), 4000);
   }
 
-  function handleSelectCli(nextCliId: string) {
+  function handleSelectCli(nextCliId: string, override?: { model?: string; thinking?: string }) {
     setCli(nextCliId);
     const reconciled = reconcileAgentCapabilities({
       agentId: nextCliId,
-      currentModel: model,
+      currentModel: override?.model ?? model,
       currentPerm: permLevel,
-      currentThinking: thinking,
+      currentThinking: override?.thinking ?? thinking,
       currentBehavior: composerMode,
     });
     setModel(reconciled.model);
@@ -462,6 +488,7 @@ function DesktopWorkbenchInner({
     if (activeTabId) {
       setTabs((prev) => prev.map((t) => (t.id === activeTabId ? { ...t, cli: nextCliId } : t)));
     }
+    return reconciled;
   }
 
   function handleSelectModel(nextModelId: string) {
@@ -654,7 +681,8 @@ function DesktopWorkbenchInner({
     });
   }
 
-  function sendPrompt() {
+  function sendPrompt(overrideMode?: TurnBehavior) {
+    const activeMode = overrideMode ?? composerMode;
     const tText = composerText.trim();
     const key = activeTabId ?? "__draft__";
     const attachedChips = composerChipsByTab[key] ?? [];
@@ -663,12 +691,26 @@ function DesktopWorkbenchInner({
       return;
     }
 
-    const handoffChip = attachedChips.find((c) => c.kind === "handoff" && c.targetAgent);
-    const effectiveCli = handoffChip?.targetAgent ?? cli;
-    if (handoffChip?.targetAgent && handoffChip.targetAgent !== cli) {
-      handleSelectCli(handoffChip.targetAgent);
+    const activeHandoff = attachedChips.find((c) => c.kind === "handoff" && c.targetAgent);
+    let effectiveCli = cli;
+    let effectiveModel = model;
+    let effectiveThinking = thinking;
+    let effectivePerm = permLevel;
+    if (activeHandoff?.targetAgent) {
+      const nextCfg = handleSelectCli(activeHandoff.targetAgent, {
+        model: activeHandoff.targetModel,
+        thinking: activeHandoff.targetThinking,
+      });
+      effectiveCli = activeHandoff.targetAgent;
+      effectiveModel = nextCfg.model;
+      effectiveThinking = nextCfg.thinking;
+      effectivePerm = nextCfg.perm;
     }
 
+    const targetProfile = getAgentProfile(effectiveCli);
+    const thinkDesc = targetProfile.supportsThinking
+      ? `思考：${THINKING_LABELS[effectiveThinking] ?? effectiveThinking}，`
+      : "";
     const finalPrompt = tText || `请处理已附加的 ${attachedChips.length} 项上下文标签`;
 
     if (!activeTab) {
@@ -689,11 +731,11 @@ function DesktopWorkbenchInner({
       const nextMsgAi: TurnMessage = {
         id: `qa-${Date.now() + 1}`,
         role: "assistant",
-        author: `${effectiveCli} · ${model}`,
-        badge: handoffChip ? `@${effectiveCli} 已接管` : undefined,
-        text: handoffChip
-          ? `已将最近上下文与附加标签移交至 @${effectiveCli}（${getPermissionMeta(effectiveCli, permLevel).label}），开始继续响应。`
-          : `已在无项目对话中响应（${getPermissionMeta(effectiveCli, permLevel).label}）：收到你的指令「${finalPrompt}」。`,
+        author: `${effectiveCli} · ${effectiveModel}`,
+        badge: activeHandoff ? `@${effectiveCli} 已接管` : undefined,
+        text: activeHandoff
+          ? `已将最近上下文与附加标签移交至 @${effectiveCli}（${effectiveModel}，${thinkDesc}${getPermissionMeta(effectiveCli, effectivePerm).label}），开始继续响应。`
+          : `已在无项目对话中响应（${getPermissionMeta(effectiveCli, effectivePerm).label}）：收到你的指令「${finalPrompt}」。`,
       };
       setQuickChats((prev) =>
         prev.map((q) =>
@@ -718,7 +760,7 @@ function DesktopWorkbenchInner({
       return;
     }
 
-    if (composerMode === "queue" && !handoffChip) {
+    if (activeMode === "queue" && !activeHandoff) {
       setQueuedPrompt(finalPrompt);
       setComposerChipsByTab((p) => ({ ...p, [key]: [] }));
       setComposerText("");
@@ -734,20 +776,20 @@ function DesktopWorkbenchInner({
         author: "你",
         text: finalPrompt,
         chips: attachedChips.length > 0 ? attachedChips : undefined,
-        badge: handoffChip
+        badge: activeHandoff
           ? `移交 -> @${effectiveCli}`
-          : composerMode === "steer"
+          : activeMode === "steer"
             ? "热纠偏 · 下一步生效"
             : "打断重发",
       },
       {
         id: `a-${Date.now() + 1}`,
         role: "assistant",
-        author: `${effectiveCli} · ${model}`,
-        badge: handoffChip ? `@${effectiveCli} 接管` : undefined,
-        text: handoffChip
-          ? `已接收跨代理移交上下文与 ${attachedChips.length} 项附件标签，以 @${effectiveCli}（${getPermissionMeta(effectiveCli, permLevel).label}）继续执行。`
-          : `已按「${getPermissionMeta(effectiveCli, permLevel).label}」策略执行当前指令，仅调整工作树内受控改动。`,
+        author: `${effectiveCli} · ${effectiveModel}`,
+        badge: activeHandoff ? `@${effectiveCli} 接管` : undefined,
+        text: activeHandoff
+          ? `已接收跨代理移交上下文与 ${attachedChips.length} 项附件标签，以 @${effectiveCli}（${effectiveModel}，${thinkDesc}${getPermissionMeta(effectiveCli, effectivePerm).label}）继续执行。`
+          : `已按「${getPermissionMeta(effectiveCli, effectivePerm).label}」策略执行当前指令，仅调整工作树内受控改动。`,
       },
     ]);
     bumpTabTelemetry(activeTab.id, finalPrompt.length);
@@ -759,10 +801,16 @@ function DesktopWorkbenchInner({
   const activeProfile = getAgentProfile(cli);
   const availableModels = getAgentModels(cli);
   const currentModelMeta = availableModels.find((m) => m.id === model) ?? availableModels[0];
-  const activePermMeta = getPermissionMeta(cli, permLevel);
   const activeChipKey = activeTabId ?? "__draft__";
   const currentComposerChips = composerChipsByTab[activeChipKey] ?? [];
-  const selectedHandoffTarget = currentComposerChips.find((c) => c.kind === "handoff")?.targetAgent;
+  const handoffChip = currentComposerChips.find((c) => c.kind === "handoff" && c.targetAgent);
+  const selectedHandoff: HandoffSelection | undefined = handoffChip?.targetAgent
+    ? {
+        targetAgent: handoffChip.targetAgent,
+        targetModel: handoffChip.targetModel ?? getAgentModels(handoffChip.targetAgent)[0].id,
+        targetThinking: handoffChip.targetThinking,
+      }
+    : undefined;
   const currentContextUsed = activeTab ? (contextTokens[activeTab.id] ?? 42800) : 6400;
   const currentSessionStats: SessionTelemetryStats = (activeTab && sessionStatsByTab[activeTab.id]) || {
     turns: 3,
@@ -2008,23 +2056,59 @@ function DesktopWorkbenchInner({
                       <div className="rounded-xl border border-[var(--soxu-semantic-warning-border)] bg-[var(--soxu-surface-card)] px-3 py-1.5 flex items-center justify-between gap-2 text-xs">
                         <span className="soxu-mono truncate text-[var(--soxu-text-secondary)]">排队中：{queuedPrompt}</span>
                         <div className="flex items-center gap-1 shrink-0">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 px-2 text-[var(--soxu-semantic-running)]"
-                            onClick={() => {
-                              setWorkspaceTurns((p) => [
-                                ...p,
-                                { id: `q-${Date.now()}`, role: "user", author: "你", text: queuedPrompt, badge: "提级为热纠偏" },
-                              ]);
-                              setQueuedPrompt(null);
-                            }}
-                          >
-                            提级纠偏
-                          </Button>
-                          <Button size="icon-sm" variant="ghost" className="h-6 w-6" onClick={() => setQueuedPrompt(null)} aria-label="撤回排队">
-                            <X className="h-3 w-3" strokeWidth={1.75} />
-                          </Button>
+                          {activeProfile.supportsLiveSteer && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon-sm"
+                                  variant="ghost"
+                                  className="h-6 w-6 text-[var(--soxu-semantic-running)] hover:bg-[var(--soxu-semantic-running-soft)]"
+                                  aria-label={t("composer.promoteSteer")}
+                                  onClick={() => {
+                                    setWorkspaceTurns((p) => [
+                                      ...p,
+                                      { id: `q-${Date.now()}`, role: "user", author: "你", text: queuedPrompt, badge: "提级为热纠偏" },
+                                    ]);
+                                    setQueuedPrompt(null);
+                                  }}
+                                >
+                                  <Zap className="h-3.5 w-3.5" strokeWidth={1.75} />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-[240px]">
+                                <div className="flex items-center justify-between gap-2 font-medium">
+                                  <span>{t("composer.promoteSteer")}</span>
+                                  <kbd className="rounded bg-[var(--soxu-surface-control)] px-1 py-0.5 text-[10px] soxu-mono text-[var(--soxu-text-secondary)]">
+                                    Ctrl+Enter
+                                  </kbd>
+                                </div>
+                                <div className="mt-0.5 text-[10.5px] text-[var(--soxu-text-tertiary)]">
+                                  {t("composer.promoteSteerDesc")}
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="icon-sm"
+                                variant="ghost"
+                                className="h-6 w-6"
+                                onClick={() => setQueuedPrompt(null)}
+                                aria-label={t("composer.cancelQueue")}
+                              >
+                                <X className="h-3 w-3" strokeWidth={1.75} />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              <div className="flex items-center gap-2">
+                                <span>{t("composer.cancelQueue")}</span>
+                                <kbd className="rounded bg-[var(--soxu-surface-control)] px-1 py-0.5 text-[10px] soxu-mono text-[var(--soxu-text-secondary)]">
+                                  Esc
+                                </kbd>
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
                         </div>
                       </div>
                     )}
@@ -2046,7 +2130,23 @@ function DesktopWorkbenchInner({
                         value={composerText}
                         onChange={(e) => setComposerText(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
+                          if (e.key === "Escape" && queuedPrompt) {
+                            e.preventDefault();
+                            setQueuedPrompt(null);
+                          } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+                            e.preventDefault();
+                            setComposerMode("queue");
+                            sendPrompt("queue");
+                          } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                            e.preventDefault();
+                            const targetMode: TurnBehavior = activeProfile.supportsLiveSteer ? "steer" : "queue";
+                            setComposerMode(targetMode);
+                            sendPrompt(targetMode);
+                          } else if (e.key === "Enter" && e.altKey) {
+                            e.preventDefault();
+                            setComposerMode("interrupt");
+                            sendPrompt("interrupt");
+                          } else if (e.key === "Enter" && !e.shiftKey) {
                             e.preventDefault();
                             sendPrompt();
                           }
@@ -2140,56 +2240,35 @@ function DesktopWorkbenchInner({
                             </DropdownMenu>
                           )}
 
-                          {/* 常驻操作权限选择器（参考 Agy 桌面端，绝不折叠；选项随当前指定 Agent 自动调整） */}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] hover:border-[var(--soxu-border-strong)] text-[11.5px] font-medium text-[var(--soxu-text-primary)] cursor-pointer transition-colors"
-                                title={activePermMeta.desc}
-                              >
-                                <Shield className="h-3 w-3 text-[var(--soxu-semantic-accent)]" strokeWidth={1.75} />
-                                <span>{activePermMeta.label}</span>
-                                <ChevronDown className="h-3 w-3 text-[var(--soxu-text-tertiary)]" strokeWidth={1.75} />
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start" className="w-72">
-                              <DropdownMenuLabel>{activeProfile.displayName} 支持的操作权限档位</DropdownMenuLabel>
-                              <DropdownMenuSeparator />
-                              {activeProfile.permissions.map((pm) => (
-                                <DropdownMenuItem
-                                  key={pm.id}
-                                  onClick={() => {
-                                    setPermLevel(pm.id);
-                                    flashToast(`操作权限已调整为「${pm.label}」`);
-                                  }}
-                                  className="flex-col items-start gap-0.5 py-2"
-                                >
-                                  <div className="w-full flex items-center justify-between">
-                                    <span className="font-semibold text-xs">{pm.label}</span>
-                                    {permLevel === pm.id && <Check className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)]" strokeWidth={2} />}
-                                  </div>
-                                  <span className="text-[11px] text-[var(--soxu-text-tertiary)]">{pm.desc}</span>
-                                </DropdownMenuItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          {/* 常驻操作权限纯图标选择器（绝不折叠；图标与可选列表随当前指定 Agent 与权限档位区分） */}
+                          <ComposerPermissionButton
+                            agentId={cli}
+                            permLevel={permLevel}
+                            onSelectPerm={(nextId, label) => {
+                              setPermLevel(nextId);
+                              flashToast(`操作权限已调整为「${label}」`);
+                            }}
+                          />
 
                           <ComposerHandoffMenu
                             currentCli={cli}
-                            selectedTargetAgent={selectedHandoffTarget}
-                            onSelectTarget={(targetCli) => {
-                              addChipToActive({
-                                kind: "handoff",
-                                label: `@${targetCli}`,
-                                targetAgent: targetCli,
-                              });
-                              flashToast(`已选择将上下文移交至 @${targetCli}`);
+                            currentModel={model}
+                            currentThinking={thinking}
+                            selectedHandoff={selectedHandoff}
+                            onSelectHandoff={(chipDraft) => {
+                              addChipToActive(chipDraft);
+                              flashToast(`已配置移交至 ${chipDraft.label}`);
+                            }}
+                            onClearHandoff={() => {
+                              if (handoffChip) {
+                                removeChipFromActive(handoffChip.id);
+                                flashToast("已取消移交配置");
+                              }
                             }}
                           />
                         </div>
 
-                        {/* 右侧：三色上下文圆环 + 会话统计胶囊 + 投递模式 + 发送/停止按钮 */}
+                        {/* 右侧：三色上下文圆环 + 会话统计胶囊 + 纯图标投递模式组 + 发送/停止按钮 */}
                         <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                           <ContextUsageRing
                             model={model}
@@ -2205,30 +2284,17 @@ function DesktopWorkbenchInner({
                           <SessionStatsPopover stats={currentSessionStats} />
 
                           {activeTab?.targetKind === "workspace" && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 rounded-full text-[11.5px] px-2.5"
-                              onClick={() => {
-                                const order: TurnBehavior[] = activeProfile.supportsLiveSteer
-                                  ? ["steer", "queue", "interrupt"]
-                                  : ["queue", "interrupt"];
-                                const cur = order.includes(composerMode) ? order.indexOf(composerMode) : 0;
-                                setComposerMode(order[(cur + 1) % order.length]);
-                              }}
-                            >
-                              {composerMode === "steer"
-                                ? t("composer.modeSteer")
-                                : composerMode === "queue"
-                                  ? t("composer.modeQueue")
-                                  : t("composer.modeInterrupt")}
-                            </Button>
+                            <ComposerTurnBehaviorGroup
+                              mode={composerMode}
+                              supportsLiveSteer={activeProfile.supportsLiveSteer}
+                              onChange={setComposerMode}
+                            />
                           )}
 
                           <Button
                             size="icon"
                             variant="default"
-                            onClick={sendPrompt}
+                            onClick={() => sendPrompt()}
                             aria-label={composerText.trim() || currentComposerChips.length > 0 ? t("composer.send") : t("composer.stop")}
                             className="transition-transform duration-150 active:scale-90"
                           >

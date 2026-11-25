@@ -67,9 +67,9 @@
 
 ## 五、7 大 CLI 线性矢量徽标规范与 Worktree 启动环境透视器
 
-### 5.1 CLI 矢量徽标统一几何纪律
-所有 CLI 驱动图标在会话标签、驱动卡片与消息头中一律以 `16×16px`（或卡片 `20×20px`）`viewBox="0 0 24 24"` 单色/双色线性 SVG 渲染，**绝不引入外链位图或 Emoji**：
-- **Claude / Codex / Pi / OpenCode / Agy / Copilot / Qwen** 各有独立几何徽标轮廓（线宽 `1.75px`），在深/浅主题下跟随 `currentColor`（未选中 `#B4B4B4` / 选中 `#ECECEC`），并可附带 1 枚 `6px` 状态圆点标示连接态。
+### 5.1 CLI 官方原始品牌矢量徽标纪律
+所有 CLI 驱动图标在会话标签、驱动卡片、移交选单与消息头中一律以 `14×14px`–`20×20px` **各自原本的官方品牌矢量 SVG 渲染**，**严禁使用本项目自绘替代线框、外链位图或 Emoji**：
+- **Claude（`#D97757` 星芒）/ Codex（蓝紫渐变云朵终端）/ Pi（双阶像素几何标）/ Agy（Antigravity `#4388F0` 升空拱翼）/ OpenCode（双层嵌套方框）/ Copilot（GitHub Copilot 护目镜）/ Qwen（`#615CED` 六角几何编织标）** 均直接复用上游官方原版矢量路径，支持深浅主题高对比显示与 `monochrome` 单色跟随 `currentColor`。
 
 ### 5.2 Worktree 启动环境变量透视器（Launch Env Inspector）
 为消除多 Worktree 并发或 Magpie `Direct` MCP 挂载黑盒感，驱动卡片详情提供 **「启动环境透视（只读）」** 折叠面板：

@@ -1,20 +1,29 @@
 import {
   AtSign,
   Check,
-  ChevronDown,
+  Compass,
+  Eye,
   FileCode2,
   Folder,
   GitBranch,
   Image as ImageIcon,
+  ListPlus,
+  LockOpen,
+  OctagonX,
+  PencilLine,
   Plus,
+  Rocket,
+  ShieldCheck,
   Sparkles,
   Terminal,
   Upload,
   X,
+  Zap,
 } from "lucide-react";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { AgentIcon } from "@/components/AgentIcon";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,13 +33,24 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { getAgentProfile } from "@/lib/agent-capabilities";
+import {
+  getAgentModels,
+  getAgentProfile,
+  getPermissionMeta,
+  THINKING_LABELS,
+} from "@/lib/agent-capabilities";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { CLI_OPTIONS } from "@/mock-data";
-import type { ComposerChip, ComposerChipKind } from "@/types";
+import type {
+  ComposerChip,
+  ComposerChipKind,
+  HandoffSelection,
+  PermissionLevel,
+  TurnBehavior,
+} from "@/types";
 
-export function chipKindIcon(kind: ComposerChipKind, targetAgent?: string) {
+function chipKindIcon(kind: ComposerChipKind, targetAgent?: string) {
   switch (kind) {
     case "handoff":
       return <AgentIcon agent={targetAgent ?? "codex"} className="h-3.5 w-3.5 shrink-0" />;
@@ -49,6 +69,35 @@ export function chipKindIcon(kind: ComposerChipKind, targetAgent?: string) {
       return <FileCode2 className="h-3 w-3 shrink-0 text-[var(--soxu-text-tertiary)]" strokeWidth={1.75} />;
   }
 }
+
+/**
+ * 按执行权限档位映射独立语义图标与识别色：
+ * plan(规划/罗盘)、read-only(只读/眼睛)、ask(询问/盾牌确认)、auto-edit(自动编辑/画笔)、full-access(全权/开锁)、turbo(自主/火箭)。
+ */
+export function PermissionIcon({ level, className }: { level: PermissionLevel; className?: string }) {
+  switch (level) {
+    case "plan":
+      return <Compass className={cn("h-3.5 w-3.5 text-[var(--soxu-semantic-running)] shrink-0", className)} strokeWidth={1.75} />;
+    case "read-only":
+      return <Eye className={cn("h-3.5 w-3.5 text-[var(--soxu-text-secondary)] shrink-0", className)} strokeWidth={1.75} />;
+    case "auto-edit":
+      return <PencilLine className={cn("h-3.5 w-3.5 text-[var(--soxu-semantic-warning)] shrink-0", className)} strokeWidth={1.75} />;
+    case "full-access":
+      return <LockOpen className={cn("h-3.5 w-3.5 text-[var(--soxu-semantic-danger)] shrink-0", className)} strokeWidth={1.75} />;
+    case "turbo":
+      return <Rocket className={cn("h-3.5 w-3.5 text-[var(--soxu-semantic-danger)] shrink-0", className)} strokeWidth={1.75} />;
+    case "ask":
+    default:
+      return <ShieldCheck className={cn("h-3.5 w-3.5 text-[var(--soxu-semantic-accent)] shrink-0", className)} strokeWidth={1.75} />;
+  }
+}
+
+const PERM_TONE_SURFACE: Record<"neutral" | "accent" | "warning" | "danger", string> = {
+  neutral: "border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] hover:border-[var(--soxu-border-strong)]",
+  accent: "border-[var(--soxu-semantic-accent)]/45 bg-[var(--soxu-semantic-accent-soft)] hover:border-[var(--soxu-semantic-accent)]/75",
+  warning: "border-[var(--soxu-semantic-warning)]/45 bg-[var(--soxu-semantic-warning-soft)] hover:border-[var(--soxu-semantic-warning)]/75",
+  danger: "border-[var(--soxu-semantic-danger)]/45 bg-[var(--soxu-semantic-danger-soft)] hover:border-[var(--soxu-semantic-danger)]/75",
+};
 
 /**
  * 输入框内部上方挂载的结构化上下文与移交标签条（参考 Agy 桌面端）。
@@ -79,7 +128,7 @@ export function ComposerChipBar({
             )}
           >
             {chipKindIcon(chip.kind, chip.targetAgent)}
-            <span className="truncate max-w-[220px]">{chip.label}</span>
+            <span className="truncate max-w-[260px]">{chip.label}</span>
             {onRemove && (
               <button
                 type="button"
@@ -222,76 +271,451 @@ export function ComposerPlusMenu({ hasWorkspace, onAddChip }: ComposerPlusMenuPr
   );
 }
 
-interface ComposerHandoffMenuProps {
-  currentCli: string;
-  selectedTargetAgent?: string;
-  onSelectTarget: (targetAgent: string) => void;
+interface ComposerPermissionButtonProps {
+  agentId: string;
+  permLevel: PermissionLevel;
+  onSelectPerm: (level: PermissionLevel, label: string) => void;
+  onOpenSheet?: () => void;
 }
 
 /**
- * 可选目标 Agent 的移交下拉菜单：
- * 展示全部可用原生驱动及专属图标，选中后作为移交标签加入输入框顶部。
+ * 常驻输入舱操作权限纯图标按钮：
+ * 绝不折叠进更多栏，按钮本体仅展示随当前权限档位变化的独立图标，悬浮提供档位说明与快捷键提示。
  */
-export function ComposerHandoffMenu({ currentCli, selectedTargetAgent, onSelectTarget }: ComposerHandoffMenuProps) {
+export function ComposerPermissionButton({
+  agentId,
+  permLevel,
+  onSelectPerm,
+  onOpenSheet,
+}: ComposerPermissionButtonProps) {
   const { t } = useI18n();
+  const profile = getAgentProfile(agentId);
+  const activeMeta = getPermissionMeta(agentId, permLevel);
+  const effectiveLevel = activeMeta.id;
+
+  const triggerButton = (
+    <button
+      type="button"
+      onClick={onOpenSheet}
+      aria-label={t("composer.permTooltipTitle", { label: activeMeta.label })}
+      className={cn(
+        "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border cursor-pointer transition-colors",
+        PERM_TONE_SURFACE[activeMeta.tone],
+      )}
+    >
+      <PermissionIcon level={effectiveLevel} />
+    </button>
+  );
+
+  const tooltip = (
+    <TooltipContent side="top" className="max-w-[260px]">
+      <div className="flex items-center justify-between gap-2 font-medium">
+        <span>{t("composer.permTooltipTitle", { label: activeMeta.label })}</span>
+        <kbd className="rounded bg-[var(--soxu-surface-control)] px-1 py-0.5 text-[10px] soxu-mono text-[var(--soxu-text-secondary)]">
+          Alt+P
+        </kbd>
+      </div>
+      <div className="mt-0.5 text-[10.5px] text-[var(--soxu-text-tertiary)] leading-snug">{activeMeta.desc}</div>
+    </TooltipContent>
+  );
+
+  if (onOpenSheet) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
+        {tooltip}
+      </Tooltip>
+    );
+  }
 
   return (
     <DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
+        </TooltipTrigger>
+        {tooltip}
+      </Tooltip>
+      <DropdownMenuContent side="top" align="start" className="w-72">
+        <DropdownMenuLabel>{profile.displayName} 支持的操作权限档位</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {profile.permissions.map((pm) => (
+          <DropdownMenuItem
+            key={pm.id}
+            onClick={() => onSelectPerm(pm.id, pm.label)}
+            className="items-start gap-2.5 py-2"
+          >
+            <PermissionIcon level={pm.id} className="mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-xs">{pm.label}</span>
+                {effectiveLevel === pm.id && (
+                  <Check className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)] shrink-0" strokeWidth={2} />
+                )}
+              </div>
+              <div className="text-[11px] text-[var(--soxu-text-tertiary)] leading-snug">{pm.desc}</div>
+            </div>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+interface ComposerTurnBehaviorGroupProps {
+  mode: TurnBehavior;
+  supportsLiveSteer: boolean;
+  onChange: (nextMode: TurnBehavior) => void;
+}
+
+/**
+ * 运行态投递行为纯图标分段组（热纠偏 / 排队 / 打断重发）：
+ * 每个动作独立显示辨识度图标，不渲染文字标签，悬浮展示解释文案与真实快捷键提示。
+ */
+export function ComposerTurnBehaviorGroup({
+  mode,
+  supportsLiveSteer,
+  onChange,
+}: ComposerTurnBehaviorGroupProps) {
+  const { t } = useI18n();
+
+  const items: {
+    id: TurnBehavior;
+    label: string;
+    desc: string;
+    kbd: string;
+    Icon: typeof Zap;
+    activeClass: string;
+  }[] = [
+    ...(supportsLiveSteer
+      ? [
+          {
+            id: "steer" as const,
+            label: t("composer.modeSteer"),
+            desc: t("composer.modeSteerDesc"),
+            kbd: "Ctrl+Enter",
+            Icon: Zap,
+            activeClass:
+              "bg-[var(--soxu-semantic-running-soft)] text-[var(--soxu-semantic-running)] border border-[var(--soxu-semantic-running)]/45",
+          },
+        ]
+      : []),
+    {
+      id: "queue",
+      label: t("composer.modeQueue"),
+      desc: t("composer.modeQueueDesc"),
+      kbd: "Ctrl+Shift+Enter",
+      Icon: ListPlus,
+      activeClass:
+        "bg-[var(--soxu-semantic-warning-soft)] text-[var(--soxu-semantic-warning)] border border-[var(--soxu-semantic-warning)]/45",
+    },
+    {
+      id: "interrupt",
+      label: t("composer.modeInterrupt"),
+      desc: t("composer.modeInterruptDesc"),
+      kbd: "Alt+Enter",
+      Icon: OctagonX,
+      activeClass:
+        "bg-[var(--soxu-semantic-danger-soft)] text-[var(--soxu-semantic-danger)] border border-[var(--soxu-semantic-danger)]/45",
+    },
+  ];
+
+  return (
+    <div
+      role="group"
+      aria-label="回合投递模式"
+      className="inline-flex h-7 items-center gap-0.5 rounded-full bg-[var(--soxu-surface-control)] border border-[var(--soxu-border-hairline)] p-0.5 shrink-0"
+    >
+      {items.map((item) => {
+        const active = mode === item.id;
+        const IconComp = item.Icon;
+        return (
+          <Tooltip key={item.id}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => onChange(item.id)}
+                aria-label={item.label}
+                aria-pressed={active}
+                className={cn(
+                  "inline-flex h-[22px] w-[22px] items-center justify-center rounded-full cursor-pointer transition-colors",
+                  active
+                    ? item.activeClass
+                    : "border border-transparent text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-interaction-hover)]",
+                )}
+              >
+                <IconComp className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[260px]">
+              <div className="flex items-center justify-between gap-2 font-medium">
+                <span>{item.label}</span>
+                <kbd className="rounded bg-[var(--soxu-surface-control)] px-1 py-0.5 text-[10px] soxu-mono text-[var(--soxu-text-secondary)]">
+                  {item.kbd}
+                </kbd>
+              </div>
+              <div className="mt-0.5 text-[10.5px] text-[var(--soxu-text-tertiary)] leading-snug">{item.desc}</div>
+            </TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}
+
+interface ComposerHandoffMenuProps {
+  currentCli: string;
+  currentModel: string;
+  currentThinking: string;
+  selectedHandoff?: HandoffSelection;
+  onSelectHandoff: (chipDraft: Omit<ComposerChip, "id">) => void;
+  onClearHandoff: () => void;
+}
+
+function resolveHandoffDraft(
+  agentId: string,
+  preferredModel?: string,
+  preferredThinking?: string,
+): { targetAgent: string; targetModel: string; targetThinking?: string; label: string } {
+  const profile = getAgentProfile(agentId);
+  const models = getAgentModels(agentId);
+  const pickedModel = models.find((m) => m.id === preferredModel) ?? models[0];
+  const nextThinking = profile.supportsThinking
+    ? pickedModel.thinkingOptions.includes(preferredThinking ?? "")
+      ? preferredThinking
+      : (pickedModel.thinkingOptions[0] ?? "medium")
+    : undefined;
+  const shortModel = pickedModel.id.replace("group/", "").replace("auto/", "");
+  const thinkText = nextThinking ? (THINKING_LABELS[nextThinking] ?? nextThinking) : "";
+  const label = thinkText ? `@${agentId} / ${shortModel} (${thinkText})` : `@${agentId} / ${shortModel}`;
+
+  return {
+    targetAgent: agentId,
+    targetModel: pickedModel.id,
+    targetThinking: nextThinking,
+    label,
+  };
+}
+
+/**
+ * 可选目标 Agent、模型与思考强度的移交面板：
+ * 选中后仅改变按钮自身激活样式（紫色柔底与边框），不改变按钮内部图标(@)与文字(移交)。
+ */
+export function ComposerHandoffMenu({
+  currentCli,
+  currentModel,
+  currentThinking,
+  selectedHandoff,
+  onSelectHandoff,
+  onClearHandoff,
+}: ComposerHandoffMenuProps) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+
+  const availableClis = CLI_OPTIONS.filter((c) => c.available);
+  const defaultAgent =
+    selectedHandoff?.targetAgent ?? availableClis.find((c) => c.id !== currentCli)?.id ?? currentCli;
+
+  const [draftAgent, setDraftAgent] = useState(defaultAgent);
+  const [draftModel, setDraftModel] = useState(selectedHandoff?.targetModel ?? currentModel);
+  const [draftThinking, setDraftThinking] = useState(selectedHandoff?.targetThinking ?? currentThinking);
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
+      const seedAgent =
+        selectedHandoff?.targetAgent ?? availableClis.find((c) => c.id !== currentCli)?.id ?? currentCli;
+      const resolved = resolveHandoffDraft(
+        seedAgent,
+        selectedHandoff?.targetModel ?? currentModel,
+        selectedHandoff?.targetThinking ?? currentThinking,
+      );
+      setDraftAgent(resolved.targetAgent);
+      setDraftModel(resolved.targetModel);
+      setDraftThinking(resolved.targetThinking ?? "");
+    }
+    setOpen(nextOpen);
+  };
+
+  const normalizedDraft = resolveHandoffDraft(draftAgent, draftModel, draftThinking);
+  const draftProfile = getAgentProfile(normalizedDraft.targetAgent);
+  const draftModels = getAgentModels(normalizedDraft.targetAgent);
+  const draftModelMeta = draftModels.find((m) => m.id === normalizedDraft.targetModel) ?? draftModels[0];
+
+  const emitSelection = (agentId: string, modelId?: string, thinkingId?: string) => {
+    const resolved = resolveHandoffDraft(agentId, modelId, thinkingId);
+    setDraftAgent(resolved.targetAgent);
+    setDraftModel(resolved.targetModel);
+    setDraftThinking(resolved.targetThinking ?? "");
+    onSelectHandoff({
+      kind: "handoff",
+      label: resolved.label,
+      targetAgent: resolved.targetAgent,
+      targetModel: resolved.targetModel,
+      targetThinking: resolved.targetThinking,
+    });
+  };
+
+  const selectedSummary = selectedHandoff
+    ? resolveHandoffDraft(selectedHandoff.targetAgent, selectedHandoff.targetModel, selectedHandoff.targetThinking).label
+    : null;
+
+  return (
+    <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+      <Tooltip>
+        <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className={cn(
-                "inline-flex items-center gap-1 h-7 px-2 rounded-full text-[11px] cursor-pointer transition-colors",
-                selectedTargetAgent
-                  ? "bg-[var(--soxu-semantic-handoff-soft)] border border-[var(--soxu-semantic-handoff)]/35 text-[var(--soxu-text-primary)]"
-                  : "text-[var(--soxu-semantic-handoff)] hover:bg-[var(--soxu-interaction-hover)]",
-              )}
+              aria-pressed={Boolean(selectedHandoff)}
               aria-label={t("composer.handoffChoose")}
-            >
-              {selectedTargetAgent ? (
-                <>
-                  <AgentIcon agent={selectedTargetAgent} className="h-3.5 w-3.5 shrink-0" />
-                  <span className="soxu-mono">@{selectedTargetAgent}</span>
-                </>
-              ) : (
-                <>
-                  <AtSign className="h-3 w-3 shrink-0" strokeWidth={1.75} />
-                  <span>{t("composer.handoff")}</span>
-                </>
+              className={cn(
+                "inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] border cursor-pointer transition-colors shrink-0",
+                selectedHandoff
+                  ? "bg-[var(--soxu-semantic-handoff-soft)] border-[var(--soxu-semantic-handoff)]/60 text-[var(--soxu-semantic-handoff)] font-medium"
+                  : "bg-transparent border-transparent text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)]",
               )}
-              <ChevronDown className="h-3 w-3 opacity-75 shrink-0" strokeWidth={1.75} />
+            >
+              <AtSign className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+              <span>{t("composer.handoff")}</span>
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>{t("composer.handoffChoose")}</TooltipContent>
+        <TooltipContent side="top" className="max-w-[260px]">
+          <div className="font-medium">{t("composer.handoffChoose")}</div>
+          {selectedSummary && (
+            <div className="mt-0.5 text-[10.5px] soxu-mono text-[var(--soxu-semantic-handoff)]">{selectedSummary}</div>
+          )}
+        </TooltipContent>
       </Tooltip>
 
-      <DropdownMenuContent side="top" align="start" className="w-60">
-        <DropdownMenuLabel>{t("composer.handoffChoose")}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {CLI_OPTIONS.filter((c) => c.available).map((c) => {
-          const isCurrent = c.id === currentCli;
-          const isPicked = c.id === selectedTargetAgent;
-          const prof = getAgentProfile(c.id);
-          return (
-            <DropdownMenuItem key={c.id} onClick={() => onSelectTarget(c.id)}>
-              <span className="inline-flex items-center gap-2 min-w-0">
-                <AgentIcon agent={c.id} className="h-4 w-4 shrink-0" />
-                <span className="soxu-mono font-medium">@{c.id}</span>
-                <span className="text-[11px] text-[var(--soxu-text-tertiary)] truncate">{prof.displayName}</span>
-              </span>
-              {isPicked ? (
-                <Check className="h-3.5 w-3.5 text-[var(--soxu-semantic-handoff)] shrink-0" strokeWidth={2} />
-              ) : isCurrent ? (
-                <Badge variant="neutral">当前</Badge>
-              ) : (
-                <Badge variant="handoff">v{c.ver}</Badge>
-              )}
-            </DropdownMenuItem>
-          );
-        })}
+      <DropdownMenuContent side="top" align="start" className="w-[332px] p-3 space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold text-[var(--soxu-text-primary)]">{t("composer.handoffChoose")}</span>
+          {selectedHandoff && <Badge variant="handoff">@{selectedHandoff.targetAgent}</Badge>}
+        </div>
+
+        {/* 1. 选择目标 Agent（官方原版图标） */}
+        <div className="grid grid-cols-2 gap-1">
+          {availableClis.map((c) => {
+            const prof = getAgentProfile(c.id);
+            const active = normalizedDraft.targetAgent === c.id;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => emitSelection(c.id, draftModel, draftThinking)}
+                className={cn(
+                  "flex items-center justify-between gap-1.5 rounded-lg border px-2 py-1.5 text-left text-[11.5px] cursor-pointer transition-colors",
+                  active
+                    ? "bg-[var(--soxu-semantic-handoff-soft)] border-[var(--soxu-semantic-handoff)]/55 text-[var(--soxu-text-primary)]"
+                    : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-hairline)] text-[var(--soxu-text-secondary)] hover:border-[var(--soxu-border-subtle)] hover:text-[var(--soxu-text-primary)]",
+                )}
+              >
+                <span className="inline-flex items-center gap-1.5 min-w-0">
+                  <AgentIcon agent={c.id} className="h-3.5 w-3.5 shrink-0" />
+                  <span className="soxu-mono font-medium truncate">@{c.id}</span>
+                </span>
+                <span className="text-[10px] text-[var(--soxu-text-tertiary)] shrink-0">
+                  {c.id === currentCli ? "当前" : prof.displayName}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <DropdownMenuSeparator className="my-1" />
+
+        {/* 2. 直接指定目标模型 */}
+        <div className="space-y-1">
+          <div className="text-[11px] font-medium text-[var(--soxu-text-tertiary)]">
+            {t("composer.handoffModelLabel")}
+          </div>
+          <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
+            {draftModels.map((m) => {
+              const active = normalizedDraft.targetModel === m.id;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => emitSelection(normalizedDraft.targetAgent, m.id, draftThinking)}
+                  className={cn(
+                    "w-full flex items-center justify-between gap-2 rounded-lg border px-2 py-1.5 text-left text-[11px] cursor-pointer transition-colors",
+                    active
+                      ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)]"
+                      : "bg-transparent border-[var(--soxu-border-hairline)] text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)]",
+                  )}
+                >
+                  <span className="soxu-mono truncate">{m.id.replace("group/", "").replace("auto/", "")}</span>
+                  <span className="inline-flex items-center gap-1 shrink-0">
+                    <span className="text-[10px] text-[var(--soxu-text-tertiary)]">{m.tier}</span>
+                    {active && <Check className="h-3 w-3 text-[var(--soxu-semantic-handoff)]" strokeWidth={2} />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 3. 直接指定思考级别 */}
+        <div className="space-y-1">
+          <div className="text-[11px] font-medium text-[var(--soxu-text-tertiary)]">
+            {t("composer.handoffThinkingLabel")}
+          </div>
+          {draftProfile.supportsThinking ? (
+            <div className="flex flex-wrap gap-1">
+              {draftModelMeta.thinkingOptions.map((lv) => {
+                const active = normalizedDraft.targetThinking === lv;
+                return (
+                  <button
+                    key={lv}
+                    type="button"
+                    onClick={() => emitSelection(normalizedDraft.targetAgent, normalizedDraft.targetModel, lv)}
+                    className={cn(
+                      "h-6 px-2.5 rounded-full text-[11px] border cursor-pointer transition-colors",
+                      active
+                        ? "bg-[var(--soxu-semantic-handoff-soft)] border-[var(--soxu-semantic-handoff)]/60 text-[var(--soxu-semantic-handoff)] font-medium"
+                        : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)]",
+                    )}
+                  >
+                    {THINKING_LABELS[lv] ?? lv}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-[11px] text-[var(--soxu-text-tertiary)]">{t("composer.handoffNoThinking")}</div>
+          )}
+        </div>
+
+        {/* 4. 底部确认与清除 */}
+        <div className="flex items-center justify-between gap-2 pt-1 border-t border-[var(--soxu-border-hairline)]">
+          {selectedHandoff ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[11px] text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-semantic-danger)]"
+              onClick={() => {
+                onClearHandoff();
+                setOpen(false);
+              }}
+            >
+              {t("composer.handoffClear")}
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button
+            size="sm"
+            variant="default"
+            className="h-7 px-3 text-[11px]"
+            onClick={() => {
+              emitSelection(normalizedDraft.targetAgent, normalizedDraft.targetModel, normalizedDraft.targetThinking);
+              setOpen(false);
+            }}
+          >
+            {t("composer.handoffConfirm")}
+          </Button>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

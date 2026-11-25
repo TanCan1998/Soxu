@@ -5,11 +5,19 @@ export type WorkspaceBucket = "needs_input" | "failed" | "running" | "attention"
 export type PermissionLevel = "plan" | "read-only" | "ask" | "auto-edit" | "full-access" | "turbo";
 export type ComposerChipKind = "file" | "folder" | "diff" | "terminal" | "image" | "skill" | "handoff";
 
+export interface HandoffSelection {
+  targetAgent: string;
+  targetModel: string;
+  targetThinking?: string;
+}
+
 export interface ComposerChip {
   id: string;
   kind: ComposerChipKind;
   label: string;
   targetAgent?: string;
+  targetModel?: string;
+  targetThinking?: string;
 }
 
 export interface SessionTelemetryStats {
