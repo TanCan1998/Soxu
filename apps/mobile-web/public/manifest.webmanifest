@@ -1,9 +1,9 @@
 {
-  "name": "Soxu Remote",
+  "name": "Soxu",
   "short_name": "Soxu",
-  "description": "Soxu 多 Agent 桌面端移动伴侣与远程审批控制台",
+  "description": "Soxu 多 Agent 桌面工作台移动遥控与跨屏审批终端",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#090d16",
-  "theme_color": "#090d16"
+  "background_color": "#000000",
+  "theme_color": "#000000"
 }

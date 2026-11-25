@@ -81,3 +81,12 @@ jobs:
 
       - name: Typecheck & production build
         run: pnpm run build
+
+      - name: Check design tokens sync
+        run: node ../../scripts/sync-design-tokens.mjs --check
+
+      - name: Build standalone desktop preview
+        run: pnpm run build:preview
+
+      - name: Verify design system & zero-emoji gate
+        run: node ../../scripts/verify-design-system.mjs

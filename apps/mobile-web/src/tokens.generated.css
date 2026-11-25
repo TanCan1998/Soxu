@@ -1,0 +1,331 @@
+/* ==========================================================================
+ * GENERATED FROM design-system/soxu/tokens.json — DO NOT EDIT DIRECTLY.
+ * Run `node scripts/sync-design-tokens.mjs --write` to regenerate.
+ * ========================================================================== */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --soxu-surface-inset: #000000;
+  --soxu-surface-canvas: #000000;
+  --soxu-surface-sidebar: #0d0d0d;
+  --soxu-surface-card: #171717;
+  --soxu-surface-card-muted: #121212;
+  --soxu-surface-raised: #212121;
+  --soxu-surface-composer: #212121;
+  --soxu-surface-floating: #262626;
+  --soxu-surface-control: #2f2f2f;
+  --soxu-surface-terminal: #050505;
+  --soxu-surface-scrim: rgba(0, 0, 0, 0.76);
+  --soxu-surface-header-glass: rgba(0, 0, 0, 0.82);
+  --soxu-interaction-hover: rgba(255, 255, 255, 0.05);
+  --soxu-interaction-selected: rgba(255, 255, 255, 0.09);
+  --soxu-interaction-pressed: rgba(255, 255, 255, 0.13);
+  --soxu-interaction-selection: rgba(25, 195, 125, 0.30);
+  --soxu-interaction-scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --soxu-interaction-scrollbar-thumb-hover: rgba(255, 255, 255, 0.30);
+  --soxu-text-primary: #ececec;
+  --soxu-text-secondary: #b4b4b4;
+  --soxu-text-tertiary: #8e8e8e;
+  --soxu-text-ghost: #5e5e5e;
+  --soxu-text-code: #f4f4f5;
+  --soxu-border-hairline: #1a1a1a;
+  --soxu-border-subtle: #262626;
+  --soxu-border-strong: #383838;
+  --soxu-border-focus-ring: #ffffff;
+  --soxu-action-inverse: #ffffff;
+  --soxu-action-inverse-hover: #e5e5e5;
+  --soxu-action-on-inverse: #000000;
+  --soxu-action-disabled-bg: #2a2a2a;
+  --soxu-action-disabled-fg: #666666;
+  --soxu-semantic-accent: #19c37d;
+  --soxu-semantic-accent-soft: rgba(25, 195, 125, 0.15);
+  --soxu-semantic-accent-border: rgba(25, 195, 125, 0.38);
+  --soxu-semantic-running: #3b82f6;
+  --soxu-semantic-running-soft: rgba(59, 130, 246, 0.14);
+  --soxu-semantic-running-border: rgba(59, 130, 246, 0.36);
+  --soxu-semantic-success: #22c55e;
+  --soxu-semantic-success-soft: rgba(34, 197, 94, 0.13);
+  --soxu-semantic-warning: #f59e0b;
+  --soxu-semantic-warning-soft: rgba(245, 158, 11, 0.14);
+  --soxu-semantic-warning-border: rgba(245, 158, 11, 0.38);
+  --soxu-semantic-danger: #ef4444;
+  --soxu-semantic-danger-soft: rgba(239, 68, 68, 0.14);
+  --soxu-semantic-danger-border: rgba(239, 68, 68, 0.40);
+  --soxu-semantic-handoff: #a855f7;
+  --soxu-semantic-handoff-soft: rgba(168, 85, 247, 0.14);
+  --soxu-semantic-code-wash: rgba(255, 255, 255, 0.08);
+  --soxu-syntax-plain: #ececec;
+  --soxu-syntax-keyword: #ff7b72;
+  --soxu-syntax-function: #d2a8ff;
+  --soxu-syntax-type: #ffa657;
+  --soxu-syntax-string: #a5d6ff;
+  --soxu-syntax-number: #79c0ff;
+  --soxu-syntax-comment: #8b949e;
+  --soxu-syntax-operator: #ff7b72;
+  --soxu-syntax-property: #7ee787;
+  --soxu-syntax-macro: #56d4dd;
+  --soxu-syntax-diff-add-bg: rgba(34, 197, 94, 0.14);
+  --soxu-syntax-diff-add-gutter: rgba(34, 197, 94, 0.26);
+  --soxu-syntax-diff-del-bg: rgba(239, 68, 68, 0.14);
+  --soxu-syntax-diff-del-gutter: rgba(239, 68, 68, 0.26);
+  --soxu-ansi-black: #262626;
+  --soxu-ansi-red: #f87171;
+  --soxu-ansi-green: #4ade80;
+  --soxu-ansi-yellow: #facc15;
+  --soxu-ansi-blue: #60a5fa;
+  --soxu-ansi-magenta: #c084fc;
+  --soxu-ansi-cyan: #22d3ee;
+  --soxu-ansi-white: #e5e5e5;
+  --soxu-ansi-bright-black: #737373;
+  --soxu-ansi-bright-red: #fca5a5;
+  --soxu-ansi-bright-green: #86efac;
+  --soxu-ansi-bright-yellow: #fde047;
+  --soxu-ansi-bright-blue: #93c5fd;
+  --soxu-ansi-bright-magenta: #d8b4fe;
+  --soxu-ansi-bright-cyan: #67e8f9;
+  --soxu-ansi-bright-white: #ffffff;
+
+  /* Typography */
+  --soxu-font-sans: 'Inter', 'Noto Sans SC', 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --soxu-font-mono: 'JetBrains Mono', 'Cascadia Mono', 'Fira Code', 'Noto Sans SC', monospace;
+  --soxu-font-ui: var(--soxu-font-sans);
+  --soxu-font-code: var(--soxu-font-mono);
+  --soxu-font-code-effective: var(--soxu-font-code);
+  --soxu-font-ui-size: 14px;
+  --soxu-font-code-size: 13px;
+  --soxu-code-ligatures: "liga" 1, "calt" 1;
+  --soxu-text-desktop-base-px: 14px;
+  --soxu-text-mobile-base-px: 15px;
+  --soxu-text-micro: 11px;
+  --soxu-text-caption: 12px;
+  --soxu-text-code: 13px;
+  --soxu-text-body: 14px;
+  --soxu-text-body-mobile: 15px;
+  --soxu-text-input-mobile: 16px;
+  --soxu-text-title: 17px;
+  --soxu-text-display: 22px;
+
+  /* Spacing */
+  --soxu-space-1: 4px;
+  --soxu-space-2: 8px;
+  --soxu-space-3: 12px;
+  --soxu-space-4: 16px;
+  --soxu-space-5: 20px;
+  --soxu-space-6: 24px;
+  --soxu-space-8: 32px;
+  --soxu-space-12: 48px;
+  --soxu-space-half: 2px;
+  --soxu-space-1-5: 6px;
+
+  /* Radius */
+  --soxu-radius-xs: 6px;
+  --soxu-radius-sm: 8px;
+  --soxu-radius-md: 12px;
+  --soxu-radius-lg: 18px;
+  --soxu-radius-composer: 22px;
+  --soxu-radius-pill: 9999px;
+
+  /* Layout & Responsive */
+  --soxu-layout-sidebar-default: 260px;
+  --soxu-layout-sidebar-min: 224px;
+  --soxu-layout-sidebar-max: 420px;
+  --soxu-layout-inspector-default: 380px;
+  --soxu-layout-inspector-min: 280px;
+  --soxu-layout-inspector-max: 720px;
+  --soxu-layout-transcript-max-width: 760px;
+  --soxu-layout-composer-max-width: 760px;
+  --soxu-layout-max-content-width: 800px;
+  --soxu-layout-touch-target-min: 44px;
+  --soxu-layout-touch-target-android: 48px;
+  --soxu-layout-breakpoint-regular: 640px;
+  --soxu-layout-breakpoint-wide: 1024px;
+
+  /* Component Sizing */
+  --soxu-size-titlebar-height: 38px;
+  --soxu-size-tabbar-height: 36px;
+  --soxu-size-subagent-bar-height: 28px;
+  --soxu-size-statusbar-height: 26px;
+  --soxu-size-sidebar-row-height: 32px;
+  --soxu-size-tool-card-header-height: 34px;
+  --soxu-size-diff-gutter-width: 52px;
+  --soxu-size-activity-diff-max-height: 400px;
+  --soxu-size-permission-detail-max-height: 96px;
+  --soxu-size-cmd-palette-width: 640px;
+  --soxu-size-cmd-palette-max-height: 440px;
+  --soxu-size-cmd-palette-input-height: 52px;
+  --soxu-size-turn-nav-rail-width: 20px;
+  --soxu-size-icon-sm: 14px;
+  --soxu-size-icon-md: 16px;
+  --soxu-size-icon-lg: 20px;
+
+  /* Z-Index */
+  --soxu-z-base: 0;
+  --soxu-z-sticky: 10;
+  --soxu-z-rail: 15;
+  --soxu-z-header: 20;
+  --soxu-z-popover: 40;
+  --soxu-z-drawer-scrim: 50;
+  --soxu-z-drawer: 55;
+  --soxu-z-modal-scrim: 60;
+  --soxu-z-modal: 70;
+  --soxu-z-palette: 80;
+  --soxu-z-floating: 95;
+  --soxu-z-toast: 100;
+
+  /* Motion (1:1 GPUI Portable) */
+  --soxu-motion-press: 100ms;
+  --soxu-motion-hover: 150ms;
+  --soxu-motion-panel: 220ms;
+  --soxu-motion-sheet: 260ms;
+  --soxu-motion-enter: 220ms;
+  --soxu-motion-exit: 150ms;
+  --soxu-motion-hover-expand-delay: 40ms;
+  --soxu-motion-hover-collapse-delay: 160ms;
+  --soxu-motion-theme: 340ms;
+  --soxu-motion-theme-icon: 280ms;
+  --soxu-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --soxu-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --soxu-ease-in-out-cubic: cubic-bezier(0.65, 0, 0.35, 1);
+  --soxu-ease-fast: cubic-bezier(0.2, 0, 0, 1);
+
+  /* shadcn/ui Semantic Variable Bridge */
+  --background: var(--soxu-surface-canvas);
+  --foreground: var(--soxu-text-primary);
+  --card: var(--soxu-surface-card);
+  --card-foreground: var(--soxu-text-primary);
+  --popover: var(--soxu-surface-floating);
+  --popover-foreground: var(--soxu-text-primary);
+  --primary: var(--soxu-action-inverse);
+  --primary-foreground: var(--soxu-action-on-inverse);
+  --secondary: var(--soxu-surface-control);
+  --secondary-foreground: var(--soxu-text-primary);
+  --muted: var(--soxu-surface-card-muted);
+  --muted-foreground: var(--soxu-text-secondary);
+  --accent: var(--soxu-interaction-selected);
+  --accent-foreground: var(--soxu-text-primary);
+  --destructive: var(--soxu-semantic-danger);
+  --destructive-foreground: #ffffff;
+  --border: var(--soxu-border-subtle);
+  --input: var(--soxu-border-strong);
+  --ring: var(--soxu-border-focus-ring);
+  --radius: var(--soxu-radius-md);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --soxu-surface-inset: #ebebeb;
+  --soxu-surface-canvas: #ffffff;
+  --soxu-surface-sidebar: #f9f9f9;
+  --soxu-surface-card: #ffffff;
+  --soxu-surface-card-muted: #f4f4f4;
+  --soxu-surface-raised: #f4f4f4;
+  --soxu-surface-composer: #f4f4f4;
+  --soxu-surface-floating: #ffffff;
+  --soxu-surface-control: #e8e8e8;
+  --soxu-surface-terminal: #f7f7f8;
+  --soxu-surface-scrim: rgba(0, 0, 0, 0.45);
+  --soxu-surface-header-glass: rgba(255, 255, 255, 0.86);
+  --soxu-interaction-hover: rgba(0, 0, 0, 0.04);
+  --soxu-interaction-selected: rgba(0, 0, 0, 0.07);
+  --soxu-interaction-pressed: rgba(0, 0, 0, 0.11);
+  --soxu-interaction-selection: rgba(16, 163, 127, 0.22);
+  --soxu-interaction-scrollbar-thumb: rgba(0, 0, 0, 0.18);
+  --soxu-interaction-scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
+  --soxu-text-primary: #0d0d0d;
+  --soxu-text-secondary: #5d5d5d;
+  --soxu-text-tertiary: #757575;
+  --soxu-text-ghost: #9b9b9b;
+  --soxu-text-code: #18181b;
+  --soxu-border-hairline: #ededed;
+  --soxu-border-subtle: #e3e3e3;
+  --soxu-border-strong: #c7c7c7;
+  --soxu-border-focus-ring: #0d0d0d;
+  --soxu-action-inverse: #0d0d0d;
+  --soxu-action-inverse-hover: #262626;
+  --soxu-action-on-inverse: #ffffff;
+  --soxu-action-disabled-bg: #e5e5e5;
+  --soxu-action-disabled-fg: #9e9e9e;
+  --soxu-semantic-accent: #10a37f;
+  --soxu-semantic-accent-soft: rgba(16, 163, 127, 0.12);
+  --soxu-semantic-accent-border: rgba(16, 163, 127, 0.34);
+  --soxu-semantic-running: #2563eb;
+  --soxu-semantic-running-soft: rgba(37, 99, 235, 0.10);
+  --soxu-semantic-running-border: rgba(37, 99, 235, 0.30);
+  --soxu-semantic-success: #16a34a;
+  --soxu-semantic-success-soft: rgba(22, 163, 74, 0.11);
+  --soxu-semantic-warning: #d97706;
+  --soxu-semantic-warning-soft: rgba(217, 119, 6, 0.11);
+  --soxu-semantic-warning-border: rgba(217, 119, 6, 0.32);
+  --soxu-semantic-danger: #dc2626;
+  --soxu-semantic-danger-soft: rgba(220, 38, 38, 0.10);
+  --soxu-semantic-danger-border: rgba(220, 38, 38, 0.32);
+  --soxu-semantic-handoff: #7c3aed;
+  --soxu-semantic-handoff-soft: rgba(124, 58, 237, 0.10);
+  --soxu-semantic-code-wash: rgba(0, 0, 0, 0.06);
+  --soxu-syntax-plain: #1f2328;
+  --soxu-syntax-keyword: #cf222e;
+  --soxu-syntax-function: #8250df;
+  --soxu-syntax-type: #953800;
+  --soxu-syntax-string: #0a3069;
+  --soxu-syntax-number: #0550ae;
+  --soxu-syntax-comment: #6e7781;
+  --soxu-syntax-operator: #cf222e;
+  --soxu-syntax-property: #116329;
+  --soxu-syntax-macro: #0969da;
+  --soxu-syntax-diff-add-bg: rgba(22, 163, 74, 0.12);
+  --soxu-syntax-diff-add-gutter: rgba(22, 163, 74, 0.24);
+  --soxu-syntax-diff-del-bg: rgba(220, 38, 38, 0.11);
+  --soxu-syntax-diff-del-gutter: rgba(220, 38, 38, 0.22);
+  --soxu-ansi-black: #24292f;
+  --soxu-ansi-red: #cf222e;
+  --soxu-ansi-green: #116329;
+  --soxu-ansi-yellow: #9a6700;
+  --soxu-ansi-blue: #0969da;
+  --soxu-ansi-magenta: #8250df;
+  --soxu-ansi-cyan: #0e7490;
+  --soxu-ansi-white: #57606a;
+  --soxu-ansi-bright-black: #6e7781;
+  --soxu-ansi-bright-red: #a40e26;
+  --soxu-ansi-bright-green: #1a7f37;
+  --soxu-ansi-bright-yellow: #7d4e00;
+  --soxu-ansi-bright-blue: #0550ae;
+  --soxu-ansi-bright-magenta: #6639ba;
+  --soxu-ansi-bright-cyan: #155e75;
+  --soxu-ansi-bright-white: #0d0d0d;
+
+  /* shadcn/ui Semantic Variable Bridge */
+  --background: var(--soxu-surface-canvas);
+  --foreground: var(--soxu-text-primary);
+  --card: var(--soxu-surface-card);
+  --card-foreground: var(--soxu-text-primary);
+  --popover: var(--soxu-surface-floating);
+  --popover-foreground: var(--soxu-text-primary);
+  --primary: var(--soxu-action-inverse);
+  --primary-foreground: var(--soxu-action-on-inverse);
+  --secondary: var(--soxu-surface-control);
+  --secondary-foreground: var(--soxu-text-primary);
+  --muted: var(--soxu-surface-card-muted);
+  --muted-foreground: var(--soxu-text-secondary);
+  --accent: var(--soxu-interaction-selected);
+  --accent-foreground: var(--soxu-text-primary);
+  --destructive: var(--soxu-semantic-danger);
+  --destructive-foreground: #ffffff;
+  --border: var(--soxu-border-subtle);
+  --input: var(--soxu-border-strong);
+  --ring: var(--soxu-border-focus-ring);
+  --radius: var(--soxu-radius-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --soxu-motion-press: 0ms;
+    --soxu-motion-hover: 0ms;
+    --soxu-motion-panel: 0ms;
+    --soxu-motion-sheet: 0ms;
+    --soxu-motion-enter: 0ms;
+    --soxu-motion-exit: 0ms;
+    --soxu-motion-theme: 0ms;
+    --soxu-motion-theme-icon: 0ms;
+  }
+}
