@@ -1,4 +1,4 @@
-//! 将只读 Codex 回合接入既有会话与事件流。
+//! 将本机只读回合接入既有会话与事件流。
 
 use super::{DaemonState, internal_err, lock_err, not_found_err};
 use chrono::Utc;
@@ -8,9 +8,9 @@ use soxu_drivers::{
 };
 use soxu_protocol::{
     ActionableError, ActiveTurnBehavior, DaemonEvent, ErrorCode, LostControlNotice,
-    PermissionLevel, QueuedMessageItem, RpcCommand, RpcRequest, RpcResponse, RpcResultData,
-    SessionSummary, SessionTarget, TurnLifecycleState, TurnMessageRole, TurnMessageSnapshot,
-    WorkspaceBucket, WorkspaceIsolation,
+    PermissionLevel, PermissionOptionMeta, PermissionTone, QueuedMessageItem, RpcCommand,
+    RpcRequest, RpcResponse, RpcResultData, SessionSummary, SessionTarget, TurnLifecycleState,
+    TurnMessageRole, TurnMessageSnapshot, WorkspaceBucket, WorkspaceIsolation,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -25,7 +25,55 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(300);
 pub(super) struct NativeTurns {
     quick_chat_root: PathBuf,
     codex: Result<NativeDriver, DriverError>,
+    pi: Result<NativeDriver, DriverError>,
     active: Mutex<ActiveTurns>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReadOnlyAgent {
+    Codex,
+    Pi,
+}
+
+impl ReadOnlyAgent {
+    fn for_session(session: &SessionSummary) -> Result<Self, ActionableError> {
+        if !session.archived && session.permission == PermissionLevel::ReadOnly {
+            match session.agent_id.as_str() {
+                "codex" => return Ok(Self::Codex),
+                "pi" => return Ok(Self::Pi),
+                _ => {}
+            }
+        }
+        Err(turn_error(
+            ErrorCode::DriverUnavailable,
+            "当前只接通未归档的 Codex 和 Pi 只读会话",
+            "请选择已配置的代理与只读权限，或新建只读快速对话",
+        ))
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Codex => "Codex",
+            Self::Pi => "Pi",
+        }
+    }
+
+    fn driver(self, runtime: &NativeTurns) -> Result<&NativeDriver, ActionableError> {
+        match self {
+            Self::Codex => &runtime.codex,
+            Self::Pi => &runtime.pi,
+        }
+        .as_ref()
+        .map_err(|error| self.driver_error(error))
+    }
+
+    fn driver_error(self, error: &DriverError) -> ActionableError {
+        let advice = match self {
+            Self::Codex => "请检查本机 Codex，或通过 SOXU_CODEX_EXE 指定原生可执行文件",
+            Self::Pi => "请通过 SOXU_PI_EXE 指定可信可执行文件，使用 Node 时同时设置 SOXU_PI_ENTRY",
+        };
+        turn_error(ErrorCode::DriverUnavailable, error.to_string(), advice)
+    }
 }
 
 type ActiveTurns = BTreeMap<String, ActiveTurn>;
@@ -43,10 +91,38 @@ impl DaemonState {
 
     /// 由守护进程宿主注入可信的 Codex 启动器和快速对话根目录。
     pub fn with_native_turns(
-        mut self,
+        self,
         quick_chat_root: PathBuf,
         codex: Result<NativeDriver, DriverError>,
     ) -> anyhow::Result<Self> {
+        self.with_native_drivers(quick_chat_root, codex, Err(DriverError::BinaryNotFound))
+    }
+
+    /// 由守护进程宿主注入可信的只读启动器和快速对话根目录。
+    pub fn with_native_drivers(
+        mut self,
+        quick_chat_root: PathBuf,
+        codex: Result<NativeDriver, DriverError>,
+        pi: Result<NativeDriver, DriverError>,
+    ) -> anyhow::Result<Self> {
+        if !self.require_auth_for_all {
+            let orchestrator = self
+                .orchestrator
+                .get_mut()
+                .map_err(|_| lock_err("orchestrator"))?;
+            let mut agents = orchestrator.agents().to_vec();
+            if let Some(agent) = agents.iter_mut().find(|agent| agent.agent_id == "pi") {
+                agent.permissions.push(PermissionOptionMeta {
+                    id: PermissionLevel::ReadOnly,
+                    label: "只读对话".to_owned(),
+                    description: "仅投递文本，禁用工具、扩展和 MCP".to_owned(),
+                    tone: PermissionTone::Neutral,
+                });
+                agent.supports_live_steer = false;
+                agent.installed = pi.is_ok();
+            }
+            orchestrator.set_agent_catalog(agents);
+        }
         for mut session in self.store.interrupted_native_sessions()? {
             session.lifecycle = TurnLifecycleState::Idle;
             session.bucket = WorkspaceBucket::Failed;
@@ -66,6 +142,7 @@ impl DaemonState {
         self.native_turns = Some(NativeTurns {
             quick_chat_root,
             codex,
+            pi,
             active: Mutex::new(BTreeMap::new()),
         });
         Ok(self)
@@ -119,7 +196,12 @@ impl DaemonState {
                     ));
                 }
                 validate_prompt(&text)?;
-                let session = self.native_session(&session_id)?;
+                let session = self
+                    .store
+                    .get_session(&session_id)
+                    .map_err(internal_err)?
+                    .ok_or_else(|| not_found_err("会话"))?;
+                let agent = ReadOnlyAgent::for_session(&session)?;
                 if let Some(running) = active.get(&session_id)
                     && (running.stopping || behavior == ActiveTurnBehavior::Interrupt)
                 {
@@ -160,8 +242,10 @@ impl DaemonState {
                                 field: "behavior".to_owned(),
                                 previous_value: "steer".to_owned(),
                                 fallback_value: "queue".to_owned(),
-                                reason_zh: "Codex 当前原生接口不支持中途纠偏，消息已排队"
-                                    .to_owned(),
+                                reason_zh: format!(
+                                    "Daemon 当前未为 {} 启用中途纠偏，消息已排队",
+                                    agent.name()
+                                ),
                             }],
                         });
                     }
@@ -205,25 +289,6 @@ impl DaemonState {
             }
             other => self.dispatch_command(other),
         }
-    }
-
-    fn native_session(&self, session_id: &str) -> Result<SessionSummary, ActionableError> {
-        let session = self
-            .store
-            .get_session(session_id)
-            .map_err(internal_err)?
-            .ok_or_else(|| not_found_err("会话"))?;
-        if session.archived
-            || session.agent_id != "codex"
-            || session.permission != PermissionLevel::ReadOnly
-        {
-            return Err(turn_error(
-                ErrorCode::DriverUnavailable,
-                "当前只接通未归档的 Codex 只读会话",
-                "请选择 Codex 与只读权限，或新建只读快速对话",
-            ));
-        }
-        Ok(session)
     }
 
     fn native_target(
@@ -292,7 +357,8 @@ impl DaemonState {
         mut session: SessionSummary,
         text: String,
     ) -> Result<(), ActionableError> {
-        let driver = runtime.codex.as_ref().map_err(driver_error)?;
+        let agent = ReadOnlyAgent::for_session(&session)?;
+        let driver = agent.driver(runtime)?;
         let target = self.native_target(runtime, &session.target)?;
         let mut request = RunRequest::new(target, text.clone());
         if let Some(id) = &session.native_session_id {
@@ -304,7 +370,7 @@ impl DaemonState {
             .map_err(internal_err)?;
         let turn = driver
             .start(request)
-            .map_err(|error| driver_error(&error))?;
+            .map_err(|error| agent.driver_error(&error))?;
 
         session.lifecycle = TurnLifecycleState::Running;
         session.bucket = WorkspaceBucket::Running;
@@ -314,7 +380,7 @@ impl DaemonState {
             &session,
             turn_index,
             TurnMessageRole::Assistant,
-            "Codex",
+            agent.name(),
             String::new(),
         );
         self.store
@@ -337,35 +403,39 @@ impl DaemonState {
             notices: vec![LostControlNotice {
                 field: "model".to_owned(),
                 previous_value: session.model_id,
-                fallback_value: "Codex 本机默认模型".to_owned(),
+                fallback_value: format!("{} 本机默认模型", agent.name()),
                 reason_zh: "本轮使用本机配置中的默认模型和思考设置".to_owned(),
             }],
         });
 
         let state = Arc::clone(self);
-        tokio::spawn(async move { state.drive_native(turn, assistant).await });
+        tokio::spawn(async move { state.drive_native(agent, turn, assistant).await });
         Ok(())
     }
 
     async fn drive_native(
         self: Arc<Self>,
+        agent: ReadOnlyAgent,
         mut turn: RunningTurn,
         mut assistant: TurnMessageSnapshot,
     ) {
         let result = tokio::time::timeout(TURN_TIMEOUT, async {
+            let mut pi_session = None;
             while let Some(event) = turn.next_event().await {
                 match event {
-                    DriverEvent::Session { id } if Uuid::parse_str(&id).is_ok() => {
-                        self.record_native_session_id(&assistant.session_id, id)
-                            .map_err(|_| "原生会话标识无法落盘")?;
-                    }
+                    DriverEvent::Session { id } if Uuid::parse_str(&id).is_ok() => match agent {
+                        ReadOnlyAgent::Codex => self
+                            .record_native_session_id(&assistant.session_id, id)
+                            .map_err(|_| "原生会话标识无法落盘".to_owned())?,
+                        ReadOnlyAgent::Pi => pi_session = Some(id),
+                    },
                     DriverEvent::Text(text_delta) => {
                         if assistant.text.len().saturating_add(text_delta.len()) > MAX_REPLY_BYTES {
-                            return Err("原生回复超过长度上限");
+                            return Err("原生回复超过长度上限".to_owned());
                         }
                         assistant.text.push_str(&text_delta);
                         if self.store.upsert_message(&assistant).is_err() {
-                            return Err("原生回复无法落盘");
+                            return Err("原生回复无法落盘".to_owned());
                         }
                         self.publish_native(DaemonEvent::TurnStreamDelta {
                             session_id: assistant.session_id.clone(),
@@ -374,16 +444,25 @@ impl DaemonState {
                             reasoning_delta: None,
                         });
                     }
-                    DriverEvent::Finished(Outcome::Succeeded) => return Ok(()),
+                    DriverEvent::Finished(Outcome::Succeeded) => {
+                        if agent == ReadOnlyAgent::Pi {
+                            let id = pi_session.ok_or("Pi 未返回有效原生会话标识")?;
+                            self.record_native_session_id(&assistant.session_id, id)
+                                .map_err(|_| "原生会话标识无法落盘".to_owned())?;
+                        }
+                        return Ok(());
+                    }
                     DriverEvent::Finished(Outcome::Cancelled) => return Ok(()),
-                    DriverEvent::Finished(_) => return Err("Codex 原生回合失败"),
+                    DriverEvent::Finished(_) => {
+                        return Err(format!("{} 原生回合失败", agent.name()));
+                    }
                     _ => {}
                 }
             }
-            Err("Codex 事件流提前结束")
+            Err(format!("{} 事件流提前结束", agent.name()))
         })
         .await
-        .unwrap_or(Err("Codex 原生回合超时"));
+        .unwrap_or_else(|_| Err(format!("{} 原生回合超时", agent.name())));
 
         if result.is_err() {
             turn.control().cancel();
@@ -426,7 +505,7 @@ impl DaemonState {
         Ok(())
     }
 
-    fn finish_native(self: &Arc<Self>, session_id: &str, result: Result<(), &'static str>) {
+    fn finish_native(self: &Arc<Self>, session_id: &str, result: Result<(), String>) {
         let Some(runtime) = &self.native_turns else {
             return;
         };
@@ -467,7 +546,7 @@ impl DaemonState {
                 turn_error(
                     ErrorCode::DriverUnavailable,
                     summary,
-                    "请检查本机 Codex 登录与只读模式后重试",
+                    "请检查当前代理的本机登录与只读模式后重试",
                 ),
             );
             return;
@@ -561,14 +640,6 @@ fn submitted(session_id: String, queued_id: Option<String>) -> RpcResultData {
         lifecycle: TurnLifecycleState::Running,
         queued_id,
     }
-}
-
-fn driver_error(error: &DriverError) -> ActionableError {
-    turn_error(
-        ErrorCode::DriverUnavailable,
-        error.to_string(),
-        "请检查本机 Codex，或通过 SOXU_CODEX_EXE 指定原生可执行文件",
-    )
 }
 
 fn invalid_directory() -> ActionableError {
