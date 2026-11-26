@@ -24,7 +24,7 @@
 | **M0.5** | Pure Black Design System & Dual Prototypes | ✅ 已完成 | 纯黑 7 级海拔 `tokens.json` + `shadcn/ui` 变量、MASTER + 7 份分页面规范、React 19 + `shadcn/ui` + Tailwind v4 双端原型与 7 分区独立设置、单文件桌面预览 `preview.html`、移动遥控 PWA 原型（PR `#4`） |
 | **M1** | Protocol v1, Domain Core & Daemon Spine | ✅ 已完成 | `soxu-protocol` 全量 RPC/WS `seq` 契约、`soxu-core` 状态桶/能力协商/安全红线/队列草稿、`soxu-daemon` SQLite WAL 持久化 + WS 增量追平 + `#offer=`/6 位码鉴权、`soxu-cli` 闭环（`#5` / `#6` / `#7`） |
 | **M2** | Magpie Discovery & 7 Native CLI Drivers | M2h、M2j 已完成，M2i 延期 | 已接通六种原生只读 CLI，Pi 原生 `Queue` / `Steer` / `Stop` 已验证。Antigravity 路由保持关闭，七代理全验收仍待完成。 |
-| **M3** | Git Worktree Pool, Checkpoints & Commit Engine | M3a–M3d 已合入，M3e（#49）在办 | 仓库身份与结构化状态只读探测、本地项目身份、Worktree 只读注册清单和四基准只读 Diff 已合入。`#49` 实现显式新分支受控注册与只读诊断。显式 Init/Clone、安全检出、Worktree 池、`direct` MCP 挂载、诊断恢复、Checkpoint Diff、安全回退与提交执行待交付。 |
+| **M3** | Git Worktree Pool, Checkpoints & Commit Engine | M3a–M3d 与 M3e 注册已合入，安全检出在审 | 仓库身份与结构化状态只读探测、本地项目身份、Worktree 只读注册清单和四基准只读 Diff 已合入。`#49` / PR `#53` 已合入，实现显式新分支受控注册与只读诊断。`#51` 交付固定 OID 的受控检出与失败禁用。显式 Init/Clone、Worktree 池、`direct` MCP 挂载、诊断恢复、Checkpoint Diff、安全回退与提交执行待交付。 |
 | **M4** | Live Mobile PWA & GPUI Workbench Foundation | ⏳ 待启动 | **双轨 100% 正交并行**：`apps/mobile-web` 去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对与 13 组视口验收；`soxu-desktop` GPUI 令牌编译器、双开源字体联动、可扩展 `i18n`、7 层焦点栈与四栏自适应壳层 |
 | **M5** | GPUI Core Views: Transcript, Composer & Inspector | ⏳ 待启动 | `soxu-desktop` 三路并行落地：`<=8.3Hz` 虚拟对话流 + 5 类工具卡/审批卡/提问卡 + 20px 轮次导航轨、760px 同步宽输入舱 + `@agent` 移交 + 三色圆环统计、右栏 Diff/Files、7 分区设置与核心业务模态框 |
 | **M6** | Scripts, PTY Terminal, Search & Automation | ⏳ 待启动 | `paseo.json` 受管脚本遥控、`#050505` 多窗格受控 PTY 终端、`Cmd+K` 五分区检索 + CodeGraph 符号补全 + 按需三步 Onboarding、Schedules & Heartbeats 定时调度中心、50,000 行 Diff 压测与跨平台打包 |
@@ -43,7 +43,7 @@
    - **M3b（`#39` / PR `#41`，已合入 `7cea1c4`）**：只读项目身份已交付。
    - **M3c（`#42` / PR `#45`，已合入 `4c5d706`）**：提供 Worktree 只读注册清单，保留原始路径、locked/prunable 原因及 `Unavailable` HEAD 状态。
    - **M3d（`#46` / PR `#50`，已合入 `0d0b4d9`）**：交付 `soxu-git` 内四基准只读 Diff、精确已跟踪路径授权、有界元数据及单文件审阅。
-   - **M3e（`#49`，设计见 `#47` / PR `#48`）**：实现显式新分支注册与只读诊断，阶段终态为「已注册，待检出」。安全检出（`#51`）依赖本项合入，当前不实施检出、宿主接入、Agent 启动或 direct MCP 挂载；后续第三阶段核验就绪后由宿主登记、开放 Agent 并挂载 `direct` MCP。详见 [Worktree 生命周期设计](../dev/git-worktree-lifecycle.md)。
+   - **M3e（`#49` → `#51` → `#52`，设计见 `#47` / PR `#48`）**：`#49` / PR `#53` 已合入，终态为「已注册，待检出」。`#51` 在同一协调域核验固定提交，受控检出并保留失败禁用记录，待主控复审。第三阶段 `#52` 核验就绪后由宿主登记、开放 Agent 并挂载 `direct` MCP。详见 [Worktree 生命周期设计](../dev/git-worktree-lifecycle.md)。
    - **后续依赖**：受控创建和诊断恢复承接 Worktree 清单及身份模型。Checkpoint 基准 Diff 依赖快照模型，回退必须先留可恢复快照，提交执行必须经过结构化预检。公共契约单独排期，先冻结再接入跨模块实现。
    - **合流联动**：新建 Worktree 时联动 `soxu-magpie` 自动补齐 `direct` MCP（AOCI / CodeGraph）工作区上下文。
 4. **M4 — 移动遥控 PWA 真机闭环 + GPUI 桌面底座（双轨 100% 正交并行）**：
@@ -74,7 +74,7 @@
 
 | Issue | 工作区 / Agent | 写入范围与合入顺序 |
 | :--- | :--- | :--- |
-| [#49](https://github.com/TanCan1998/Soxu/issues/49) M3e Worktree 受控注册与只读诊断 | `feat/49-worktree-registration` | `soxu-git/src/worktree_lifecycle.rs`、专项测试、crate README、本看板及 AOCI。执行代理验证并交主控复审；复审通过后建 PR，主控合流。 |
+| [#51](https://github.com/TanCan1998/Soxu/issues/51) M3e 已注册 Worktree 的安全检出 | `feat/51-worktree-checkout` | `soxu-git` 检出接口与测试、crate README、本看板及 AOCI。Windows 保留目录身份拒绝，Linux 负责受控发布。交主控复审与合流。 |
 
 Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0f5e2e5`（`main`）。执行代理完成各自验证、推送和建 PR，主控负责审查、合入与归档。
 

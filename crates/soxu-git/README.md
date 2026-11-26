@@ -1,6 +1,6 @@
-# soxu-git：本地项目身份与 Git 只读探测
+# soxu-git：本地项目身份、Git 探测与受控 Worktree
 
-M3e 提供显式 Worktree 新分支注册与只读诊断。M3d 提供已跟踪文件的四种只读 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
+M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控检出。M3d 提供已跟踪文件的四种只读 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
 
 ## 消费接口
 
@@ -40,6 +40,14 @@ M3e 提供显式 Worktree 新分支注册与只读诊断。M3d 提供已跟踪�
 - 本轮 Windows 在 Rust/Cargo 1.99.1、Node 26.13.1、pnpm 12.21.0 的 `mise exec` 环境执行专项与七项门禁，缓存隔离为 `target/soxu-49-pi`。生命周期集成仅运行 Windows fail-closed 用例；执行器另用原生测试二进制实测成功、spawn 失败、退出码、输出超限和超时回收，不证明 Windows 目录授权、合法创建或 DACL 可用。Unix 注册、崩溃和重放用例本轮未执行：本机 WSL 启动报 `ERROR_BAD_EXE_FORMAT`，须由可用 Unix 环境补验。
 - 参考固定 HEAD：paseo `7bcd598f` 的 `validateWorktreePath` 与创建后注册回读、codeg `028d30ed` 的 `check_name` 和占用拒绝、padu `fbe97a38` 的 `create_in` 专用根及平铺目标。Soxu 保留严格新目标、固定 OID、失败留痕与待检出语义，不采用自动清理或宽松已有路径。参考 AOCI 仅执行 `aoci status` 与读取参考索引文件 + 源码核实，未做参考仓完整认知校验；CodeGraph 精确 `node --path` 查询用于导航，paseo 图仍有已知漂移/解析缺口。
 - 注册入口先检查请求 ID、目标目录名和分支引用的格式。Windows 在打开协调能力时即拒绝，且不会创建锁、意图或目标。Unix 专项可运行 `cargo test --locked -p soxu-git --test worktree_lifecycle`，其中独立测试进程覆盖同仓跨父目录串行、跨仓目标冲突、注册所有者终止后的持久预约及只读重放。宿主接入须在启用前验证部署所用文件系统与统一域边界。
+
+## Worktree 受控检出
+
+- `GitProbe::checkout_registered_worktree(&coordinator, &registration).await` 在原协调域中重读 #49 的注册意图。仅接受目标目录只含原 Git 标记、目标分支与 HEAD 仍指向固定完整 OID、管理目录尚无 index 的登记。分支需保留可直接核验的 loose ref。
+- 进程只读取有限的本地对象副本与受控配置。在私有暂存目录运行 `read-tree <OID>` 与 `checkout-index --all`，校验 index 树条目。拒绝 gitlink、符号链接、路径别名、过滤器、外部属性来源、稀疏检出、工作树专属配置、外部或缺失对象。仅支持受控的内建文本和换行属性。
+- 采用目录句柄约束发布路径。index 和各工作文件以独占创建方式发布，随后核对工作文件、index、目录身份及 HEAD。单次检出的持久记录先于写入，失败、取消或失联后保留阶段、原因及可能的文件残留，原请求拒绝再次检出。暂存留痕由受信任宿主管理。
+- `GitProbe::checkout_status(&coordinator, request_id)` 可读取 `Pending`、`Disabled` 或 `Verified`。`Verified` 对应本次检出完毕时的复核，宿主登记、当前工作区接入、Agent 启动和 `direct` MCP 仍由第三阶段负责。
+- 当前文件发布使用 Linux 的目录句柄与 `/proc/self/fd`。Windows 保留 #49 的 `UnsupportedFilesystem`；预检、Git 子进程约束及持久状态在 Windows 通过独立夹具验证。缺少稳定目录身份、句柄路径或同卷 index 发布能力时拒绝执行。
 
 ## 已跟踪文件只读 Diff
 

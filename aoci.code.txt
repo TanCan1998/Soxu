@@ -99,16 +99,17 @@ process.rs[IW8L]: F:用Tokio启动可信原生CLI，转发有界JSONL与Pi控制
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/===
 Cargo.toml[FV5T]: F:声明 soxu-git crate 的包元数据、lint 规则和依赖 | R:code:Cargo.toml | A:soxu-git | S:版本、Rust edition、最低 Rust 版本、许可证、lint 规则和全部依赖均继承自工作区
-README.md[SD7T]: F:说明项目身份、注册清单、四基准Diff及受控Worktree注册和只读诊断的调用约束与验证边界 | R:code:crates/soxu-git/src/worktree_lifecycle.rs,code:crates/soxu-git/src/diff.rs,code:docs/dev/git-worktree-lifecycle.md | A:register_new_worktree,diagnose_registration,readonly_diff,list_worktrees | S:Windows目录身份入口拒绝；原生执行器实测不证明合法创建。Unix专项本轮受WSL启动故障阻断；参考索引仅状态与源码核实，非完整认知校验。
+README.md[SD7T]: F:说明 Git 项目身份、Worktree 清单、受控注册和检出、四基准 Diff 的消费接口与边界 | R:code:crates/soxu-git/src/worktree_checkout.rs,code:crates/soxu-git/src/worktree_lifecycle.rs,code:docs/dev/git-worktree-lifecycle.md | A:register_new_worktree,checkout_registered_worktree,checkout_status,readonly_diff | S:检出采用隔离暂存与独占发布，Windows 保留目录身份拒绝，宿主接入后续处理
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/===
-lib.rs[LD6T]: F:重导出Git项目身份、状态、清单、Diff与受控注册诊断类型，并保留轮次检查点摘要 | R:code:crates/soxu-git/src/worktree_lifecycle.rs,code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/diff.rs | A:GitProbe,WorktreeRegistrationCoordinator,WorktreeRegistrationRequest,RegistrationOutcome,CheckpointSummary | S:CheckpointSummary四字段及serde契约不变；生命周期新增导出不修改既有身份、清单和Diff签名。
+lib.rs[LD6T]: F:重导出 Git 项目身份、清单、Diff、受控注册和检出契约并保留轮次检查点摘要 | R:code:crates/soxu-git/src/worktree_lifecycle.rs,code:crates/soxu-git/src/worktree_checkout.rs | A:GitProbe,VerifiedRegistration,CheckoutError,CheckoutStage,CheckoutStatus,CheckpointSummary | S:检出结果无 Agent 接入语义
 probe.rs[ID8M]: F:经可信原生Git异步探测工作树身份、HEAD与状态，并为项目、清单与Diff共享受限进程构造和输出收集 | R:code:crates/soxu-git/src/diff.rs,code:crates/soxu-git/src/status.rs,code:crates/soxu-git/src/project.rs,code:crates/soxu-git/src/probe/tests.rs | A:GitProbe::new,probe,command,run_command,run_bounded,GitError | S:清继承GIT环境、屏蔽系统全局配置并禁用可选锁、fsmonitor与按需fetch。状态先拒clean/process和gitlink。普通命令15秒、每流16MiB；Diff可使用更小剩余预算。超限和超时杀死并等待直接子进程。
 status.rs[KD8M]: F:纯字节解析porcelain v2 NUL记录，结构化保留XY、子模块、模式OID、重命名评分与原始路径 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/status.rs | A:parse_status,GitPath,StatusSnapshot,StatusEntry,ParseError | S:重命名下一NUL段为源路径；OID含零占位与头部须同为40或64位。仅未跟踪和忽略路径允许单个尾斜线，原字节保留；跟踪路径及内部空分量拒绝。Windows转换拒绝非UTF8及风险名；serde路径为字节数组
 project.rs[ID8S]: F:只读打开规范化绝对目录，区分普通目录和Git工作树，返回工作树根及独立与共享Git目录 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/project.rs | A:GitProbe::open_local_project,LocalProject,WorktreeIdentity,ProjectOpenError | S:仅退出128且空stdout及精确非仓库stderr可降级普通目录；检查被Git跳过的祖先元数据防损坏误判。bare和元数据目录拒绝，linked保留独立根及Git目录；不扫描status、不执行初始化克隆或写入
 worktrees.rs[ID8M]: F:复用GitProbe运行原生Worktree只读清单并全批解析NUL属性为注册路径、HEAD状态与锁定及可清理原因 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/worktrees.rs | A:GitProbe::list_worktrees,parse_worktrees,WorktreeInventory,WorktreeHead,WorktreePath,WorktreeAnnotation | S:复用run_command配置隔离及15秒每流16MiB边界；首条Main其余Linked。路径及原因保留字节，不裁剪解引号，不额外访问注册路径。未知字段、重复截断、非法ref路径及混合OID宽度整批拒绝；零OID无branch为Unavailable不推断健康。Unix路径无损，Windows拒绝非UTF8及归一化风险；无创建删除repair/prune
 diff.rs[ID8L]: F:以固定Git端点比较精确授权的已跟踪路径，返回有界变更元数据及可选单文件审阅 | R:code:crates/soxu-git/src/diff/repository.rs,code:crates/soxu-git/src/diff/format.rs,code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/tests/diff.rs | A:GitProbe::readonly_diff,DiffBaseline,DiffRequest,DiffOutput,DiffResult,DiffObservation | S:空授权短路；unborn暂存允许空基准，净变化拒绝缺HEAD。路径最多128项且合计8KiB；请求45秒及双流累计64MiB。先按字节授权再发literal路径；二进制不返回patch，复核布局、路径状态与端点，结果为非原子观察。
-worktree_lifecycle.rs[IR8L]: F:以宿主统一协调域和持久请求预约执行固定OID新分支Worktree注册，回读分级结果并提供只读诊断 | R:code:crates/soxu-git/src/worktree_lifecycle/state.rs,code:crates/soxu-git/src/worktree_lifecycle/identity.rs,code:crates/soxu-git/src/worktree_lifecycle/execution.rs,code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/worktrees.rs | A:WorktreeRegistrationCoordinator,register_new_worktree,diagnose_registration,diagnose_registration_with_target,RegistrationOutcome | S:宿主须统一私有协调域并停用旧写者；请求不能选域。Started先落盘再spawn，取消不取消持锁执行者；未知结果保留预约不重发。SOXUWT3绑定七类目录身份，旧版缺身份留痕待复核。成功仅待检出；默认诊断不触目标。
+worktree_lifecycle.rs[IR8L]: F:在宿主统一协调域持久预约固定 OID 新分支 Worktree 注册、回读复核并提供只读诊断与检出授权衔接 | R:code:crates/soxu-git/src/worktree_lifecycle/state.rs,code:crates/soxu-git/src/worktree_lifecycle/identity.rs,code:crates/soxu-git/src/worktree_lifecycle/execution.rs,code:crates/soxu-git/src/worktree_checkout.rs | A:GitProbe::register_new_worktree,GitProbe::diagnose_registration,VerifiedRegistration,WorktreeRegistrationCoordinator | S:注册成功保留待检出状态；检出时重读同域持久意图并对照源、目标和管理目录身份，公开结构体不能单独授权写入
+worktree_checkout.rs[AS8S]: F:在统一协调域重读已核验的注册意图并协调固定 OID 的一次性检出与诊断 | R:code:crates/soxu-git/src/worktree_lifecycle.rs,code:crates/soxu-git/src/worktree_checkout/journal.rs,code:crates/soxu-git/src/worktree_checkout/publication.rs | A:GitProbe::checkout_registered_worktree,GitProbe::checkout_status,CheckoutStage,CheckoutStatus | S:写入前持久保留禁用状态，调用取消由有锁的执行所有者处理；Verified 只证明本次检出复核，缺少平台能力时显式拒绝
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-magpie/===
 Cargo.toml[FV5T]: F:声明soxu-magpie包及其工作区依赖 | R:code:Cargo.toml | A:soxu-magpie | S:包版本、Rust版本、edition、许可证和lint规则均继承自工作区
@@ -141,7 +142,7 @@ git-worktree-lifecycle.md[SR7T]: F:审定受控Worktree新分支注册与只读�
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录Soxu架构与工程决策，新增主控只编排审查、AGY延期及Pi/Git正交并行的ADR-007 | R:code:AGENTS.md,code:docs/ops/PROGRESS.md,code:design-system/soxu/MASTER.md | A:ADR-001..007,Owned Paths,Queue/Steer/Stop | S:#26开放但路由关闭，延期不等于M2七代理验收；PiDeck仅参考原生Pi，不引入ACP。Issue#34的PR#35先合流，再串行合入Issue#32/#33业务PR；后续分支吸收main并保留前序AOCI认知，执行代理不得合并或回收。
-PROGRESS.md[SW6S]: F:记录里程碑、pi唯一路由、在办工作区与验证事实及后续验收队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:crates/soxu-git/README.md,code:docs/dev/git-worktree-lifecycle.md | A:M0..M6,#49,#51,主力 Agent 与模型路由池 | S:#49吸收#52并通过Windows隔离门禁；Windows合法注册仍关闭，Unix实测受WSL故障阻断。#51等待#49；执行代理只提PR不合并回收，#26继续延期关闭路由。
+PROGRESS.md[SW6S]: F:记录 Soxu 各里程碑、在途工作区、交付状态与待执行队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:docs/dev/git-worktree-lifecycle.md | A:- | S:M3e 注册已合入，安全检出进入复审，宿主接入留待第三阶段
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
@@ -227,4 +228,12 @@ repository.rs[IS8L]: F:核验Diff工作树布局与Git配置来源，按基准�
 execution.rs[IR7M]: F:有界运行原生Git子进程，区分启动失败、正常退出、输出超限和超时，并报告直接子进程是否已停止 | R:code:crates/soxu-git/src/worktree_lifecycle.rs | A:run | S:终止前释放两条输出管道；直接子进程回收窗口至少两秒，无法确认停止时保留Unknown。跨平台原生测试夹具显式关闭stdin，Windows目录身份授权另行验证。
 identity.rs[IS8S]: F:验证绝对目录链与规范路径身份，提供原生目录指纹编码、刷新及拒绝链接的状态文件打开 | R:code:crates/soxu-git/src/worktree_lifecycle.rs,code:crates/soxu-git/src/worktree_lifecycle/state.rs | A:DirectoryIdentity,AuthorizedDirectory,checked_directory,open_regular_file | S:Windows稳定标准库后端始终UnsupportedFilesystem，不开放创建。Unix绑定设备、inode和原生创建时间，缺创建时间或根权限过宽即拒绝；路径复验不替代宿主持有持续受控授权。
 state.rs[PR8M]: F:在授权私有协调域取得跨进程文件锁，限量读取意图并以同步临时文件和重命名持久化阶段记录 | R:code:crates/soxu-git/src/worktree_lifecycle/identity.rs,code:crates/soxu-git/src/worktree_lifecycle.rs | A:StateLock,acquire_state_lock,write_intent,rewrite_intent,read_intents_directory | S:锁跨Git执行与回读持有；Unix协调根禁组和其他用户权限。tmp/next用create_new保留失败足迹，禁止自动清理重试；Unix同步父目录，Windows不因此获得断电持久性证明。
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/worktree_checkout/===
+journal.rs[PR8M]: F:持久记录检出进入阶段、失败原因与完整复核，读取记录诊断受影响范围 | R:code:crates/soxu-git/src/worktree_checkout.rs | A:Journal,read | S:以独占创建阻止同一请求重放；阶段单调，内容截断、损坏或只写入执行阶段均保持禁用
+publication.rs[RS9L]: F:在 Linux 以固定目录句柄发布预检后的 index 与文件，并复核工作树、HEAD 和磁盘内容 | R:code:crates/soxu-git/src/worktree_checkout/sandbox.rs,code:crates/soxu-git/src/worktree_checkout/journal.rs,code:crates/soxu-git/src/worktree_lifecycle.rs | A:checkout,PinnedDirectory | S:Git 经父进程目录句柄访问私有暂存；正式发布拒绝链接、边界变化和目标覆盖。index 使用硬链接独占发布，失败保留阶段及落盘证据
+sandbox.rs[IS9L]: F:用隔离配置和有界本地对象副本核验固定提交，再以原生 Git 暂存 index 和工作文件 | R:code:crates/soxu-git/src/probe.rs,code:crates/soxu-git/src/worktree_checkout/publication.rs | A:Sandbox,Tree | S:仅接受普通文件与约束内的内建属性，排除过滤器、外部对象、稀疏和工作树配置；执行 read-tree 和无 force 的 checkout-index，关闭钩子、协议与递归，停止前释放管道
+
+===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/worktree_checkout/sandbox/===
+tests.rs[TQ7M]: F:用同进程托管的普通 Git 夹具验证暂存检出、预检拒绝及子进程取消和超时 | R:code:crates/soxu-git/src/worktree_checkout/sandbox.rs | A:Fixture | S:原生测试二进制充当长运行子进程，同时覆盖 Windows，使用关闭的 stdin 以确保可回收
 
