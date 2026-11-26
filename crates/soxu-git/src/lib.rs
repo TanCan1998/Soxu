@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+mod checkpoint;
 mod diff;
 mod probe;
 mod project;
@@ -10,6 +11,11 @@ mod worktree_checkout;
 mod worktree_lifecycle;
 mod worktrees;
 
+pub use checkpoint::{
+    CheckpointError, CheckpointLifecycle, CheckpointObservation, CheckpointOptions,
+    CheckpointPolicy, CheckpointRecord, CheckpointScope, CheckpointStage, CoverageManifest,
+    CoveredPath, Omission, OmissionReason,
+};
 pub use diff::{
     DiffBaseline, DiffChange, DiffError, DiffFileMode, DiffKind, DiffObservation, DiffOutput,
     DiffRequest, DiffResult, DiffReview,
