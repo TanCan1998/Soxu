@@ -141,16 +141,14 @@ fn is_link(metadata: &Metadata) -> bool {
 }
 
 fn matches_directory(open: &Metadata, named: &Metadata) -> bool {
-    if !is_plain_directory(open) || !is_plain_directory(named) {
-        return false;
-    }
+    let plain = is_plain_directory(open) && is_plain_directory(named);
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        open.dev() == named.dev() && open.ino() == named.ino()
+        plain && open.dev() == named.dev() && open.ino() == named.ino()
     }
     #[cfg(not(unix))]
-    true // Windows 的目录句柄排除了重命名及删除。
+    plain // Windows 的目录句柄排除了重命名及删除。
 }
 
 fn open_directory(path: &Path) -> io::Result<File> {
