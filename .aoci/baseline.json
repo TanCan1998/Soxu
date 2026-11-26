@@ -1,13 +1,13 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T17:33:15Z",
+  "updated_at": "2026-11-26T18:03:34Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
-      "sha256": "000952023a5b46ba4725914a17494d4d2388e2cb83c37030e4f435ae485e8bf4",
-      "size": 18978,
-      "normalized_sha256": "000952023a5b46ba4725914a17494d4d2388e2cb83c37030e4f435ae485e8bf4"
+      "sha256": "e551b033dc6e7f1cd92754847cea4df3e66870024c7b974b685eac172dbfaada",
+      "size": 19939,
+      "normalized_sha256": "e551b033dc6e7f1cd92754847cea4df3e66870024c7b974b685eac172dbfaada"
     },
     ".editorconfig": {
       "role": "index",
@@ -69,6 +69,12 @@
       "size": 1169,
       "normalized_sha256": "d88f5abac57448c4499ff640a765cb5fe56139fbe151170684dab7cb51d26514"
     },
+    ".pi/settings.json": {
+      "role": "index",
+      "sha256": "84fa04c452797480ea5087fbaa81fababb7ea86cf8b8070d9ebce4cc635e22d4",
+      "size": 115,
+      "normalized_sha256": "84fa04c452797480ea5087fbaa81fababb7ea86cf8b8070d9ebce4cc635e22d4"
+    },
     "AGENTS.md": {
       "role": "index",
       "sha256": "d4e61d55c627ae6b3e304a45f0bcb631e184f839120c21c954e6852da09f1cdf",
@@ -101,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "2a23e81a4ddb7cd385b3fc03398b7630a16d4c1c46ac21703c8dfc3a95b3c2b6",
-      "size": 77066,
-      "normalized_sha256": "2a23e81a4ddb7cd385b3fc03398b7630a16d4c1c46ac21703c8dfc3a95b3c2b6"
+      "sha256": "94e2f8a5fe89df170c52266b303d3c55ba6fce8ec32013c8a4b8f0a87cef5fda",
+      "size": 77655,
+      "normalized_sha256": "94e2f8a5fe89df170c52266b303d3c55ba6fce8ec32013c8a4b8f0a87cef5fda"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1037,15 +1043,15 @@
     },
     "docs/ops/DECISIONS.md": {
       "role": "index",
-      "sha256": "78de338e3eb604c9d1286b20c672957011eebdd6cf39d6dfc5ca95cf48b0d4a1",
-      "size": 9098,
-      "normalized_sha256": "78de338e3eb604c9d1286b20c672957011eebdd6cf39d6dfc5ca95cf48b0d4a1"
+      "sha256": "dc247f0a3389c09aa737aba9213c03ce2dd026701c08ae602bc2c10d0226698b",
+      "size": 10529,
+      "normalized_sha256": "dc247f0a3389c09aa737aba9213c03ce2dd026701c08ae602bc2c10d0226698b"
     },
     "docs/ops/LESSONS.md": {
       "role": "index",
-      "sha256": "a2385aa9a4ac4a1a560fe3aa965b7e76817415f3026b0408ca88f58c12419ffe",
-      "size": 10966,
-      "normalized_sha256": "a2385aa9a4ac4a1a560fe3aa965b7e76817415f3026b0408ca88f58c12419ffe"
+      "sha256": "023de82083fedec58aa89b87c2b5a0c1cd7fc28fe77431060a5229a3b7322db2",
+      "size": 12074,
+      "normalized_sha256": "023de82083fedec58aa89b87c2b5a0c1cd7fc28fe77431060a5229a3b7322db2"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",

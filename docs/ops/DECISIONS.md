@@ -53,3 +53,11 @@
   1. 主仓 CI（`.github/workflows/ci.yml` + `scripts/detect-check-scope.ps1`）实行按路径域与 Cargo 反向依赖闭包的精确分级检查，同时对齐 Magpie 抗压规则：`main` 永不因新推送取消在途 run、全 Job 显式 `timeout-minutes`、`CARGO_INCREMENTAL=0`、设置汇总门禁 `ci-gate` 兼容 skipped job；
   2. 新建公开联动发版仓库 `TanCan1998/soxu-releases` 与主仓 `.github/workflows/release.yml`：主仓以只读 Deploy Key（配于联动仓 `SOXU_DEPLOY_KEY`）配合限流退避 `repository_dispatch` 触发联动仓执行多平台 release 编译、实机 `--version`/`--help` 冒烟验证、`SHA256SUMS` + SLSA 构建溯源及包管理器清单自动更新，随后主仓镜像产物并用双重 `sort -V` 保护最高语义版本 `Latest` 标记；
   3. 新增 `docs/ops/CODE_STANDARDS.md` 并在 `docs/ops/LESSONS.md` 引入 `Seen N×` 复现自动晋升规则与 `--match-head-commit` 锁 SHA 合入纪律。
+
+## ADR-010：Soxu 项目级关闭 `context-mode` 并采用语义索引 + 作用域节流治理上下文
+- **状态**：已采纳（2026-11-27，治理 Issue `#78`）
+- **背景**：实测全局 `npm:context-mode@2.2.1` 会对超过 16 KB 且未传分段的 `read` 直接拒读、将 >4 KB 输出截断入本地 FTS5 索引，并在 `before_agent_start` 拼接动态状态破坏 Prompt Cache 命中率；在中大型 Rust/TypeScript 跨模块改造中易诱发残缺上下文与返工死循环。同时，若本机 Pi `trust.json` 未将主仓与 worktrees 父目录加入信任列表，非交互派发会跳过项目级 `.pi/settings.json` 与 `aoci` MCP。
+- **决策**：
+  1. 在仓库根目录配置 `.pi/settings.json`，在项目作用域内将 `npm:context-mode` 的 `extensions` 与 `skills` 置空，保障长链路编码时完整 `read` 源码与 API Prompt Cache 稳定性；不修改全局面向外部重 I/O 场景的通用设置。
+  2. 以 **AOCI 认知索引 + CodeGraph 符号关系图 + Git 版本化 `docs/ops/` 事实文档**替代 FTS5 压缩记忆；命令输出侧通过 `scripts/detect-check-scope.ps1` 精准收敛范围与日志摘要替代黑盒过滤；重型编译日志排障与外部网页调研交由独立探索会话完成。
+  3. 本机使用前须确保 Pi `trust.json` 覆盖主仓与对应的 Paseo worktrees 祖先目录，以激活项目级 `.pi/settings.json` 与自动 AOCI MCP 挂载。
