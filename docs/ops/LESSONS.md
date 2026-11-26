@@ -30,6 +30,7 @@
 | `L-009` | `.ps1` 测试退出码 | PowerShell 测试脚本调完负向外部子进程后末尾必写 `exit 0`，防 CI `shell: pwsh` 继承非零 `$LASTEXITCODE` | `L3 · Seen 1×` | `test-*.ps1` / 本文 |
 | `L-010` | PR 关联与防竞态合入 | PR 正文裸写 `Closes #<num>` 不套反引号；合入强制带 `--match-head-commit <reviewed_sha>` | `L3 · Seen 1×` | `CODE_STANDARDS.md` / `SKILL.md` / 本文 |
 | `L-011` | `.ps1` UTF-8 防乱码 | 中文 Windows 无终端宿主默认 CP936；读写 `git` 输出的门禁脚本开头必设 `Console/OutputEncoding = UTF8` | `L3 · Seen 1×` | `check-all.ps1` / `verify-commits-and-privacy.ps1` |
+| `L-012` | Pi 上下文与缓存 | 编码仓项目级 `.pi/settings.json` 禁用 `context-mode`，并确保 `trust.json` 覆盖 worktrees 祖先目录 | `L3 · Seen 1×` | `.pi/settings.json` / `SKILL.md` / `ADR-010` |
 
 ---
 
@@ -90,10 +91,15 @@
 - **预防动作**：在读取外部工具 UTF-8 输出的 `.ps1` 门禁脚本开头显式设置 `[Console]::OutputEncoding = [Text.Encoding]::UTF8` 与 `$OutputEncoding = [Text.Encoding]::UTF8`，并加 `git -c i18n.logOutputEncoding=utf-8 -c core.quotepath=false`。
 - **验证方式**：在 CP936 Python `subprocess` 宿主中直接运行 `scripts/check-all.ps1` 与 `verify-commits-and-privacy.ps1` 零乱码通过；**状态**：活跃。
 
+### `L-012` Pi 项目级隔离 `context-mode` 与 Worktree 祖先信任兜底
+- **场景与根因**（`Seen 1× (2026-11-27)`）：`npm:context-mode@2.2.1` 对超过 16 KB 未分段 `read` 直接拒读、>4 KB 结果截断入 FTS5，且在 `before_agent_start` 拼接输出损伤 Prompt Cache；同时默认 `ask` 信任模式下若 worktrees 父目录未列入全局 `trust.json`，非交互启动会跳过 `.pi/settings.json` 与 `aoci` MCP。
+- **预防动作**：在仓内 `.pi/settings.json` 清空 `npm:context-mode` 的扩展与技能，改由 AOCI + CodeGraph + 作用域门禁与独立探索会话协作；同步确认本机 Pi `trust.json` 已信任仓库与 worktrees 祖先目录。
+- **验证方式**：AOCI `verify`/`check` 对齐、新工作树 `setup-worktree.ps1` 就绪且 Pi 启动不触发 `ctx_*` 拒读循环；**状态**：活跃（已同步写入 `ADR-010`）。
+
 ---
 
 ## 四、已自动化防呆归档区
 
 > 当「活跃规则速查表」中的经验已被仓库脚本或自动化测试完全机器防呆且连续两个波次零复发后，将其迁入本区归档，以保持主控日常上下文精干。
 
-- *暂无已迁出归档项（当前 `L-001` ~ `L-010` 处于活跃巡检期）。*
+- *暂无已迁出归档项（当前 `L-001` ~ `L-012` 处于活跃巡检期）。*

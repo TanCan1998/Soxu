@@ -148,9 +148,9 @@ git-checkpoint-rewind-commit.md[SR7M]: F:审定轮次快照、Checkpoint Diff、
 git-init-clone-and-recovery.md[SR7S]: F:审定显式仓库 Init、Clone 与 Worktree 损坏恢复的本机授权契约、证据与后续验收 | R:code:docs/dev/git-worktree-lifecycle.md,code:docs/dev/git-readonly-diff.md,code:crates/soxu-git/src/project.rs,code:crates/soxu-git/src/worktrees.rs,code:crates/soxu-git/src/worktree_lifecycle.rs,code:crates/soxu-git/src/worktree_checkout.rs | A:显式 Init/Clone,只读恢复预览,Worktree 二次授权,专项验收矩阵 | S:Clone 首版目标须缺失，Init 仅独立授权可接纳验证的纯空目录。注册阶段、检出状态与清单注解分别判断。Prune 授权须覆盖仓库级完整候选集。失败保留足迹并禁用接入，身份或候选漂移须重新预览和确认。
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
-DECISIONS.md[SW7T]: F:记录Soxu架构与工程决策，含GPUI/Daemon底座、自优化闭环(ADR-008)及联动发版与分级抗压CI(ADR-009) | R:code:AGENTS.md,code:docs/ops/PROGRESS.md,code:docs/ops/LESSONS.md,code:docs/ops/CODE_STANDARDS.md,code:.agents/skills/paseo-orchestrator/SKILL.md | A:ADR-001..009,soxu-releases,Self-Evolving Orchestration | S:#26路线关闭；串行合入保留AOCI；ADR-008禁削红线与改托管区块；ADR-009以只读DeployKey隔离soxu-releases并双重保护Latest
+DECISIONS.md[SW7T]: F:记录Soxu架构与工程决策，含自优化(ADR-008)、联动发版与分级CI(ADR-009)及Pi上下文隔离(ADR-010) | R:code:AGENTS.md,code:.pi/settings.json,code:docs/ops/PROGRESS.md,code:docs/ops/LESSONS.md,code:docs/ops/CODE_STANDARDS.md,code:.agents/skills/paseo-orchestrator/SKILL.md | A:ADR-001..010,soxu-releases,Self-Evolving Orchestration | S:#26路线关闭；串行合入保留AOCI；ADR-008禁削红线与改托管区块；ADR-009以只读DeployKey隔离soxu-releases；ADR-010在.pi/settings.json禁用context-mode
 PROGRESS.md[SW7S]: F:记录里程碑、已合入交付及验证边界、M3并行波次和后续队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:docs/dev/git-worktree-lifecycle.md,code:docs/dev/git-init-clone-and-recovery.md,code:docs/dev/git-checkpoint-rewind-commit.md | A:wave-m3-next-20261126,Next Actions | S:波次按#63→#64→#65合入并分支维护AOCI；区分宿主接入已合入与Linux实测、Agent启动和Worktree会话联调待交付；隔离只读快聊仍关闭项目目录入口
-LESSONS.md[SW8T]: F:维护主控工程经验库、Seen复现计数晋升机制及L-001..L-011活跃避坑速查表 | R:code:AGENTS.md,code:.agents/skills/paseo-orchestrator/SKILL.md,code:docs/ops/DECISIONS.md,code:docs/ops/CODE_STANDARDS.md | A:活跃规则速查表,L-001..L-011,Seen复现计数 | S:活跃表<=25条，Seen>=3x跨日期复现自主晋升CODE_STANDARDS；.ps1设UTF8编码并显式exit 0防CI/CP936乱码误判；PR裸写Closes并锁SHA合入
+LESSONS.md[SW8T]: F:维护主控工程经验库、Seen复现计数晋升机制及L-001..L-012活跃避坑速查表 | R:code:AGENTS.md,code:.pi/settings.json,code:.agents/skills/paseo-orchestrator/SKILL.md,code:docs/ops/DECISIONS.md,code:docs/ops/CODE_STANDARDS.md | A:活跃规则速查表,L-001..L-012,Seen复现计数 | S:活跃表<=25条，Seen>=3x跨日期复现自主晋升CODE_STANDARDS；.ps1设UTF8编码并显式exit 0；PR裸写Closes并锁SHA合入；项目级禁用context-mode并保trust.json覆盖worktrees
 CODE_STANDARDS.md[SQ8T]: F:确立Soxu对标Magpie的变更边界、双平台测试隔离纪律、锁SHA合入与联动发版验收硬标准 | R:code:AGENTS.md,code:docs/ops/LESSONS.md,code:.github/workflows/ci.yml,code:.github/workflows/release.yml | A:Fail Closed,Tests & Verification,Review Merge & Release | S:修复必附回退即FAIL测试，禁触网与宿主配置，main红灯即当前P0禁绕过；合入必带--match-head-commit；Tag须联动仓全资产且Latest落定才算发版
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
@@ -223,7 +223,7 @@ agent-capabilities.ts[DB7M]: F:定义七大原生代理能力矩阵（支持模�
 i18n.ts[CL7L]: F:可扩展前端国际化注册表与 React 上下文，覆盖 zh-CN/zh-TW/en-US 工作台、纯图标权限投递快捷键说明、移交模型思考与统计词条 | R:- | A:registerLocalePack,listLocalePacks,translate,I18nProvider,useI18n,LocalePack | S:保持 .ts 纯代码用 createElement 避开 JSX 编译限制；严禁字面量 Emoji 与统计中点分隔，缺词条自动回退 zh-CN
 
 ===F:/workplace/Paseo/work/Soxu/.agents/skills/paseo-orchestrator/===
-SKILL.md[SW8M]: F:指导跨端Paseo的pi派发、参考索引复用、送达核验、阻塞裁决、联动发版收口及Seen经验晋升闭环 | R:code:AGENTS.md,code:docs/ops/LESSONS.md,code:docs/ops/CODE_STANDARDS.md,code:scripts/paseo-ctl.ps1,code:scripts/paseo-run-pi.ps1,code:scripts/paseo-dispatch.ps1 | A:paseo-orchestrator,派发任务并核验全文送达,阻塞协同闭环,Retro & Self-Evolution | S:合入须带--match-head-commit且正文裸写Closes；并行禁mise run；WSL前置真toolchain绕shims；AOCI stdio先发id=1 initialize；Seen>=3次晋升进CODE_STANDARDS
+SKILL.md[SW8M]: F:指导跨端Paseo的pi派发、索引复用、送达核验、阻塞裁决、联动发版收口、Seen经验晋升及Pi上下文治理 | R:code:AGENTS.md,code:.pi/settings.json,code:docs/ops/LESSONS.md,code:docs/ops/CODE_STANDARDS.md,code:scripts/paseo-ctl.ps1,code:scripts/paseo-run-pi.ps1,code:scripts/paseo-dispatch.ps1 | A:paseo-orchestrator,派发任务并核验全文送达,阻塞协同闭环,Retro & Self-Evolution,Pi 上下文治理与缓存稳定性规约 | S:合入带--match-head-commit且裸写Closes；并行禁mise run；项目级禁context-mode并由AOCI与作用域节流替代，重I/O放独立探索会话
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-daemon/src/state/===
 native.rs[AW8L]: F:调度回环七类只读原生回合、Pi 纠偏、续接、Stop 和 FIFO，持久化消息与确认，启动前复核可信资产 | R:code:crates/soxu-daemon/src/store.rs,code:crates/soxu-drivers/src/process.rs,code:crates/soxu-daemon/src/antigravity.rs,code:crates/soxu-daemon/src/native_assets.rs,code:crates/soxu-protocol/src/rpc.rs | A:with_native_driver_set,with_native_asset_guard,handle_transport_rpc,SubmitTurn,StopTurn | S:AGY 仅本机未归档只读 QuickChat，要求私有守卫并持有资产到回合结束。资产拒绝保留队首，Stop 暂停 FIFO。Pi active 时同轮仅一条待确认，退出或超时标未知。Codex 即时存原生 ID，其余成功后存。
@@ -257,4 +257,7 @@ record.rs[PR8M]: F:创建应用独占操作目录和工作树锁，原子持久�
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/checkpoint/record/===
 encoding.rs[PD6M]: F:编解码版本化 Checkpoint Intent 与发布记录，保存观察摘要、覆盖数据和原始路径字节 | R:code:crates/soxu-git/src/checkpoint.rs,code:crates/soxu-git/src/checkpoint/record.rs | A:encode,decode | S:遗漏原因按固定顺序编码，加入新原因须延续既有编号；解码校验记录集合上限、长度、ID、路径、OID 及尾部。
+
+===F:/workplace/Paseo/work/Soxu/.pi/===
+settings.json[FC5T]: F:配置项目级Pi会话设置以覆盖全局扩展并禁用npm:context-mode插件 | R:code:docs/ops/DECISIONS.md,code:docs/ops/LESSONS.md,code:.agents/skills/paseo-orchestrator/SKILL.md | A:packages,npm:context-mode | S:清空npm:context-mode扩展与技能防止大文件拒读及Prompt Cache抖动；须全局trust.json信任仓库与worktree根目录后生效
 

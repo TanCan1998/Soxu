@@ -202,3 +202,12 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 script stop check-all --workspace <w
 ### 4. 自主演化安全护栏
 - 所有自优化修改一律经由独立 Worktree 与 PR 落地，跑通 `scripts/check-all.ps1` 与 AOCI 校验后合入；
 - 严禁以“优化效率”为由削弱 `AGENTS.md` 第一章安全红线（如禁止跳过 `--no-verify` 校验、禁止静默改写本机全局配置、禁止修改 `AGENTS.md` 内 `<!-- aoci:begin -->`~`<!-- aoci:end -->` 托管区块）。
+
+---
+
+## 六、Pi 上下文治理与缓存稳定性规约
+
+1. **项目级关闭 `context-mode`**：仓库根目录 `.pi/settings.json` 已清空 `npm:context-mode` 的扩展与技能，保障长链路重构时的完整 `read` 上下文与稳定的 Prompt Cache 前缀；
+2. **语义定位优先于词法检索**：跨文件符号与依赖定位优先使用 AOCI（`.aoci/`）与 CodeGraph；架构约束与进度以仓库 `AGENTS.md`、`docs/ops/CODE_STANDARDS.md`、`LESSONS.md`、`DECISIONS.md`、`PROGRESS.md` 为单一事实源；
+3. **作用域节流与日志摘要**：优先运行 `scripts/detect-check-scope.ps1` 缩小检查域；面对超长构建/测试输出时先定向检索或仅保留错误段落与尾部汇总，避免无关原始日志撑爆上下文；
+4. **重 I/O 调研与编码解耦**：海量全仓日志分析或外部网页资料抓取放独立探索会话处理，主 Worktree 编码代理聚焦最小充分修改与验收验证。
