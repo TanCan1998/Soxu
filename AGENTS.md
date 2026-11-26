@@ -81,9 +81,10 @@
    - `🔧 chore`: 构建脚本、依赖升级、`.gitignore` 维护
    - `👷 ci`: GitHub Actions 与 Git Hooks 调整
    - `🔒️ security`: 安全加固与防隐私泄露规则
-2. **提交与提 PR 前必跑门禁**：
+2. **提交与提 PR 前必跑门禁**（默认按修改范围增量检查并自动展开 Rust 反向依赖闭包；需强制全仓验收时追加 `-Full`）：
    ```powershell
    pwsh -NoProfile -File scripts/check-all.ps1
+   # 强制全仓验收：pwsh -NoProfile -File scripts/check-all.ps1 -Full
    ```
 
 ---
