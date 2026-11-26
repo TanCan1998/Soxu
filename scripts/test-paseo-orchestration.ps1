@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ("soxu-paseo-test-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $fixture | Out-Null
 $referenceScript = Join-Path $PSScriptRoot 'paseo-reference-context.ps1'
@@ -88,3 +88,4 @@ foreach ($mode in @('truncated','missing','wrong-agent','error')) {
   Assert-Result ($LASTEXITCODE -ne 0) "拒绝 $mode 送达证据"
 }
 Write-Host "$passed 项回归通过；临时夹具保留于 $fixture"
+exit 0

@@ -48,13 +48,17 @@
    - 任何时候引入新工具、新缓存目录、新构建产物、测试快照临时目录或本地索引文件时，**必须在同一个提交/PR 中同步更新根 `.gitignore`**，保证提交前后 `git status` 干净无脏文件。
 4. **Paseo 任务书、环境绑定与 Pi 唯一派发规范**：
    - **唯一派发引擎**：后续所有 Paseo 编码、审查与文档子代理派发**仅使用 `pi` agent**（`--provider pi` 配合经 `pi --list-models` 核实的 `magpie/...` 模型与思考强度）；**禁止**新派发或续派 `codex`、`claude`、`antigravity` 等其他驱动。
-   - **强制环境绑定**：派发前须对目标 Worktree 完成 `scripts/setup-worktree.ps1`（或 `mise trust`）；派发启动统一使用 `scripts/paseo-run-pi.ps1`（或等效 `--env` 参数）将项目 `mise.toml` 锁定的环境变量与工具链前置 `PATH`（含 `MISE_DISABLE_TOOLS=python,java,maven`、`PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false`、`RUSTUP_TOOLCHAIN=1.99.1`、`CARGO_TARGET_DIR`）注入子代理进程。任务书必须单列「规定环境」，要求使用锁定的 Rust/Node/pnpm 工具链，在开工回执上报 doctor 实测版本，禁止修改用户全局 `mise` 配置。
+   - **强制环境绑定**：派发前须对目标 Worktree 完成 `scripts/setup-worktree.ps1`（或 `mise trust`）；派发启动统一使用 `scripts/paseo-run-pi.ps1`（或等效 `--env` 参数）将项目 `mise.toml` 锁定的环境变量与工具链前置 `PATH`（含 `MISE_DISABLE_TOOLS=java,maven`、`PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false`、`PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8`、`RUSTUP_TOOLCHAIN=1.99.1`、`CARGO_TARGET_DIR`）注入子代理进程。任务书必须单列「规定环境」，要求使用锁定的 Rust/Node/pnpm 与放行的 `python` 工具链，在开工回执上报 doctor 实测版本，禁止修改用户全局 `mise` 配置。
    - **隔离构建目录与 `mise env` 注入规范**：并行任务不得使用共享 target。先将 `mise env --json` 的锁定环境注入当前进程，再显式覆写 `$env:CARGO_TARGET_DIR` 为各自独立目录，随后直接运行 `pwsh -NoProfile -File scripts/mise-doctor.ps1`、`cargo` 或 `pwsh -NoProfile -File scripts/check-all.ps1`。并行场景严禁以 `mise run ...` 执行门禁或 doctor，子任务启动时会重读 `mise.toml` 并覆盖进程内的独立构建目录。
    - **子代理遇阻即时上报与主控协同机制（Fail-Fast Escalation）**：遇环境、工具链或文件锁冲突，AOCI / CodeGraph 异常或截断，Owned Paths 或契约冲突、冻结代码缺陷，设计歧义或平台原语缺失，或同一问题连续排查两轮未果时，立即停手，按编排技能的 `[BLOCKED / NEED-DECISION]` 模板上报并暂停，等待主控以 `send --behavior steer` 裁决。禁止重复盲试、越权试改或留到交稿才报告。主控派发后持续巡检，即时响应阻塞，重大决策报请用户。
    - 主控派发时，首条可见消息须指出 Issue、参考项目名称、复用参考项目既有 AOCI 与 CodeGraph、规定使用的 `mise` 环境，并要求等待完整任务书与开工确认。任务书须写明 `Owned Paths`、规定环境与构建缓存路径、可读的参考路径及源码定位、应借鉴的做法和适用边界、每个参考仓库的既有索引身份与实际可用的查询入口及回退、验收和交付要求。参考认知绑定参考仓库根；目标工作树的 Soxu 认知和收尾维护另列，不能替代参考认知。
    - 子代理直接复用参考仓库的 `aoci.txt` / 已声明 Volumes 与 `.codegraph`，不得复制到目标工作树或为本次派发自动初始化、扫描、重建、同步或维护参考索引。参考 MCP 根不匹配时使用显式绑定参考根的 CLI / stdio MCP；缺失、过期或不可访问时报告，并按任务书回退到源码调查，不把回退称作索引校验成功。
    - 多行任务书通过 UTF-8 文件投递。主控须把目标 Paseo 代理日志里的 `user_message.text` 与任务书全文核对一致，记录代理 ID 和消息 ID 后才确认开工。缺失或截断时向同一代理补发并复核。命令、模板和验证步骤见 [Paseo 编排技能](.agents/skills/paseo-orchestrator/SKILL.md#3-派发任务并核验全文送达)。
    - 执行代理须把适用的参考做法落实到实现或回归测试，在 PR 中写明参考来源、实际采用点和验证证据，并说明不适用的做法或工具回退原因。
+5. **自主经验收集与流程自优化闭环（Continuous Self-Improvement）**：
+   - **自动触发采集**：主控每次完成 `[BLOCKED / NEED-DECISION]` 阻塞裁决、捕获跨平台（Windows / Linux）或远端 CI 真实缺陷、发现同一工程环节连续排查 >= 2 轮仍存在可复现工具/脚本摩擦，或在每波（Wave）串行合入收口做微复盘时，必须自动提炼可复现避坑经验，严格脱敏后登记至 [`docs/ops/LESSONS.md`](docs/ops/LESSONS.md)。
+   - **分级沉淀与自主晋升**：偶发一次性现象仅留在 PR 摘要，不膨胀主规范；对高危阻断、跨平台陷阱或同类命中 >= 2 次的规则，主控应自主发起治理更新，将其晋升固化进派发任务书默认条款、[Paseo 编排技能](.agents/skills/paseo-orchestrator/SKILL.md)、`AGENTS.md` 工程规范或后续防呆脚本/测试 PR（均须走独立 Worktree、`scripts/check-all.ps1` 与 AOCI 收尾闭环）。
+   - **演化安全红线**：任何自主流程优化均不得削弱第一章安全红线、不得篡改本机用户全局配置、也不得改写本文件下方 `<!-- aoci:begin -->` 至 `<!-- aoci:end -->` 的 AOCI 托管区块；`docs/ops/LESSONS.md` 活跃速查表上限 25 条，已被脚本或测试机器防呆的条目应定期移入归档区。
 
 ---
 
@@ -77,9 +81,10 @@
    - `🔧 chore`: 构建脚本、依赖升级、`.gitignore` 维护
    - `👷 ci`: GitHub Actions 与 Git Hooks 调整
    - `🔒️ security`: 安全加固与防隐私泄露规则
-2. **提交与提 PR 前必跑门禁**：
+2. **提交与提 PR 前必跑门禁**（默认按修改范围增量检查并自动展开 Rust 反向依赖闭包；需强制全仓验收时追加 `-Full`）：
    ```powershell
    pwsh -NoProfile -File scripts/check-all.ps1
+   # 强制全仓验收：pwsh -NoProfile -File scripts/check-all.ps1 -Full
    ```
 
 ---
@@ -90,12 +95,12 @@
 
 1. **新对话接手标准启动顺序（30 秒恢复）**：
    1. 阅读本文件 `AGENTS.md` 及共享编排技能 [`.agents/skills/paseo-orchestrator/SKILL.md`](.agents/skills/paseo-orchestrator/SKILL.md)；
-   2. 阅读 [`docs/ops/PROGRESS.md`](docs/ops/PROGRESS.md) 与 [`docs/ops/DECISIONS.md`](docs/ops/DECISIONS.md)；
+   2. 阅读 [`docs/ops/PROGRESS.md`](docs/ops/PROGRESS.md)、[`docs/ops/DECISIONS.md`](docs/ops/DECISIONS.md) 与 [`docs/ops/CODE_STANDARDS.md`](docs/ops/CODE_STANDARDS.md)，并快速扫读 [`docs/ops/LESSONS.md`](docs/ops/LESSONS.md) 的「活跃规则速查表」；
    3. 执行只读状态盘点：`git status -sb`、`gh issue list --limit 20 --json number,title,milestone,assignees`、`gh pr list --json number,title,headRefName` 以及统一 Paseo 状态盘点（`pwsh -NoProfile -File scripts/paseo-ctl.ps1 project ls --json`、`pwsh -NoProfile -File scripts/paseo-ctl.ps1 workspace ls --json`、`pwsh -NoProfile -File scripts/paseo-ctl.ps1 ls --json`）。
 2. **离开/收口写入义务**：
-   - 每完成一个 Issue、合入一个 PR 或切换里程碑时，主控或负责合入的 Agent 必须同步更新 `docs/ops/PROGRESS.md` 中的「当前阶段」、「进行中工作区/PR」与「下一步待执行队列」。
+   - 每完成一个 Issue、合入一个 PR 或切换里程碑时，主控或负责合入的 Agent 必须同步更新 `docs/ops/PROGRESS.md` 中的「当前阶段」、「进行中工作区/PR」与「下一步待执行队列」；若本波捕获到可复用闭环经验或规则晋升，同步在收口/微复盘时更新 `docs/ops/LESSONS.md`。
 3. **AGY 桌面端与 Codex 桌面端双主控切换与隔离约定**：
-   - **共享层**：双方共用仓库内 `AGENTS.md`、`docs/ops/PROGRESS.md`、`docs/ops/DECISIONS.md`、`aoci.txt` + `.aoci/` 认知索引、`.agents/skills/` 共享技能、Cargo 共享缓存（`../.cargo-target/soxu`）及本机 Paseo 守护进程下的项目与 Worktree 池（统一通过 `pwsh -NoProfile -File scripts/paseo-ctl.ps1` 自动探测并唤醒控制）。
+   - **共享层**：双方共用仓库内 `AGENTS.md`、`docs/ops/PROGRESS.md`、`docs/ops/DECISIONS.md`、`docs/ops/CODE_STANDARDS.md`、`docs/ops/LESSONS.md`、`aoci.txt` + `.aoci/` 认知索引、`.agents/skills/` 共享技能、Cargo 共享缓存（`../.cargo-target/soxu`）及本机 Paseo 守护进程下的项目与 Worktree 池（统一通过 `pwsh -NoProfile -File scripts/paseo-ctl.ps1` 自动探测并唤醒控制）。
    - **隔离层**：双方宿主元数据与全局配置完全隔离（AGY 使用 `~/.gemini/config/projects/`，Codex 使用 `~/.codex/state_5.sqlite` 及受 `.gitignore` 保护的 `.codex/config.toml`），互不篡改；仓库主检出目录仅作为**主控编排与审查台（Control Plane）**，严禁双端同时在主检出并发修改业务代码，功能开发一律通过 Paseo `--isolation worktree` 下沉至独立分支并遵守 Issue `Owned Paths`。
 
 <!-- aoci:begin -->

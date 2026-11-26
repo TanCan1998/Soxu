@@ -1,0 +1,10 @@
+{
+  "packages": [
+    {
+      "source": "npm:context-mode",
+      "autoload": false,
+      "extensions": ["!**"],
+      "skills": ["!**"]
+    }
+  ]
+}

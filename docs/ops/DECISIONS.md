@@ -39,3 +39,25 @@
   - `#34` 仅维护 `docs/ops/PROGRESS.md`、本决策日志及自身分支 AOCI 托管资产，记录实时 GitHub/Paseo 身份、并行白名单和收口顺序，不写业务代码或根依赖。三线身份与精确 Owned Paths 见 [`PROGRESS.md`](PROGRESS.md#31-当前-pi--git-并行波次2026-11-25-北京时间盘点)。
 - **延期不等于验收**：`#26` 保持开放，保留已有驱动、防护和探针，Antigravity Daemon 路由继续关闭。恢复该线时必须另行闭合真实入口、配置来源、校验到启动竞态、运行期保护及取消边界；不得把七种流式格式或六类已接线 CLI 写成 M2 七代理全验收，也不得把 M3a 派发或只读底座写成 M3 全完成。
 - **收口顺序与证据**：治理 Issue `#34` 对应的 PR `#35` 先合流，再按 Issue `#32` → Issue `#33` 的业务 PR 串行审查合入，业务开发本身可并行。每个执行代理须提供 Owned Paths 审计、完整 `scripts/check-all.ps1`、AOCI 对齐及剩余风险；模拟夹具和真实原生 CLI 证据分别报告。后一个 PR 由其执行代理吸收最新 `main`，处理测试及 AOCI 冲突后复跑门禁，不得用整卷覆盖丢弃前一 PR 的认知。公共契约若必须调整，先派独立契约 PR 合入，再继续受影响分支。主控在每次合入收口时安排更新看板；本决策不授权执行代理合并或回收。
+
+## ADR-008：主控自主经验收集与流程自优化闭环（Self-Evolving Orchestration）
+- **状态**：已采纳（2026-11-27，治理 Issue `#74`）
+- **背景**：多波次多 Worktree 并行研发与双平台真机验证持续暴露跨工具链、环境隔离、AOCI 协议及缓存容量等高频陷阱；仅靠人工回顾容易重复踩坑，且单靠上下文总结无法跨 AGY/Codex 会话无损传承。
+- **决策**：建立三层随仓库 Git 版本化的自优化闭环：在 `AGENTS.md`（第三章第 5 条、第五章）确立制度与安全红线；在 `.agents/skills/paseo-orchestrator/SKILL.md`（第五章）定义 4 类自动捕获时机、L1/L2/L3 分级晋升漏斗、派发前 10 秒预检与容量剪枝机制；在 `docs/ops/LESSONS.md` 维护脱敏工程经验台账与 <= 25 条活跃速查表。
+- **约束与边界**：任何流程自主晋升均不得削弱 `AGENTS.md` 第一章安全红线，不得改写 `AGENTS.md` 中 `<!-- aoci:begin -->`~`<!-- aoci:end -->` 托管区块，不得修改本机用户全局配置，也不得将真实用户名路径或凭据写入版本化文件；已被脚本或自动化测试完全机器防呆的条目须及时归档剪枝。
+
+## ADR-009：双仓解耦联动发版（soxu-releases）与分级抗压 CI 架构
+- **状态**：已采纳（2026-11-27，治理 Issue `#76` / 对标 `yetone/magpie`）
+- **背景**：私有主仓无法直接向公网分发公开包管理器（Scoop / Homebrew / Winget）与下载直链，且单仓 CI 此前缺乏修改域分级、`main` 并发保护与超时护栏。
+- **决策**：
+  1. 主仓 CI（`.github/workflows/ci.yml` + `scripts/detect-check-scope.ps1`）实行按路径域与 Cargo 反向依赖闭包的精确分级检查，同时对齐 Magpie 抗压规则：`main` 永不因新推送取消在途 run、全 Job 显式 `timeout-minutes`、`CARGO_INCREMENTAL=0`、设置汇总门禁 `ci-gate` 兼容 skipped job；
+  2. 新建公开联动发版仓库 `TanCan1998/soxu-releases` 与主仓 `.github/workflows/release.yml`：主仓以只读 Deploy Key（配于联动仓 `SOXU_DEPLOY_KEY`）配合限流退避 `repository_dispatch` 触发联动仓执行多平台 release 编译、实机 `--version`/`--help` 冒烟验证、`SHA256SUMS` + SLSA 构建溯源及包管理器清单自动更新，随后主仓镜像产物并用双重 `sort -V` 保护最高语义版本 `Latest` 标记；
+  3. 新增 `docs/ops/CODE_STANDARDS.md` 并在 `docs/ops/LESSONS.md` 引入 `Seen N×` 复现自动晋升规则与 `--match-head-commit` 锁 SHA 合入纪律。
+
+## ADR-010：Soxu 项目级关闭 `context-mode` 并采用语义索引 + 作用域节流治理上下文
+- **状态**：已采纳（2026-11-27，治理 Issue `#78`）
+- **背景**：实测全局 `npm:context-mode@2.2.1` 会对超过 16 KB 且未传分段的 `read` 直接拒读、将 >4 KB 输出截断入本地 FTS5 索引，并在 `before_agent_start` 拼接动态状态破坏 Prompt Cache 命中率；在中大型 Rust/TypeScript 跨模块改造中易诱发残缺上下文与返工死循环。同时，若本机 Pi `trust.json` 未将主仓与 worktrees 父目录加入信任列表，非交互派发会跳过项目级 `.pi/settings.json` 与 `aoci` MCP。
+- **决策**：
+  1. 在仓库根目录配置 `.pi/settings.json`，在项目作用域内将 `npm:context-mode` 的 `extensions` 与 `skills` 置空，保障长链路编码时完整 `read` 源码与 API Prompt Cache 稳定性；不修改全局面向外部重 I/O 场景的通用设置。
+  2. 以 **AOCI 认知索引 + CodeGraph 符号关系图 + Git 版本化 `docs/ops/` 事实文档**替代 FTS5 压缩记忆；命令输出侧通过 `scripts/detect-check-scope.ps1` 精准收敛范围与日志摘要替代黑盒过滤；重型编译日志排障与外部网页调研交由独立探索会话完成。
+  3. 本机使用前须确保 Pi `trust.json` 覆盖主仓与对应的 Paseo worktrees 祖先目录，以激活项目级 `.pi/settings.json` 与自动 AOCI MCP 挂载。

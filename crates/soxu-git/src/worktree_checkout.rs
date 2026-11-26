@@ -4,6 +4,7 @@ use std::io;
 
 use serde::{Deserialize, Serialize};
 
+use crate::worktree_lifecycle::identity::AuthorizedDirectory;
 #[cfg(target_os = "linux")]
 use crate::worktree_lifecycle::state;
 use crate::worktree_lifecycle::validate_request_id;
@@ -68,6 +69,23 @@ pub enum CheckoutError {
         original: Box<Self>,
         record: io::Error,
     },
+}
+
+/// 判定该请求是否已经完成受控检出并通过复核。
+///
+/// 只有持久记录为 `CheckoutStatus::Verified` 才返回 `Ok(true)`；
+/// `Pending`（未执行或已中断）与 `Disabled`（失败或已禁止接入）都返回 `Ok(false)`，
+/// 调用方必须继续按未检出处理。读取前后的目录身份都会重新核验，
+/// 其余校验或 IO 错误一律向上传播，不做降级。
+pub(crate) fn is_checkout_verified(
+    state_root: &AuthorizedDirectory,
+    request_id: &str,
+) -> Result<bool, WorktreeLifecycleError> {
+    validate_request_id(request_id)?;
+    state_root.refresh()?;
+    let status = journal::read(state_root.path(), request_id)?;
+    state_root.refresh()?;
+    Ok(status == CheckoutStatus::Verified)
 }
 
 impl GitProbe {

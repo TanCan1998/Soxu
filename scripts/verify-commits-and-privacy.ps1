@@ -5,6 +5,8 @@
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 # 允许的 Git Emoji + Conventional Commits 正则（兼容 Unicode FE0F 变体选择符）
 $CommitPattern = '^(?:🎉|✨|🐛|♻\uFE0F?|⚡\uFE0F?|💄|🎨|📝|✅|🔧|👷|🔒\uFE0F?) (?:init|feat|fix|refactor|perf|ui|style|docs|test|chore|ci|security)(?:\([a-z0-9_/-]+\))?!?: .{4,72}$'
@@ -102,7 +104,7 @@ switch ($Mode) {
     if (-not [string]::IsNullOrWhiteSpace($env:PR_TITLE)) {
       Test-CommitSubject -Subject $env:PR_TITLE.Trim() -ContextLabel "PR Title"
     }
-    $commits = git log -n 20 --pretty=format:"%s" 2>$null
+    $commits = git -c i18n.logOutputEncoding=utf-8 -c core.quotepath=false log -n 20 --pretty=format:"%s" 2>$null
     foreach ($subject in $commits) {
       if (-not [string]::IsNullOrWhiteSpace($subject)) {
         Test-CommitSubject -Subject $subject.Trim() -ContextLabel "Git History"

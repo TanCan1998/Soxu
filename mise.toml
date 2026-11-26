@@ -1,6 +1,6 @@
 [settings]
-# 锁定本仓库实际工具链并屏蔽宿主全局配置中的无关工具（如 python/java/maven），避免全局缺失工具阻断 mise exec 与 shim
-disable_tools = ["python", "java", "maven"]
+# 锁定本仓库实际工具链并仅隔离无关全局工具（java/maven），保留 mise 托管 python 供子代理处理复杂脚本与 JSON 解析
+disable_tools = ["java", "maven"]
 idiomatic_version_file_enable_tools = ["node", "rust"]
 
 [tools]

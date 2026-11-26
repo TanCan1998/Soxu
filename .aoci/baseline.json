@@ -1,13 +1,13 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T14:47:24Z",
+  "updated_at": "2026-11-26T18:40:33Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
-      "sha256": "b58f7a02947eb2d0ae6fb2e4054ef325a193a4865fe498cc06d319a4d2d1d733",
-      "size": 14422,
-      "normalized_sha256": "b58f7a02947eb2d0ae6fb2e4054ef325a193a4865fe498cc06d319a4d2d1d733"
+      "sha256": "5d7d7570a3e00d9d56cb0efec0a3d1d56ead784b878ea177f6286ec2acec2444",
+      "size": 19996,
+      "normalized_sha256": "5d7d7570a3e00d9d56cb0efec0a3d1d56ead784b878ea177f6286ec2acec2444"
     },
     ".editorconfig": {
       "role": "index",
@@ -47,15 +47,21 @@
     },
     ".github/workflows/ci.yml": {
       "role": "index",
-      "sha256": "4eef2248a52275c936590475acaa3068541a897fc58b27ce822d1f488829a655",
-      "size": 2355,
-      "normalized_sha256": "4eef2248a52275c936590475acaa3068541a897fc58b27ce822d1f488829a655"
+      "sha256": "d870bd31a4b4a2e16918bee58e694df8fcfd77de09990c56283db04c77a33761",
+      "size": 7642,
+      "normalized_sha256": "d870bd31a4b4a2e16918bee58e694df8fcfd77de09990c56283db04c77a33761"
+    },
+    ".github/workflows/release.yml": {
+      "role": "index",
+      "sha256": "6f3a3e06fc1a1ee0e9f84361c2301b168f5f55280651bd59fb99ecd1e64ea01b",
+      "size": 8365,
+      "normalized_sha256": "6f3a3e06fc1a1ee0e9f84361c2301b168f5f55280651bd59fb99ecd1e64ea01b"
     },
     ".gitignore": {
       "role": "index",
-      "sha256": "c4f1d37b4457c6553c2f681da6dff6631473025c8bf2039f3e082157491d16a1",
-      "size": 1168,
-      "normalized_sha256": "c4f1d37b4457c6553c2f681da6dff6631473025c8bf2039f3e082157491d16a1"
+      "sha256": "7ba5d2fc6e1bdffa42bb32c406b5b71eef8a14d5eb6025be5f570f6d29edccf3",
+      "size": 1271,
+      "normalized_sha256": "7ba5d2fc6e1bdffa42bb32c406b5b71eef8a14d5eb6025be5f570f6d29edccf3"
     },
     ".gitleaks.toml": {
       "role": "index",
@@ -63,11 +69,17 @@
       "size": 1169,
       "normalized_sha256": "d88f5abac57448c4499ff640a765cb5fe56139fbe151170684dab7cb51d26514"
     },
+    ".pi/settings.json": {
+      "role": "index",
+      "sha256": "c0ca9698f8fa5d18b95a5fdd6076cf340c26c3bad2cef36523686986b525e41a",
+      "size": 150,
+      "normalized_sha256": "c0ca9698f8fa5d18b95a5fdd6076cf340c26c3bad2cef36523686986b525e41a"
+    },
     "AGENTS.md": {
       "role": "index",
-      "sha256": "397eae9c4543fac2cbb83e4e249fdf1a98758d550a7da127a2489d3b9318ba56",
-      "size": 25256,
-      "normalized_sha256": "397eae9c4543fac2cbb83e4e249fdf1a98758d550a7da127a2489d3b9318ba56"
+      "sha256": "0a1fdbd5e3eb41e2ef088722fc60ea73edbb2db3fb78cad10f799762d2c71c36",
+      "size": 27155,
+      "normalized_sha256": "0a1fdbd5e3eb41e2ef088722fc60ea73edbb2db3fb78cad10f799762d2c71c36"
     },
     "CLAUDE.md": {
       "role": "index",
@@ -95,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "a18be18ddee34ae92ef28d2b6d2b50bdcc8c080588b33bc72153490e30b4800a",
-      "size": 75033,
-      "normalized_sha256": "a18be18ddee34ae92ef28d2b6d2b50bdcc8c080588b33bc72153490e30b4800a"
+      "sha256": "dd93025e83c3abf862d30f9d5b49e67ec16ff9d55289c789dbef43794d37f83d",
+      "size": 78851,
+      "normalized_sha256": "dd93025e83c3abf862d30f9d5b49e67ec16ff9d55289c789dbef43794d37f83d"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -677,9 +689,9 @@
     },
     "crates/soxu-git/src/project.rs": {
       "role": "index",
-      "sha256": "5eff696899dfe174ce66230328a99bf0ae662fa1279cdbe9653e4dbe6a1b3f30",
-      "size": 6625,
-      "normalized_sha256": "5eff696899dfe174ce66230328a99bf0ae662fa1279cdbe9653e4dbe6a1b3f30"
+      "sha256": "3d76d695bd9c65ebca06ef4a2e52dab475991049d8ac28af5540b24b58d145b3",
+      "size": 9971,
+      "normalized_sha256": "3d76d695bd9c65ebca06ef4a2e52dab475991049d8ac28af5540b24b58d145b3"
     },
     "crates/soxu-git/src/status.rs": {
       "role": "index",
@@ -689,15 +701,15 @@
     },
     "crates/soxu-git/src/worktree_checkout.rs": {
       "role": "index",
-      "sha256": "13df9b08aac03ed900b862296a9cab39ebecba29ed16c99ab90898a4f474d81a",
-      "size": 5619,
-      "normalized_sha256": "13df9b08aac03ed900b862296a9cab39ebecba29ed16c99ab90898a4f474d81a"
+      "sha256": "26a4d9f43caf593145af2d6e326913e6dbfa17bae084c6fa8d048a718348114b",
+      "size": 6442,
+      "normalized_sha256": "26a4d9f43caf593145af2d6e326913e6dbfa17bae084c6fa8d048a718348114b"
     },
     "crates/soxu-git/src/worktree_checkout/journal.rs": {
       "role": "index",
-      "sha256": "987aac9174d30a5369a1766a22a8d5a63fbe2488a1f7471fc6f891b929d7ace8",
-      "size": 8346,
-      "normalized_sha256": "987aac9174d30a5369a1766a22a8d5a63fbe2488a1f7471fc6f891b929d7ace8"
+      "sha256": "8ffe3cd8350cf7cc79258d9c8aebc73701d56283a7615dbdab51aad910b53d8a",
+      "size": 8543,
+      "normalized_sha256": "8ffe3cd8350cf7cc79258d9c8aebc73701d56283a7615dbdab51aad910b53d8a"
     },
     "crates/soxu-git/src/worktree_checkout/publication.rs": {
       "role": "index",
@@ -719,9 +731,9 @@
     },
     "crates/soxu-git/src/worktree_lifecycle.rs": {
       "role": "index",
-      "sha256": "d29416333083af11b10b4886b65f73caf11f18f1a9e97475a5197ebd57d58c20",
-      "size": 71134,
-      "normalized_sha256": "d29416333083af11b10b4886b65f73caf11f18f1a9e97475a5197ebd57d58c20"
+      "sha256": "b2b9e4802aa24fc82b5047606e2ecb4061ee604a1df47034b53e440a8c3a07ac",
+      "size": 72137,
+      "normalized_sha256": "b2b9e4802aa24fc82b5047606e2ecb4061ee604a1df47034b53e440a8c3a07ac"
     },
     "crates/soxu-git/src/worktree_lifecycle/execution.rs": {
       "role": "index",
@@ -767,9 +779,9 @@
     },
     "crates/soxu-git/tests/project.rs": {
       "role": "observe",
-      "sha256": "6e3ba06340ec3b5e44996028b7d4fab51d3a96884f4b7bcaffe158175d435bbd",
-      "size": 13334,
-      "normalized_sha256": "6e3ba06340ec3b5e44996028b7d4fab51d3a96884f4b7bcaffe158175d435bbd"
+      "sha256": "ca8b2f0714d11d0c8631c871c2543af29bfa03a8a1f55f1697ab512b77984a28",
+      "size": 13338,
+      "normalized_sha256": "ca8b2f0714d11d0c8631c871c2543af29bfa03a8a1f55f1697ab512b77984a28"
     },
     "crates/soxu-git/tests/status.rs": {
       "role": "observe",
@@ -779,15 +791,15 @@
     },
     "crates/soxu-git/tests/worktree_checkout.rs": {
       "role": "observe",
-      "sha256": "d6ce89051a6af3ab3ce2fb0e005b264021cb4687026c5db51698935ff331affe",
-      "size": 10749,
-      "normalized_sha256": "d6ce89051a6af3ab3ce2fb0e005b264021cb4687026c5db51698935ff331affe"
+      "sha256": "2ae711a823924ba1dbe65d08be6ce3f3e5432eff22ce5fd52fb28bd60560f50d",
+      "size": 15288,
+      "normalized_sha256": "2ae711a823924ba1dbe65d08be6ce3f3e5432eff22ce5fd52fb28bd60560f50d"
     },
     "crates/soxu-git/tests/worktree_lifecycle.rs": {
       "role": "observe",
-      "sha256": "874259a75644c03a8e2e359e1cde25b004755066f17cb6de9e04eb1d81bd4be1",
-      "size": 46922,
-      "normalized_sha256": "874259a75644c03a8e2e359e1cde25b004755066f17cb6de9e04eb1d81bd4be1"
+      "sha256": "1113efd7fdfd403f662d6e49f1a476dd7f1c7dc8ef3463d3152b756bc4b47d41",
+      "size": 47205,
+      "normalized_sha256": "1113efd7fdfd403f662d6e49f1a476dd7f1c7dc8ef3463d3152b756bc4b47d41"
     },
     "crates/soxu-git/tests/worktrees.rs": {
       "role": "observe",
@@ -827,9 +839,9 @@
     },
     "crates/soxu-magpie/src/worktree_context.rs": {
       "role": "index",
-      "sha256": "1e442ed56125869c92fca357daaf00ceed12fbe2f62bd4d40cae994f0b996557",
-      "size": 11101,
-      "normalized_sha256": "1e442ed56125869c92fca357daaf00ceed12fbe2f62bd4d40cae994f0b996557"
+      "sha256": "c5b2ed129781032df3b199b46585b80ce13ce257fda6eef95e0ce66e68d9a515",
+      "size": 11221,
+      "normalized_sha256": "c5b2ed129781032df3b199b46585b80ce13ce257fda6eef95e0ce66e68d9a515"
     },
     "crates/soxu-magpie/tests/worktree_context.rs": {
       "role": "observe",
@@ -995,9 +1007,9 @@
     },
     "docs/dev/contributing.md": {
       "role": "index",
-      "sha256": "59e9c8604bf09290d8b23c698707bab59a72e7b8e12a0b2b91fd9a6fcb30c7a6",
-      "size": 1980,
-      "normalized_sha256": "59e9c8604bf09290d8b23c698707bab59a72e7b8e12a0b2b91fd9a6fcb30c7a6"
+      "sha256": "ea3666bbc64946e83ba0b29479a4e22e362f179b6d1281ca648768d899012503",
+      "size": 1985,
+      "normalized_sha256": "ea3666bbc64946e83ba0b29479a4e22e362f179b6d1281ca648768d899012503"
     },
     "docs/dev/git-checkpoint-rewind-commit.md": {
       "role": "index",
@@ -1023,11 +1035,23 @@
       "size": 16066,
       "normalized_sha256": "cedb87964cb0cae9dc50f6f34f0049a062c4f60a2bf6e9c4591327a9558effee"
     },
+    "docs/ops/CODE_STANDARDS.md": {
+      "role": "index",
+      "sha256": "dd9ab563e03f4298e04c57807f9b2396d4be076a340a323c6901c36b02f2c181",
+      "size": 4079,
+      "normalized_sha256": "dd9ab563e03f4298e04c57807f9b2396d4be076a340a323c6901c36b02f2c181"
+    },
     "docs/ops/DECISIONS.md": {
       "role": "index",
-      "sha256": "52be7c268c0f3f9915a06e059376f432aeb878ced9be9f999f6fc31c664fa2b7",
-      "size": 6538,
-      "normalized_sha256": "52be7c268c0f3f9915a06e059376f432aeb878ced9be9f999f6fc31c664fa2b7"
+      "sha256": "dc247f0a3389c09aa737aba9213c03ce2dd026701c08ae602bc2c10d0226698b",
+      "size": 10529,
+      "normalized_sha256": "dc247f0a3389c09aa737aba9213c03ce2dd026701c08ae602bc2c10d0226698b"
+    },
+    "docs/ops/LESSONS.md": {
+      "role": "index",
+      "sha256": "75c83dd4d0ed3becb4d2bc01dd67e033ae6c2c33a9065a49414f79948b7417d5",
+      "size": 12361,
+      "normalized_sha256": "75c83dd4d0ed3becb4d2bc01dd67e033ae6c2c33a9065a49414f79948b7417d5"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
@@ -1049,9 +1073,9 @@
     },
     "mise.toml": {
       "role": "index",
-      "sha256": "6afb6db6896fb3ce0d86e6488a7e5b561980960f439bd495fab86334fb8c4a64",
-      "size": 1853,
-      "normalized_sha256": "6afb6db6896fb3ce0d86e6488a7e5b561980960f439bd495fab86334fb8c4a64"
+      "sha256": "e2f1412f07b86d7baaabdf53c4ea3ffb15447d75db7f7f5659cca9832a2c8f9c",
+      "size": 1839,
+      "normalized_sha256": "e2f1412f07b86d7baaabdf53c4ea3ffb15447d75db7f7f5659cca9832a2c8f9c"
     },
     "paseo.json": {
       "role": "index",
@@ -1061,15 +1085,21 @@
     },
     "scripts/check-all.ps1": {
       "role": "index",
-      "sha256": "611a900277ca7776ac966d76fafee8a763bbd7359d150461b4c4f0b7103596b1",
-      "size": 1489,
-      "normalized_sha256": "611a900277ca7776ac966d76fafee8a763bbd7359d150461b4c4f0b7103596b1"
+      "sha256": "50818a109e8adc9376525f6db48d20efbf4484926b6b0659474a20d3de1c4558",
+      "size": 3892,
+      "normalized_sha256": "50818a109e8adc9376525f6db48d20efbf4484926b6b0659474a20d3de1c4558"
+    },
+    "scripts/detect-check-scope.ps1": {
+      "role": "index",
+      "sha256": "0693b97fd0685fc9fbf12aacd49cf022c04c6f7c22ae00fcbdcfc2765444b00c",
+      "size": 11612,
+      "normalized_sha256": "0693b97fd0685fc9fbf12aacd49cf022c04c6f7c22ae00fcbdcfc2765444b00c"
     },
     "scripts/mise-doctor.ps1": {
       "role": "index",
-      "sha256": "ffe665b2c196b41fe481d5c24492477001e2b249ac06be0d31f742ecfd76d89f",
-      "size": 1252,
-      "normalized_sha256": "ffe665b2c196b41fe481d5c24492477001e2b249ac06be0d31f742ecfd76d89f"
+      "sha256": "6e53d493a881ddd89eabb85f72c1761078a0eb3e0f53a473387ab0b75b8b0c7c",
+      "size": 1550,
+      "normalized_sha256": "6e53d493a881ddd89eabb85f72c1761078a0eb3e0f53a473387ab0b75b8b0c7c"
     },
     "scripts/paseo-ctl.ps1": {
       "role": "index",
@@ -1091,9 +1121,9 @@
     },
     "scripts/paseo-run-pi.ps1": {
       "role": "index",
-      "sha256": "b8394f8934410c82e76f397ea68bf960424e234a3ca2ec7d6714cca5360d9825",
-      "size": 2679,
-      "normalized_sha256": "b8394f8934410c82e76f397ea68bf960424e234a3ca2ec7d6714cca5360d9825"
+      "sha256": "59ebcda4e57afffdfe592c1c9595e8a8ceeec1a89d9de724da0cac51c34b7297",
+      "size": 2771,
+      "normalized_sha256": "59ebcda4e57afffdfe592c1c9595e8a8ceeec1a89d9de724da0cac51c34b7297"
     },
     "scripts/setup-hooks.ps1": {
       "role": "index",
@@ -1113,17 +1143,23 @@
       "size": 7908,
       "normalized_sha256": "d952eed88a0afb450877dddff13119fec5c94431d1f26e3cfda87612bc0d3c56"
     },
+    "scripts/test-check-scope.ps1": {
+      "role": "index",
+      "sha256": "d83f52682f809dcf1608cb1bdaee491586cafe285038819d0360585b3638e1f9",
+      "size": 5821,
+      "normalized_sha256": "d83f52682f809dcf1608cb1bdaee491586cafe285038819d0360585b3638e1f9"
+    },
     "scripts/test-paseo-orchestration.ps1": {
       "role": "index",
-      "sha256": "f907afa8037d4fa3ddaef5721a8147c3adf0d57193f7388f0093f640f5dcd967",
-      "size": 6362,
-      "normalized_sha256": "f907afa8037d4fa3ddaef5721a8147c3adf0d57193f7388f0093f640f5dcd967"
+      "sha256": "9777bfa3b10802bcdbf5a7683ed5a5403fd7ae3c57c8e6f73ab086a9182e0f4c",
+      "size": 6372,
+      "normalized_sha256": "9777bfa3b10802bcdbf5a7683ed5a5403fd7ae3c57c8e6f73ab086a9182e0f4c"
     },
     "scripts/verify-commits-and-privacy.ps1": {
       "role": "index",
-      "sha256": "0b532ef0ce6a232a0efc097580319d1b3d81824d1ba96df3f5b5ed535eb25122",
-      "size": 5384,
-      "normalized_sha256": "0b532ef0ce6a232a0efc097580319d1b3d81824d1ba96df3f5b5ed535eb25122"
+      "sha256": "156df7a84378501522498b20b285bc6e9a7d2ce11e9bc39e662459cdc48511db",
+      "size": 5544,
+      "normalized_sha256": "156df7a84378501522498b20b285bc6e9a7d2ce11e9bc39e662459cdc48511db"
     },
     "scripts/verify-design-system.mjs": {
       "role": "index",

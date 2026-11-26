@@ -1,0 +1,184 @@
+name: Release
+
+# 对标 yetone/magpie 双仓联动发版模式：
+# 推送 v* tag 后通过 repository_dispatch 触发公开联动仓 TanCan1998/soxu-releases
+# 进行多平台构建、二进制冒烟校验、SHA256SUMS + SLSA 溯源、包管理器清单更新；
+# 待联动仓齐备全部产物后，将其镜像回本仓 Releases 并做双重 sort -V 防竞态 Latest 校正。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发版语义版本号（不含 v 前缀，例如 0.1.0；需已有对应 v* tag）'
+        required: true
+        type: string
+      publish:
+        description: '是否公开正式发版（false 时仅在联动仓 dry-run 构建验证）'
+        type: boolean
+        default: true
+      skip_mirror:
+        description: '仅触发联动仓构建而不回传镜像到本仓 Releases'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  trigger-release:
+    name: Dispatch Release Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      ref: ${{ steps.version.outputs.ref }}
+
+    steps:
+      - name: Parse and validate release version
+        id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            REF="$GITHUB_REF_NAME"
+            VERSION="${REF#v}"
+          else
+            VERSION="${INPUT_VERSION#v}"
+            REF="v$VERSION"
+          fi
+          [[ "$VERSION" =~ ^[0-9][0-9A-Za-z.+-]*$ ]] || { echo "::error::非法版本号：$VERSION"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "正在触发 $REF 发版构建 (version=$VERSION)"
+
+      - name: Trigger release workflow in soxu-releases (with rate-limit backoff)
+        env:
+          TOKEN: ${{ secrets.SOXU_RELEASES_TOKEN }}
+          API_URL: ${{ github.api_url }}
+          RELEASES_REPO: TanCan1998/soxu-releases
+          REF: ${{ steps.version.outputs.ref }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PUBLISH: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.publish == 'true' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then
+            echo "::error::未配置 secrets.SOXU_RELEASES_TOKEN（细粒度 PAT，仅需对 $RELEASES_REPO 拥有 contents:write 权限以发送 repository_dispatch）。"
+            echo "在配置该 Secret 前，也可直接在 $RELEASES_REPO 手动运行 Release workflow_dispatch。"
+            exit 1
+          fi
+          payload=$(jq -nc --arg ref "$REF" --arg version "$VERSION" --argjson publish "$PUBLISH" \
+            '{event_type: "release", client_payload: {ref: $ref, version: $version, publish: $publish}}')
+          url="$API_URL/repos/$RELEASES_REPO/dispatches"
+          tmp=$(mktemp -d)
+          deadline=$(( $(date +%s) + ${DISPATCH_MAX_WAIT:-3900} ))
+          header() { awk -v k="$1" -F': *' 'tolower($1) == k { v = $2 } END { sub(/\r$/, "", v); print v }' "$tmp/headers"; }
+          for try in $(seq 1 100); do
+            code=$(curl -sS -o "$tmp/body" -D "$tmp/headers" -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              --data "$payload" "$url") || { echo "::error::dispatch 请求异常 (curl exit $?)"; exit 1; }
+            if [[ "$code" == 2* ]]; then
+              echo "已成功派发 $REF 构建至 $RELEASES_REPO (HTTP $code, 第 $try 次尝试)"
+              exit 0
+            fi
+            retry_after=$(header retry-after)
+            remaining=$(header x-ratelimit-remaining)
+            reset=$(header x-ratelimit-reset)
+            limited=
+            if [[ "$code" == 403 || "$code" == 429 ]]; then
+              if [[ -n "$retry_after" || "$remaining" == 0 ]] || grep -qi 'rate limit' "$tmp/body"; then
+                limited=1
+              fi
+            fi
+            if [[ -z "$limited" ]]; then
+              echo "::error::dispatch 失败 (HTTP $code)"
+              cat "$tmp/body"; echo
+              exit 1
+            fi
+            now=$(date +%s)
+            if [[ "$retry_after" =~ ^[0-9]+$ ]]; then
+              until=$(( now + retry_after ))
+            elif [[ "$reset" =~ ^[0-9]+$ ]] && (( reset > now )); then
+              until=$reset
+            else
+              until=$(( now + 60 ))
+            fi
+            until=$(( until + 5 ))
+            if (( until > deadline )); then
+              echo "::error::API 限流 (HTTP $code) 持续超出最大等待时限"
+              cat "$tmp/body"; echo
+              exit 1
+            fi
+            echo "::warning::遭遇限流 (HTTP $code, try $try)，等待 $(( until - now ))s 后重试"
+            sleep $(( until - now ))
+          done
+          echo "::error::连续重试后仍受限流"
+          exit 1
+
+  mirror-release:
+    needs: trigger-release
+    if: (github.event_name != 'workflow_dispatch' || (inputs.publish && !inputs.skip_mirror))
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.SOXU_RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
+      MIRROR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASES_REPO: TanCan1998/soxu-releases
+      REF: ${{ needs.trigger-release.outputs.ref }}
+      EXPECTED_ASSETS: 5
+    steps:
+      - name: Wait for soxu-releases to publish all verified assets
+        run: |
+          for i in $(seq 1 320); do
+            n=$(gh release view "$REF" -R "$RELEASES_REPO" --json assets -q '.assets | length' 2>/dev/null || echo 0)
+            has_sums=$(gh release view "$REF" -R "$RELEASES_REPO" --json assets -q '[.assets[].name] | index("SHA256SUMS") != null' 2>/dev/null || echo false)
+            echo "轮询第 $i 次：$n / $EXPECTED_ASSETS 产物 (SHA256SUMS=$has_sums)"
+            if [ "$n" -ge "$EXPECTED_ASSETS" ] && [ "$has_sums" = "true" ]; then
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::$RELEASES_REPO 在等待窗口内未齐备 $REF 的 $EXPECTED_ASSETS 项产物" >&2
+          exit 1
+
+      - name: Mirror release assets & enforce monotonic Latest tag
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          GH_TOKEN="$GH_TOKEN" gh release download "$REF" -R "$RELEASES_REPO" -D dist
+          GH_TOKEN="$GH_TOKEN" gh release view "$REF" -R "$RELEASES_REPO" --json body -q .body > notes.md
+          printf '\n\n---\n联动发版与包管理器清单仓库：https://github.com/%s/releases/tag/%s\n' "$RELEASES_REPO" "$REF" >> notes.md
+
+          newest() {
+            GH_TOKEN="$MIRROR_TOKEN" gh release list -R "$GITHUB_REPOSITORY" -L 100 --exclude-drafts --exclude-pre-releases --json tagName -q '.[].tagName' |
+              { grep -E '^v[0-9]+(\.[0-9]+)*$' || true; } | sort -V | tail -1
+          }
+
+          top=$(newest)
+          if [ -z "$top" ] || [ "$(printf '%s\n%s\n' "$top" "$REF" | sort -V | tail -1)" = "$REF" ]; then
+            latest=true
+          else
+            latest=false
+            echo "当前最高版本为 $top，本次 $REF 镜像不覆盖 Latest 标记"
+          fi
+
+          if GH_TOKEN="$MIRROR_TOKEN" gh release view "$REF" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            GH_TOKEN="$MIRROR_TOKEN" gh release edit "$REF" -R "$GITHUB_REPOSITORY" --notes-file notes.md --latest="$latest"
+            GH_TOKEN="$MIRROR_TOKEN" gh release upload "$REF" dist/* -R "$GITHUB_REPOSITORY" --clobber
+          else
+            GH_TOKEN="$MIRROR_TOKEN" gh release create "$REF" dist/* -R "$GITHUB_REPOSITORY" --verify-tag --title "Soxu $REF" --notes-file notes.md --latest="$latest"
+          fi
+
+          # 二次纠偏：避免并发发布窗口导致旧版本抢占 Latest
+          top=$(newest)
+          now=$(GH_TOKEN="$MIRROR_TOKEN" gh api "repos/$GITHUB_REPOSITORY/releases/latest" -q .tag_name 2>/dev/null || true)
+          if [ -n "$top" ] && [ "$now" != "$top" ]; then
+            echo "纠正 Latest 标记：${now:-none} -> $top"
+            GH_TOKEN="$MIRROR_TOKEN" gh release edit "$top" -R "$GITHUB_REPOSITORY" --latest >/dev/null
+          fi

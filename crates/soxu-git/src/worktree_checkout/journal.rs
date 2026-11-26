@@ -4,7 +4,9 @@ use std::fs::OpenOptions;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use super::{CheckoutError, CheckoutStage, CheckoutStatus};
+#[cfg(any(target_os = "linux", test))]
+use super::CheckoutError;
+use super::{CheckoutStage, CheckoutStatus};
 
 const LIMIT: usize = 4096;
 
@@ -12,7 +14,10 @@ fn path(root: &Path, request: &str) -> PathBuf {
     root.join(format!("checkout-{request}.log"))
 }
 
-pub(super) fn read(root: &Path, request: &str) -> Result<CheckoutStatus, CheckoutError> {
+/// 读取持久检出记录。
+///
+/// 只把文件系统读取失败作为错误上报，调用方据此选择自己的错误类型并继续 fail-closed。
+pub(super) fn read(root: &Path, request: &str) -> Result<CheckoutStatus, io::Error> {
     let path = path(root, request);
     let invalid = CheckoutStatus::Disabled {
         stage: None,
@@ -22,7 +27,7 @@ pub(super) fn read(root: &Path, request: &str) -> Result<CheckoutStatus, Checkou
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Ok(CheckoutStatus::Pending);
         }
-        Err(error) => return Err(error.into()),
+        Err(error) => return Err(error),
         Ok(metadata)
             if !metadata.is_file()
                 || crate::worktree_lifecycle::identity::is_reparse(&metadata) =>
