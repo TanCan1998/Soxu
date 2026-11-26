@@ -127,6 +127,15 @@ impl Layout {
     }
 
     pub(super) async fn preflight(&self, runner: &mut Runner<'_>) -> Result<(), DiffError> {
+        self.preflight_format(runner, false).await
+    }
+
+    // 固定端点单独允许 SHA-256，不扩大既有四基准的接受范围。
+    pub(super) async fn preflight_format(
+        &self,
+        runner: &mut Runner<'_>,
+        fixed: bool,
+    ) -> Result<(), DiffError> {
         for (path, data) in &self.files {
             if data.is_some()
                 && path
@@ -134,7 +143,7 @@ impl Layout {
                     .is_some_and(|name| name == "config" || name == "config.worktree")
             {
                 let config = runner.config(path).await?;
-                check_config(&config)?;
+                check_config(&config, fixed)?;
             }
         }
         let kind = runner
@@ -149,6 +158,7 @@ impl Layout {
             .await?;
         match kind.as_slice() {
             b"true\nfalse\nsha1\n" => {}
+            b"true\nfalse\nsha256\n" if fixed => {}
             b"true\nfalse\nsha256\n" => return Err(DiffError::Unsupported("SHA-256 对象格式")),
             _ => return Err(DiffError::InvalidWorktree),
         }
@@ -185,7 +195,7 @@ fn path_line(bytes: &[u8], prefix: &[u8]) -> Result<PathBuf, DiffError> {
     Ok(native_path(value)?)
 }
 
-fn check_config(bytes: &[u8]) -> Result<(), DiffError> {
+fn check_config(bytes: &[u8], fixed: bool) -> Result<(), DiffError> {
     if bytes.is_empty() {
         return Ok(());
     }
@@ -208,7 +218,9 @@ fn check_config(bytes: &[u8]) -> Result<(), DiffError> {
         if key.starts_with(b"extensions.") {
             match key {
                 b"extensions.worktreeconfig" => {}
-                b"extensions.objectformat" if value.eq_ignore_ascii_case(b"sha1") => {}
+                b"extensions.objectformat"
+                    if value.eq_ignore_ascii_case(b"sha1")
+                        || (fixed && value.eq_ignore_ascii_case(b"sha256")) => {}
                 b"extensions.objectformat" => {
                     return Err(DiffError::Unsupported("非 SHA-1 对象格式"));
                 }

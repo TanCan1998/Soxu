@@ -18,7 +18,9 @@ pub use checkpoint::{
 };
 pub use diff::{
     DiffBaseline, DiffChange, DiffError, DiffFileMode, DiffKind, DiffObservation, DiffOutput,
-    DiffRequest, DiffResult, DiffReview,
+    DiffRequest, DiffResult, DiffReview, FixedDiffChange, FixedDiffCoverage, FixedDiffEndpoint,
+    FixedDiffError, FixedDiffIdentity, FixedDiffIncomplete, FixedDiffKind, FixedDiffRequest,
+    FixedDiffResult,
 };
 pub use probe::{GitError, GitProbe, HeadState, RepositorySnapshot};
 pub use project::{LocalProject, ProjectOpenError, WorktreeIdentity};
