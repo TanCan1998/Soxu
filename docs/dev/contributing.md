@@ -2,7 +2,7 @@
 
 ## 1. 环境准备
 
-项目使用 `mise.toml` 统一锁定工具链（Rust `1.99.1` 含 `rustfmt`/`clippy`、Node `26.13.1`、`pnpm 12.21.0`），通过 `disable_tools = ["python", "java", "maven"]` 隔离宿主全局无关或缺失工具，并通过 Scoop 使用 `gitleaks` 执行提交前隐私与密钥扫描。
+项目使用 `mise.toml` 统一锁定工具链（Rust `1.99.1` 含 `rustfmt`/`clippy`、Node `26.13.1`、`pnpm 12.21.0`），通过 `disable_tools = ["java", "maven"]` 仅隔离无关全局工具并保留本机 `python`，同时通过 Scoop 使用 `gitleaks` 执行提交前隐私与密钥扫描。
 
 ```powershell
 # 1. 一键激活仓库级 Git Hooks 并信任当前工作树的 mise.toml（启用 CARGO_TARGET_DIR 与工具链隔离）

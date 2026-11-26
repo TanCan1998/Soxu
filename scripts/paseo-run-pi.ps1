@@ -25,8 +25,8 @@ if ($LASTEXITCODE -ne 0) {
   throw "对目标工作区执行 mise trust 失败：$resolvedWorkspace"
 }
 
-# 2. 按项目 mise.toml 导出干净环境（屏蔽无关全局工具）
-$env:MISE_DISABLE_TOOLS = "python,java,maven"
+# 2. 按项目 mise.toml 导出干净环境（仅隔离 java/maven，保留 mise python 供子代理使用）
+$env:MISE_DISABLE_TOOLS = "java,maven"
 $miseEnvJson = (& $miseCmd.Source -C $resolvedWorkspace env --json 2>&1)
 if ($LASTEXITCODE -ne 0) {
   throw "读取目标工作区 mise env --json 失败：$($miseEnvJson | Out-String)"
@@ -34,8 +34,10 @@ if ($LASTEXITCODE -ne 0) {
 $miseEnv = ($miseEnvJson | Out-String) | ConvertFrom-Json -ErrorAction Stop
 
 $envPairs = [System.Collections.Generic.List[string]]::new()
-$envPairs.Add("MISE_DISABLE_TOOLS=python,java,maven")
+$envPairs.Add("MISE_DISABLE_TOOLS=java,maven")
 $envPairs.Add("PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false")
+$envPairs.Add("PYTHONUTF8=1")
+$envPairs.Add("PYTHONIOENCODING=utf-8")
 
 $allowedKeys = @(
   "CARGO_HOME",

@@ -54,7 +54,7 @@ function Get-WorkspaceCrateGraph([string]$RootDir) {
     foreach ($rawLine in $lines) {
       $line = ($rawLine -split '#', 2)[0].Trim()
       if ([string]::IsNullOrWhiteSpace($line)) { continue }
-      if ($line -match '^\[([^\]]+)\]$') {
+      if ($line -match '^\[\[?([^\]]+)\]\]?$') {
         $section = $Matches[1].Trim()
         if ($section -match '^(?:dependencies|dev-dependencies|build-dependencies)\.([A-Za-z0-9_-]+)$') {
           $deps.Add($Matches[1].Trim())
