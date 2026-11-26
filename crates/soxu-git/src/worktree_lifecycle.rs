@@ -341,7 +341,7 @@ impl GitProbe {
                 Some(workspace_root)
             }
         };
-        verify_intent(self, &intent, target_workspace.as_ref())
+        verify_intent(self, &state_root, &intent, target_workspace.as_ref())
             .await
             .map(Some)
     }
@@ -476,7 +476,7 @@ async fn observe_registration(
         });
     }
     let command_succeeded = intent.execution.result == ExecutionResult::Succeeded;
-    let observation = match verify_intent(git, &intent, Some(workspace_root)).await {
+    let observation = match verify_intent(git, state_root, &intent, Some(workspace_root)).await {
         Ok(observation) => observation,
         Err(error) => {
             return Ok(RegistrationOutcome::UnknownOutcome {
@@ -1573,11 +1573,28 @@ impl CheckoutRegistration {
     }
 }
 
+/// 仅当目标已登记且持久检出记录为 `Verified` 时，才允许放开「只含 .git 标记」的前置条件。
+///
+/// 未检出、检出失败或记录为 `Disabled` 时一律返回 `Ok(false)`，保持原未检出通道的收紧语义。
+fn checkout_released_pending(
+    state_root: &AuthorizedDirectory,
+    intent: &PersistentIntent,
+) -> Result<bool, WorktreeLifecycleError> {
+    if intent.registered_directories.is_none() {
+        return Ok(false);
+    }
+    crate::worktree_checkout::is_checkout_verified(state_root, &intent.request_id)
+}
+
 async fn verify_intent(
     git: &GitProbe,
+    state_root: &AuthorizedDirectory,
     intent: &PersistentIntent,
     target_workspace: Option<&AuthorizedDirectory>,
 ) -> Result<RegistrationObservation, WorktreeLifecycleError> {
+    // 目标已产出真实检出内容时，只有持久 Verified 记录才允许按已检出状态复核。
+    let released = checkout_released_pending(state_root, intent)?;
+    let pending = !released;
     let bound = intent
         .authorized_directories
         .ok_or(WorktreeLifecycleError::IdentityChanged)?;
@@ -1616,7 +1633,7 @@ async fn verify_intent(
     let registered = if target_state == TargetState::Directory
         && entry.is_some_and(|entry| matches!(entry.kind, crate::WorktreeKind::Linked))
     {
-        open_registered_target(git, intent).await?
+        open_registered_target(git, intent, pending).await?
     } else {
         None
     };
@@ -1626,6 +1643,9 @@ async fn verify_intent(
         return Err(WorktreeLifecycleError::IdentityChanged);
     }
     source.refresh()?;
+    if checkout_released_pending(state_root, intent)? != released {
+        return Err(WorktreeLifecycleError::IdentityChanged);
+    }
     if let Some(workspace) = target_workspace {
         workspace.refresh()?;
         if target_state != self::target_state(&intent.target)? {
@@ -1636,7 +1656,7 @@ async fn verify_intent(
         Some((identity, target, git_dir)) => {
             target.refresh()?;
             git_dir.refresh()?;
-            if target_git_directory(intent, &target, true)?.map(|directory| directory.identity())
+            if target_git_directory(intent, &target, pending)?.map(|directory| directory.identity())
                 != Some(git_dir.identity())
             {
                 return Err(WorktreeLifecycleError::IdentityChanged);
@@ -1749,6 +1769,7 @@ async fn exact_ref_oid(
 async fn open_registered_target(
     git: &GitProbe,
     intent: &PersistentIntent,
+    pending: bool,
 ) -> Result<
     Option<(WorktreeIdentity, AuthorizedDirectory, AuthorizedDirectory)>,
     WorktreeLifecycleError,
@@ -1760,7 +1781,7 @@ async fn open_registered_target(
     {
         return Ok(None);
     }
-    let Some(git_dir) = target_git_directory(intent, &target, true)? else {
+    let Some(git_dir) = target_git_directory(intent, &target, pending)? else {
         return Ok(None);
     };
     target.refresh()?;

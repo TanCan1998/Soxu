@@ -1,6 +1,6 @@
 # soxu-git：本地项目身份、Git 探测与受控 Worktree
 
-M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控检出。M3d 提供已跟踪文件的四种只读 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
+M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控检出。M3d 提供已跟踪文件的四种只读 Diff，以及只接受已授权 Checkpoint 或完整本地提交的固定端点双端 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
 
 ## 轮次 Checkpoint
 
@@ -90,6 +90,27 @@ Windows 专项夹具验证四种基准、unborn、linked/detached 独立 index�
 - 运行隔离：受控 Git 在协调域沙箱内运行，清除继承的 `GIT_*`、`SSH_*`、`GPG_*`、`LC_*`、`XDG_*`、代理与 home/临时目录变量，隔离 HOME/XDG/临时目录与全局配置，用宿主私有空目录覆盖 `core.hooksPath`，`protocol.allow=never` 且只放行本次操作声明的协议；单命令 120 秒、输出 16 MiB 上限，超时或超限先关闭管道再终止并回收直接子进程。
 
 平台边界（如实披露）：Linux 用 `O_DIRECTORY | O_NOFOLLOW` 逐段打开并绑定 `/proc/self/fd`，身份为 `dev:ino` 加目录创建时间（目录内容变化会推进 `ctime`，故不使用 `ctime`；创建时间不可得时 fail-closed）；Windows 从卷根逐段持有 `share_mode(1|2)`（不共享删除）且带 `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT` 的目录句柄并逐段核对非 reparse point，身份只有 `creation_time + file_attributes`（纯 `std` 无跨重启 NTFS FileId），仅在「同一进程持有句柄链」期间用于检测替换，不与 Linux 等价；其他平台 fail-closed 返回 `UnsupportedPlatform`。本仓库已在 Windows 与 WSL Ubuntu 26.04.1 LTS（rustc 1.99.1、clippy 0.1.99）两处实机执行 `tests/repository_create.rs` 全部 19 个用例并通过，两平台 `cargo clippy -- -D warnings` 均零告警；Windows 分支额外覆盖 junction 与 reparse point 拒绝，Linux 分支覆盖 `O_DIRECTORY | O_NOFOLLOW` 打开与 `/proc/self/fd` 身份绑定。其余 Unix（macOS、BSD）未验证，按 fail-closed 处理。
+
+## 固定端点只读 Diff
+
+`GitProbe::readonly_fixed_diff(root, FixedDiffRequest).await` 比较两个**已授权固定端点**。它不扩展 `DiffBaseline` 的四个基准，也不接受任意 ref 字符串：端点只有两种可验证来源。
+
+| `FixedDiffEndpoint` | 解析与校验 |
+| --- | --- |
+| `AuthorizedCheckpoint { state_directory, scope, checkpoint_id }` | 只接受服务端已发布记录：`inspect_checkpoint` 复核 Intent/记录，工作树 `root`、`git_dir`、`common_dir` 与目录身份必须与本工作树一致，`workspace_id`/`session_id`/`checkpoint_id` 必须属于给定作用域，私有 ref 不得为符号引用且其 OID 必须与记录一致，提交、树与 `worktree_tree_oid` 必须真实存在 |
+| `AuthorizedBaseCommit(oid)` | 完整 40 位 SHA-1 或 64 位 SHA-256 十六进制 OID。缩写、`HEAD`、`refs/*` 等任意引用一律 `InvalidCommit`；对象必须可从本地分支、标签、远端跟踪分支或 HEAD 到达，私有 `refs/soxu` 提交返回 `UnreachableCommit` |
+
+`GitProbe::readonly_checkpoint_diff(root, checkpoint, paths, output)` 是「已授权 Checkpoint → 当前工作树」的封装：先固定完整提交 OID，再复用同一受控只读比较。结果中 head 端 `mutable = true` 且 `commit_oid`/`tree_oid` 为空，显式标注为可变观察，不伪造历史身份。
+
+- `FixedDiffResult` 携带两端 `FixedDiffIdentity`（工作树身份、会话归属、提交/树 OID、观察时间）、两端 `FixedDiffCoverage`、`selected_paths`、逐文件 `FixedDiffChange`、可选 `review` 与 `incomplete_reason`。
+- `FixedDiffChange` 支持新增、删除、修改与重命名（`old_path`），保留模式、完整 OID、二进制标记与 `numstat` 行统计。二进制审阅返回 `DiffReview::Binary`，未变更返回 `Unchanged`，文本补丁上限 1 MiB。
+- `FixedDiffIncomplete` 记录 `BaseOmissions`、`HeadOmissions`、`PathSelection`、`PathBudget`、`OutputBudget`、`ReviewBudget`、`UntrackedWorktreePaths`。任一端 Checkpoint 存在遗漏、或命中任何路径/输出/审阅预算时，`is_complete()` 必为 `false`；空 `changes` 不能覆盖这些事实。
+- 工作树端的未跟踪与被忽略路径（`ls-files --others --exclude-standard`、`--ignored`）只记录在 `head_coverage.untracked_paths`，不读取内容，也不进入比较集合。因此含未跟踪路径的工作树比较永不声称完整零差异。
+- 请求路径为空时在两端已跟踪集合内枚举；显式授权时按 `native_file_path` 校验、拒绝重复与越界，且仍以 `PathSelection` 标记「非全仓库」语义。预算沿用 128 文件 / 8 KiB 路径字节，超限记录 `PathBudget` 并保留已选前缀。
+- 沿用既有只读边界：`--no-ext-diff`、`--no-textconv`、`--ignore-submodules=all`、`--no-replace-objects`、literal pathspec、禁用自动刷新 index 与 optional locks、`GIT_NO_LAZY_FETCH=1`，关闭 rename 之外的启发式（固定 `--diff-algorithm=myers`、`--no-indent-heuristic`）。不比固定端点组合时不做 worktree 戳记；工作树比较前记录 index 与选中路径元数据，结束后复核并要求完全一致，否则 `Changed`。
+- 固定端点单独允许 SHA-256 对象格式，四个既有基准仍拒绝 SHA-256。比较前后复核 `Layout`、两端解析结果与工作树戳记，不建临时分支、不改 HEAD、主 index 或工作树。
+
+专项夹具 `tests/fixed_diff.rs` 覆盖 Checkpoint→Checkpoint、AuthorizedBaseCommit→Checkpoint、Checkpoint→工作树、跨会话与跨工作树拒绝、私有 ref 删除与 OID 漂移、缩写与任意引用拒绝、含遗漏检查点的 `incomplete_reason`、路径选择与预算、SHA-256、unborn、linked worktree、二进制、重命名，并断言比较与审阅前后全仓库文件字节与 mtime 不变。
 
 ## 只读与限制
 

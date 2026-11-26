@@ -10,8 +10,14 @@ use tokio::time::Instant;
 use crate::probe::{COMMAND_TIMEOUT, OUTPUT_LIMIT, null_device, run_bounded};
 use crate::{GitError, GitProbe, WorktreeIdentity};
 
+mod fixed;
 mod format;
 mod repository;
+
+pub use fixed::{
+    FixedDiffChange, FixedDiffCoverage, FixedDiffEndpoint, FixedDiffError, FixedDiffIdentity,
+    FixedDiffIncomplete, FixedDiffKind, FixedDiffRequest, FixedDiffResult,
+};
 
 const MAX_PATHS: usize = 128;
 const MAX_PATH_BYTES: usize = 8 * 1024;
