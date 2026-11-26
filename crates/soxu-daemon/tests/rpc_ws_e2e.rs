@@ -464,7 +464,7 @@ async fn native_asset_guard_rechecks_automatic_fifo_launch() {
 }
 
 #[tokio::test]
-async fn native_asset_guard_does_not_enable_antigravity_route() {
+async fn antigravity_refuses_to_launch_without_a_private_asset_guard() {
     let dir = TempDir::new().expect("isolated blocked driver");
     let (addr, state, handle) = spawn_daemon_with_drivers(
         &dir,
@@ -500,6 +500,358 @@ async fn native_asset_guard_does_not_enable_antigravity_route() {
             .is_empty()
     );
     handle.abort();
+}
+
+async fn spawn_antigravity_daemon(
+    dir: &TempDir,
+    driver: NativeDriver,
+    guard: NativeAssetGuard,
+) -> (
+    std::net::SocketAddr,
+    Arc<DaemonState>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("绑定测试 Daemon TCP");
+    let addr = listener.local_addr().expect("读取测试 Daemon 地址");
+    let state = Arc::new(
+        DaemonState::open(Some(dir.path()), &format!("http://{addr}"), false)
+            .expect("打开测试 Daemon 状态")
+            .with_native_driver_set(
+                dir.path().join("quick-chats"),
+                [(NativeCliKind::Antigravity, Ok(driver))],
+            )
+            .expect("注册测试 AGY 驱动")
+            .with_native_asset_guard(NativeCliKind::Antigravity, guard)
+            .expect("绑定测试 AGY 资产"),
+    );
+    let router = build_router(Arc::clone(&state));
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .await
+            .expect("运行测试 Daemon")
+    });
+    (addr, state, handle)
+}
+
+fn antigravity_chat(agent: &str, permission: PermissionLevel) -> RpcCommand {
+    RpcCommand::CreateQuickChat {
+        title: Some(agent.to_owned()),
+        agent_id: agent.to_owned(),
+        model_id: None,
+        permission: Some(permission),
+        thinking: None,
+    }
+}
+
+async fn antigravity_ws(addr: std::net::SocketAddr) -> WsClient {
+    connect_ws(
+        addr,
+        ClientHello {
+            client_kind: ClientKind::Desktop,
+            client_version: "test".to_owned(),
+            protocol_version: soxu_protocol::PROTOCOL_VERSION,
+            after_seq: None,
+            device_id: None,
+        },
+    )
+    .await
+    .0
+}
+
+#[tokio::test]
+async fn antigravity_quick_chat_requires_read_only_and_intact_assets() {
+    let dir = TempDir::new().expect("创建快聊测试临时目录");
+    let node = soxu_daemon::antigravity::node_program().expect("可信 Node");
+    let root = dir
+        .path()
+        .canonicalize()
+        .expect("规范化快聊测试目录")
+        .join("antigravity");
+    let (_, guard) =
+        soxu_daemon::antigravity::configure(&root, &node, &node).expect("生成快聊隔离配置");
+    let driver = native_fixture(NativeCliKind::Antigravity, "antigravity.cjs")
+        .without_inherited_env()
+        .with_env("HOME", Some(root.join("home").into_os_string()))
+        .with_env("SystemRoot", std::env::var_os("SystemRoot"));
+    let (addr, state, handle) = spawn_antigravity_daemon(&dir, driver, guard).await;
+    for agent in ["agy", "antigravity"] {
+        assert!(
+            post_rpc(addr, antigravity_chat(agent, PermissionLevel::ReadOnly))
+                .await
+                .ok
+        );
+    }
+    assert!(
+        post_rpc(addr, antigravity_chat("agy", PermissionLevel::FullAccess))
+            .await
+            .ok
+    );
+    let mut ws = antigravity_ws(addr).await;
+    for session in state.snapshot().expect("读取会话快照").sessions {
+        let id = session.session_id;
+        let reply = post_rpc(addr, submit_native(&id, "fixture")).await;
+        if session.permission == PermissionLevel::ReadOnly {
+            assert!(reply.ok, "{reply:?}");
+            wait_for_ws_event(&mut ws, |event| {
+                matches!(event, DaemonEvent::SessionUpdated(session)
+                if session.session_id == id && session.bucket == WorkspaceBucket::Done)
+            })
+            .await;
+            assert!(
+                state
+                    .snapshot()
+                    .expect("读取完成后的会话快照")
+                    .sessions
+                    .iter()
+                    .any(|session| session.session_id == id && session.native_session_id.is_some())
+            );
+        } else {
+            assert_eq!(
+                reply.error.expect("获取权限拒绝错误").code,
+                ErrorCode::DriverUnavailable
+            );
+        }
+    }
+    let session = state
+        .snapshot()
+        .expect("读取待续聊会话")
+        .sessions
+        .into_iter()
+        .find(|session| session.title == "antigravity")
+        .expect("查找别名创建的快聊");
+    let response = rpc_via_ws(
+        &mut ws,
+        "hold-agy",
+        submit_native(&session.session_id, "hold"),
+    )
+    .await
+    .0;
+    assert!(response.ok, "{response:?}");
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+        if text_delta == "hold")
+    })
+    .await;
+    let hook = root.join("home/.gemini/config/hooks.json");
+    #[cfg(windows)]
+    {
+        assert!(std::fs::read(&hook).is_ok());
+        assert_eq!(
+            std::fs::write(&hook, b"{}")
+                .expect_err("回合中资产写入应被拒绝")
+                .raw_os_error(),
+            Some(32)
+        );
+        assert_eq!(
+            std::fs::remove_file(&hook)
+                .expect_err("回合中资产删除应被拒绝")
+                .raw_os_error(),
+            Some(32)
+        );
+    }
+    assert!(
+        post_rpc(
+            addr,
+            RpcCommand::StopTurn {
+                session_id: session.session_id.clone()
+            }
+        )
+        .await
+        .ok
+    );
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::SessionUpdated(current)
+        if current.session_id == session.session_id && current.bucket == WorkspaceBucket::Done)
+    })
+    .await;
+    let unexpected = root.join("home/.gemini/config/agents/override.md");
+    std::fs::write(&unexpected, b"unexpected agent").expect("写入额外代理夹具");
+    let rejected = post_rpc(addr, submit_native(&session.session_id, "extra-agent")).await;
+    assert_eq!(
+        rejected.error.expect("获取额外代理拒绝错误").code,
+        ErrorCode::DriverUnavailable
+    );
+    std::fs::remove_file(unexpected).expect("移除额外代理夹具");
+
+    std::fs::write(hook, b"{}").expect("篡改钩子配置夹具");
+    let rejected = post_rpc(addr, submit_native(&session.session_id, "resume")).await;
+    assert_eq!(
+        rejected.error.expect("获取钩子校验拒绝错误").code,
+        ErrorCode::DriverUnavailable
+    );
+    handle.abort();
+}
+
+#[tokio::test]
+#[ignore = "需要 SOXU_TEST_AGY 指向可信 Antigravity 1.5.18 实机程序"]
+async fn antigravity_real_quick_chat_http_ws_loopback() {
+    use axum::{Json, Router, extract::State, response::IntoResponse, routing::any};
+    use serde_json::{Value, json};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::mpsc;
+
+    let dir = TempDir::new().expect("创建真机测试临时目录");
+    let input = PathBuf::from(std::env::var_os("SOXU_TEST_AGY").expect("可信 AGY 入口"));
+    assert!(input.is_absolute());
+    let program = dir.path().join(if cfg!(windows) {
+        "antigravity-cli.exe"
+    } else {
+        "agy"
+    });
+    std::fs::copy(input, &program).expect("复制可信 AGY 程序");
+    let node = soxu_daemon::antigravity::node_program().expect("可信 Node");
+    let root = dir
+        .path()
+        .canonicalize()
+        .expect("规范化真机测试目录")
+        .join("antigravity");
+    let (driver, guard) =
+        soxu_daemon::antigravity::configure(&root, &program, &node).expect("生成真机隔离配置");
+    let (requests, mut received) = mpsc::unbounded_channel::<Value>();
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("绑定回环模型 TCP");
+    let endpoint = format!(
+        "http://{}",
+        listener.local_addr().expect("读取模型服务地址")
+    );
+    let provider = Router::new().fallback(any(
+        |State((requests, injected)): State<(mpsc::UnboundedSender<Value>, Arc<AtomicBool>)>, Json(body): Json<Value>| async move {
+            let contents = body["contents"].to_string();
+            requests.send(body).expect("记录模型请求");
+            if contents.contains("SOXU_WAIT_FOR_CANCEL") {
+                return std::future::pending().await;
+            }
+            let part = if contents.contains("SOXU_TEST_PRE_TOOL_USE") && !injected.swap(true, Ordering::Relaxed) {
+                json!({"functionCall": {"name": "manage_task", "args": {"Action": "list"}}})
+            } else {
+                json!({"text": "SOXU_AGY_OK"})
+            };
+            let payload = json!({
+                "candidates": [{"content": {"role": "model", "parts": [part]}, "finishReason": "STOP", "index": 0}],
+                "usageMetadata": {"promptTokenCount": 12, "candidatesTokenCount": 4, "totalTokenCount": 16},
+                "modelVersion": "gemini-3.8-flash", "responseId": "soxu-agy-fixture"
+            });
+            ([("content-type", "text/event-stream")], format!("data: {payload}\n\n")).into_response()
+        },
+    )).with_state((requests, Arc::new(AtomicBool::new(false))));
+    let server = tokio::spawn(async move {
+        axum::serve(listener, provider)
+            .await
+            .expect("运行回环模型服务")
+    });
+    let driver = driver
+        .with_env("GEMINI_API_KEY", Some("soxu-loopback-key".into()))
+        .with_env("GOOGLE_GEMINI_BASE_URL", Some(endpoint.into()));
+    let (addr, state, handle) = spawn_antigravity_daemon(&dir, driver, guard).await;
+    assert!(
+        post_rpc(addr, antigravity_chat("agy", PermissionLevel::ReadOnly))
+            .await
+            .ok
+    );
+    let id = state.snapshot().expect("读取新建快聊快照").sessions[0]
+        .session_id
+        .clone();
+    let mut ws = antigravity_ws(addr).await;
+    let mut first_id = None;
+    for prompt in ["SOXU_FIRST", "SOXU_SECOND"] {
+        let response = rpc_via_ws(&mut ws, prompt, submit_native(&id, prompt))
+            .await
+            .0;
+        assert!(response.ok, "{response:?}");
+        let seen = tokio::time::timeout(Duration::from_secs(30), received.recv())
+            .await
+            .expect("真实 AGY 应访问隔离回环端点")
+            .expect("接收真实模型请求");
+        let tools: Vec<_> = seen["tools"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|tool| {
+                tool["functionDeclarations"]
+                    .as_array()
+                    .or_else(|| tool["function_declarations"].as_array())
+                    .into_iter()
+                    .flatten()
+            })
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert_eq!(tools, ["manage_task"], "真实请求中的剩余工具");
+        wait_for_ws_event(&mut ws, |event| {
+            matches!(event, DaemonEvent::TurnStreamDelta { text_delta, .. }
+            if text_delta.contains("SOXU_AGY_OK"))
+        })
+        .await;
+        wait_for_ws_event(&mut ws, |event| {
+            matches!(event, DaemonEvent::SessionUpdated(session)
+            if session.session_id == id && session.bucket == WorkspaceBucket::Done)
+        })
+        .await;
+        let native_id = state.snapshot().expect("读取真机会话快照").sessions[0]
+            .native_session_id
+            .clone()
+            .expect("取得原生会话标识");
+        if let Some(first) = &first_id {
+            assert_eq!(first, &native_id);
+            assert!(seen["contents"].to_string().contains("SOXU_AGY_OK"));
+        }
+        first_id = Some(native_id);
+    }
+    assert!(
+        post_rpc(addr, submit_native(&id, "SOXU_TEST_PRE_TOOL_USE"))
+            .await
+            .ok
+    );
+    let hook_result = tokio::time::timeout(Duration::from_secs(25), async {
+        loop {
+            let request = received.recv().await.expect("接收钩子后的模型请求");
+            if request["contents"].to_string().contains("SOXU_HOOK_DENY") {
+                break request;
+            }
+        }
+    })
+    .await
+    .expect("真实 AGY 必须在下一次模型请求中报告钩子拒绝");
+    assert!(hook_result["contents"].to_string().contains("manage_task"));
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::SessionUpdated(session)
+        if session.session_id == id && session.bucket == WorkspaceBucket::Done)
+    })
+    .await;
+
+    assert!(
+        post_rpc(addr, submit_native(&id, "SOXU_WAIT_FOR_CANCEL"))
+            .await
+            .ok
+    );
+    let request = tokio::time::timeout(Duration::from_secs(25), received.recv())
+        .await
+        .expect("等待取消测试的模型请求")
+        .expect("接收取消测试的模型请求");
+    assert!(
+        request["contents"]
+            .to_string()
+            .contains("SOXU_WAIT_FOR_CANCEL")
+    );
+    assert!(
+        post_rpc(
+            addr,
+            RpcCommand::StopTurn {
+                session_id: id.clone()
+            }
+        )
+        .await
+        .ok
+    );
+    wait_for_ws_event(&mut ws, |event| {
+        matches!(event, DaemonEvent::SessionUpdated(session)
+        if session.session_id == id && session.bucket == WorkspaceBucket::Done)
+    })
+    .await;
+    handle.abort();
+    server.abort();
 }
 
 #[tokio::test]
@@ -1347,6 +1699,7 @@ fn bind_local_fixture(dir: &TempDir, state: &DaemonState) -> SessionTarget {
 async fn quick_chat_only_drivers_reject_bound_directories() {
     assert_bound_directory_rejected(NativeCliKind::Copilot, "copilot.cjs").await;
     assert_bound_directory_rejected(NativeCliKind::OpenCode, "opencode.cjs").await;
+    assert_bound_directory_rejected(NativeCliKind::Antigravity, "antigravity.cjs").await;
 }
 
 async fn assert_bound_directory_rejected(kind: NativeCliKind, fixture: &str) {

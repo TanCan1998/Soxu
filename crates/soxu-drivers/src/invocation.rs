@@ -192,7 +192,7 @@ pub(crate) fn invocation(
                 "--sandbox",
                 "--disable-slash-commands",
                 "--settings",
-                "{\"toolPermission\":\"strict\",\"allowNonWorkspaceAccess\":false,\"permissions\":{\"deny\":[\"read_file(*)\",\"write_file(*)\",\"command(*)\",\"read_url(*)\",\"execute_url(*)\",\"mcp(*)\"]}}",
+                r#"{"modelProvider":"gemini","toolPermission":"strict","allowNonWorkspaceAccess":false,"permissions":{"deny":["read_file(*)","write_file(*)","command(*)","read_url(*)","execute_url(*)","mcp(*)"]}}"#,
             ],
             Input::Argument,
         ),

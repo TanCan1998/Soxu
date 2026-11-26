@@ -1,5 +1,6 @@
 //! Soxu 守护进程库导出，供可嵌入运行及端到端集成测试使用。
 
+pub mod antigravity;
 pub mod native_assets;
 pub mod pairing;
 pub mod server;

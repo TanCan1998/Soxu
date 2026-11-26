@@ -99,6 +99,73 @@ async fn collect(mut turn: RunningTurn) -> Vec<DriverEvent> {
 }
 
 #[tokio::test]
+#[cfg(any(windows, unix))]
+async fn antigravity_cancel_and_drop_reap_the_hook_process_tree() {
+    let scratch = Scratch::new();
+    let node = node().expect("Node is required for the process tree fixture");
+    let script = scratch.0.join("antigravity process tree.cjs");
+    fs::write(
+        &script,
+        include_bytes!("fixtures/antigravity-process-tree.cjs"),
+    )
+    .expect("写入进程树夹具");
+    for drop_turn in [false, true] {
+        let pid_file = scratch.0.join(format!("pids-{drop_turn}"));
+        let mut driver = NativeDriver::with_program(
+            NativeCliKind::Antigravity,
+            node.clone(),
+            [script.as_os_str().to_owned()],
+        )
+        .expect("配置进程树夹具")
+        .without_inherited_env()
+        .with_env(
+            "SOXU_TEST_TREE_PIDS",
+            Some(pid_file.clone().into_os_string()),
+        );
+        if let Some(system_root) = std::env::var_os("SystemRoot") {
+            driver = driver.with_env("SystemRoot", Some(system_root));
+        }
+        let mut turn = driver
+            .start(RunRequest::new(
+                RunTarget::QuickChat(scratch.0.clone()),
+                "tree",
+            ))
+            .expect("启动进程树夹具");
+        assert!(matches!(event(&mut turn).await, Some(DriverEvent::Text(_))));
+        let pids = fs::read_to_string(&pid_file).expect("读取进程树 PID");
+        if drop_turn {
+            drop(turn);
+        } else {
+            turn.control().cancel();
+            assert_eq!(
+                event(&mut turn).await,
+                Some(DriverEvent::Finished(Outcome::Cancelled))
+            );
+        }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+        loop {
+            let check = tokio::process::Command::new(&node)
+                .arg(&script)
+                .arg("check")
+                .args(pids.split_whitespace())
+                .stdin(std::process::Stdio::null())
+                .output()
+                .await
+                .expect("执行进程存活探针");
+            if check.status.success() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "进程树回收超时：{}",
+                String::from_utf8_lossy(&check.stderr)
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+#[tokio::test]
 async fn codex_streams_both_targets_and_preserves_unknown_telemetry() {
     let scratch = Scratch::new();
     let quick = scratch.dir("quick chat");

@@ -349,7 +349,7 @@ impl DaemonState {
                         .lock()
                         .map_err(|_| lock_err("orchestrator"))?;
                     orch.reconcile(ReconcileRequest {
-                        agent_id,
+                        agent_id: crate::antigravity::canonical_agent_id(agent_id),
                         current_model: model_id,
                         current_perm: permission,
                         current_thinking: thinking,
@@ -435,7 +435,7 @@ impl DaemonState {
                         .lock()
                         .map_err(|_| lock_err("orchestrator"))?;
                     orch.reconcile(ReconcileRequest {
-                        agent_id,
+                        agent_id: crate::antigravity::canonical_agent_id(agent_id),
                         current_model: model_id,
                         current_perm: permission,
                         current_thinking: thinking,
@@ -614,7 +614,7 @@ impl DaemonState {
                         .lock()
                         .map_err(|_| lock_err("orchestrator"))?;
                     orch.reconcile(ReconcileRequest {
-                        agent_id,
+                        agent_id: crate::antigravity::canonical_agent_id(agent_id),
                         current_model: model_id.or_else(|| Some(session.model_id.clone())),
                         current_perm: permission.or(Some(session.permission)),
                         current_thinking: thinking.or(session.thinking),

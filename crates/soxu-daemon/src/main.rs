@@ -262,7 +262,37 @@ async fn main() -> anyhow::Result<()> {
         std::env::temp_dir().join(format!("soxu-{}", state.daemon_fingerprint()))
     });
     let native_root = std::path::absolute(native_root)?;
-    let state = Arc::new(state.with_native_driver_set(
+    let (agy, agy_guard) = match std::env::var_os("SOXU_AGY_EXE") {
+        Some(program) => {
+            match soxu_daemon::antigravity::node_program()
+                .context("缺少可信 Node 可执行文件")
+                .and_then(|node| {
+                    soxu_daemon::antigravity::configure(
+                        &native_root.join("antigravity"),
+                        Path::new(&program),
+                        &node,
+                    )
+                }) {
+                Ok((mut driver, guard)) => {
+                    if let Some(key) =
+                        std::env::var_os("SOXU_AGY_GEMINI_API_KEY").filter(|key| !key.is_empty())
+                    {
+                        driver = driver.with_env("GEMINI_API_KEY", Some(key));
+                    }
+                    (Ok(driver), Some(guard))
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "Antigravity 只读快聊未能配置");
+                    (
+                        Err(DriverError::Unsupported("Antigravity 隔离配置未通过校验")),
+                        None,
+                    )
+                }
+            }
+        }
+        None => (Err(DriverError::BinaryNotFound), None),
+    };
+    let mut state = state.with_native_driver_set(
         native_root.join("quick-chats"),
         [
             (NativeCliKind::Codex, discover_codex()),
@@ -286,8 +316,13 @@ async fn main() -> anyhow::Result<()> {
                 NativeCliKind::OpenCode,
                 configure_opencode(native_root.join("opencode")).await,
             ),
+            (NativeCliKind::Antigravity, agy),
         ],
-    )?);
+    )?;
+    if let Some(guard) = agy_guard {
+        state = state.with_native_asset_guard(NativeCliKind::Antigravity, guard)?;
+    }
+    let state = Arc::new(state);
     info!(
         address = %local_addr,
         magpie_detected = state.magpie_detected(),
