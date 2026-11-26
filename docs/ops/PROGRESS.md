@@ -12,7 +12,11 @@
 - **M3e 第三阶段（`#56` / PR `#61`）已合入 `main`，交付宿主接入控制面。** `DaemonState` 核验 `CheckoutStatus::Verified` 后，重核注册与目录身份、index 和固定提交树。路由失败单独记录，重验通过后可重试。`soxu-magpie` 在 `MagpieManaged` 为工作区准备 `direct` MCP 目录级上下文，`StandaloneNative` 可直接使用通过复核的工作区。`crates/soxu-daemon/src/state/native.rs` 与 `soxu-protocol` 保持冻结，真实 Agent 启动与 Worktree 会话联调已由 `#69` 接续（只读原生会话），运行时挂载仍待后续接入 PR。Linux 真实注册和检出链路待非 Windows 宿主补测。
 - **本轮复验已收口。** `#26` / PR `#55`、`#56` / PR `#61` 与 Diff 夹具修复 PR `#62` 均已完成主控复验、通过远端 CI 并合入 `main`，对应 Worktree 已归档。PR `#62` 合入提交为 `810b670`，当前基线为 `0b0317b`。
 - **`wave-m3-next-20261126` 三路已全部合入 `main`。** `#63` / PR `#66`（`02daacf`，子代理遇阻上报与隔离构建规范）、`#64` / PR `#67`（`5225eca`，M3 Git 操作公共契约）、`#65` / PR `#68`（`21cf871`，轮次 Checkpoint 私有索引与覆盖清单）均通过远端 CI 并合入，三路工作区已归档、本地与远端分支已回收，当前基线为 `21cf871`。
-- **`wave-m3-next2-20261126` 三路已开工，合入顺序 `#69` → `#70` → `#71`。** `#69` 交付 `soxu-daemon` 已复核 Worktree 的只读原生会话联调与看板刷新；`#70` 承接固定端点 Diff，`#71` 承接显式仓库创建。本波所有子代理统一使用 DeepSeek（`magpie/auto/deepseek-v4.1-flash-1017`，用户简称 `ds4.1f`）。
+- **`wave-m3-next2-20261126` 三路已开工，合入顺序 `#69` → `#70` → `#71`。** `#69`（PR `#73`）交付 `soxu-daemon` 已复核 Worktree 的只读原生会话联调、启动前目录与清单身份重核及看板刷新，已吸收 `main`（含 `#80` / PR `#82`）并在 WSL 真机完成 8/8 收尾验证；`#70` 承接固定端点 Diff，`#71` 承接显式仓库创建。本波所有子代理统一使用 DeepSeek（`magpie/auto/deepseek-v4.1-flash-1017`，用户简称 `ds4.1f`）。
+- **`main` 已再合入 `#74` / PR `#75`（`22f94af`）。** 升级主控提示词，建立主控自主经验收集与流程自优化闭环（`docs/ops/LESSONS.md` 的 Seen 复现计数晋升机制）。
+- **`main` 已合入 `#76` / PR `#77`（`ea9f345`）。** 完成按改动域与 Cargo 反向依赖分级的抗压 CI、`scripts/detect-check-scope.ps1` 门禁分流、`.github/workflows/release.yml` 与公开联动发版仓库 `TanCan1998/soxu-releases`。
+- **`main` 已合入 `#78` / PR `#79`（`481ed70`）与 PR `#81`（`0e969b6`）。** 项目级 `.pi/settings.json` 以 `autoload: false` 关闭 `context-mode`，派发脚本放行 `python 3.13` 并注入 `PYTHONUTF8=1`，同时修复 `detect-check-scope.ps1` 双括号 `[[bin]]` 误解析导致 `soxu-cli` 包名漏检的缺陷。
+- **`main` 已合入 `#80` / PR `#82`（`e9504d6`）。** 收窄 Linux 真机已检出 Worktree 诊断的 `pending` 放行条件，为 `project.rs` 补跨挂载点 stderr 严格白名单，并修复两处历史 Linux Clippy 告警。
 - **M3 两份设计已合入 `main`。** `#57` 的显式 Init/Clone 与损坏恢复二次授权见 [仓库初始化、克隆与工作树恢复](../dev/git-init-clone-and-recovery.md)。`#58` 的轮次 Checkpoint 快照、先建 Safety Snapshot 再 Rewind 和文件级结构化提交见 [检查点、回退与结构化提交](../dev/git-checkpoint-rewind-commit.md)。
 - 仓库已启用合并自动删支（`delete_branch_on_merge = true`）与 Paseo Worktree 回收。
 - **参考项目与索引进度（已全部完成）**：
@@ -101,11 +105,13 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 | Issue / 任务 | 分支 / Paseo 工作区 | Owned Paths |
 | :--- | :--- | :--- |
-| `#69` `soxu-daemon` 已复核 Worktree 原生只读会话联调与看板刷新 | `feat/69-worktree-native-session-wiring` / `wks_42f8f89cfbb8c36d` | `soxu-daemon/src/state/native.rs`、`soxu-daemon/src/state/worktrees.rs`（仅补 `pub(super)` 复核与目录获取）、`soxu-daemon/tests/worktree_lifecycle.rs`、本看板、AOCI |
+| `#69` `soxu-daemon` 已复核 Worktree 原生只读会话联调与看板刷新（收尾验证中，PR `#73` 待合入） | `feat/69-worktree-native-session-wiring` / `wks_42f8f89cfbb8c36d` | `soxu-daemon/src/state/native.rs`、`soxu-daemon/src/state/worktrees.rs`（仅补 `pub(super)` 复核与目录获取）、`soxu-daemon/tests/worktree_lifecycle.rs`、本看板、AOCI |
 | `#70` M3 固定端点 Diff | `feat/70-git-fixed-endpoint-diff` / `wks_1f218f3956c3cdab` | `soxu-git` 固定端点 Diff 实现与测试、crate README、AOCI |
 | `#71` M3 显式仓库创建 | `feat/71-git-repository-create` / `wks_19a9523a8249b8ac` | `soxu-git` 受控 Init/Clone 与测试、crate README、AOCI |
 
 合入顺序为 **`#69` → `#70` → `#71`**。三路业务写入范围正交，AOCI 按分支维护并由主控在合流时重新对齐。本波所有子代理统一使用 DeepSeek（`magpie/auto/deepseek-v4.1-flash-1017`，用户简称 `ds4.1f`）。
+
+`#69` 已吸收 `main`（`#74` / `#76` / `#78`+`#81` / `#80`）并完成收尾验证：WSL `Ubuntu-26.04` 真机（Rust `1.99.1`，独立 `CARGO_TARGET_DIR`）`cargo clippy --workspace --all-targets --locked -- -D warnings` 零警告、`cargo test -p soxu-daemon --locked --test worktree_lifecycle` **8 passed; 0 failed**、`cargo test -p soxu-daemon --locked` 全量 32 passed / 3 ignored / 0 failed。
 
 ### 3.2 已合入交付与验收证据边界
 
@@ -137,6 +143,8 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 - `#33`（PR `#36`）的 M3a Git 专项 20 项全通过，覆盖真实目录后缀、linked worktree、detached/unborn HEAD 和特殊路径。交付范围限于只读仓库身份与结构化状态。
 - 本机使用 `soxu doctor --json` 查看脱敏发现结果，通过 `soxu chat new --read-only` 创建快聊，再用 `soxu chat send <对话或会话 ID> <文本>` 发送，`soxu events` 查看增量，`soxu chat stop <对话或会话 ID>` 停止。Windows 的 Scoop 包装器需用 `SOXU_CODEX_EXE` 指定真实 EXE 的绝对路径。失败或停止后暂停剩余队列，下一次投递从队首继续。队列驻留内存。
 
+- `#69`（PR `#73`）在 `#56` 宿主接入之上打通已复核 Worktree 的原生只读会话：首轮、续接与 FIFO 出队前统一经 `resolve_ready_worktree_dir` 复核目录身份与 `.soxu-worktree-mcp.json` 清单（符号链接/重解析点拒绝），复核失败以 `WorkspaceDamaged` 上报并保留队首待撤回。WSL 真机专项 8 项全通过；同轮修正在测试桩驱动 `turn.completed` 缺少 `usage` 被 `soxu-drivers` 判为 `MalformedOutput` 导致的回合失败，以及用例在 `CreateSession` 之前订阅事件、被会话创建 `Idle` 事件提前满足首轮等待的竞态。GitHub CI 的 Rust 门禁仅跑 `windows-latest`，Linux 专属用例由本轮 WSL 真机补测。
+
 - **并发规则**：各阶段公共契约先串行冻结，正交模块按独立 Owned Paths 采用 `2~3` 路 Paseo Worktree 并行；AOCI 托管资产由各分支独立维护，合流后重新对齐。
 - **双桌面端主控协同（AGY ⇄ Codex 随时切换）**：本机 AGY 桌面端与 Codex 桌面端已同时导入 `Soxu` 项目，宿主配置与工作树写操作相互隔离，仓库认知（`AGENTS.md` / `aoci.txt` / `.agents/skills/paseo-orchestrator`）与 Paseo 守护进程状态池全面共享；任意时刻均可使用 `pwsh -NoProfile -File scripts/paseo-ctl.ps1` 在两端之间无损切换控制 Paseo。
 - **主力 Agent 与模型路由池**（通过 Paseo 调度，经 Magpie 网关路由；**后续派发仅使用 `pi` agent**，并须通过 `scripts/paseo-run-pi.ps1` 绑定项目 `mise.toml` 锁定环境）：
@@ -149,8 +157,8 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 按 **`#69` → `#70` → `#71`** 顺序完成 `wave-m3-next2-20261126` 三路的执行、主控复验与合入。
-2. 后续 Git 候选按契约和共享写入范围排期：`#57-2` 实现只读恢复预览（恢复执行须另经二次授权），`#58-D` 先建 Safety Snapshot 再执行 Rewind，`#58-E` 实现文件级结构化提交的预检和执行。固定端点 Diff 由本波 `#70` 承接，受控 Init/Clone 由 `#71` 承接。
+1. 按 **`#70`（`#58-C`）→ `#71`（`#57-1`）** 顺序完成 `wave-m3-next2-20261126` 剩余两路的执行、主控复验与合入；`#69` / PR `#73` 已通过 WSL 真机 8/8 收尾验证，进入主控复验与合入。
+2. 后续 Git 候选按契约和共享写入范围排期：`#57-2` 实现只读恢复预览（恢复执行须另经二次授权），`#58-D` 先建 Safety Snapshot 再执行 Rewind，`#58-E` 实现文件级结构化提交的预检和执行，之后衔接剩余工作区联调。固定端点 Diff 由本波 `#70` 承接，受控 Init/Clone 由 `#71` 承接。
 3. `state/native.rs` 的 Worktree 只读原生会话联调由 `#69` 交付，衔接 `#56` 宿主就绪状态：仅 `Codex`、`Pi`、`Claude`、`Qwen` 可在已复核 Worktree 启动，`Copilot`、`OpenCode`、`Antigravity` 仍限快速对话。`direct` MCP 运行时挂载与 Worktree 内写权限另排期，涉及 `soxu-protocol` 的变更先走独立契约 PR。
 4. 在非 Windows 宿主补测 `#49`、`#51`、`#56`、`#69` 的真实注册、固定提交检出、宿主接入、路由重试与 Worktree 原生会话。`#69` 的 Linux 专属 `mod linux` 用例未在真实 Linux 宿主编译或运行（本机 WSL 启动返回 ERROR_BAD_EXE_FORMAT 且缺少 x86_64-linux-gnu-gcc），需留待 Linux 宿主补测。Windows 原生目录身份与 DACL 持续授权另行决策。
 5. `#26` 隔离只读快聊已合入。Daemon 托管快聊的项目目录入口继续关闭，后续另行验收项目配置来源、启动竞态和运行期隔离。Copilot 项目钩子安全、遥测、历史导入、附件、移交、更高权限及移动端投递另排验收。M2 和 M3 均仍有未交付范围。
