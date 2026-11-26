@@ -38,7 +38,13 @@ $rustSummary = if ($plan.rust) {
 } else {
   "跳过"
 }
-Write-Host ("==> 门禁范围：full={0} | files={1} | rust={2} | mobileWeb={3} | paseo={4}" -f $plan.full, $plan.changedFiles.Count, $rustSummary, $plan.mobileWeb, $plan.paseoOrchestration) -ForegroundColor DarkCyan
+$planMode = if ($plan.PSObject.Properties["mode"]) { $plan.mode } else { "legacy" }
+$planPlatforms = if ($plan.PSObject.Properties["requiredPlatforms"]) { @($plan.requiredPlatforms) -join ',' } else { "" }
+Write-Host ("==> 门禁范围：full={0} | mode={1} | files={2} | rust={3} | mobileWeb={4} | paseo={5} | platforms={6}" -f $plan.full, $planMode, $plan.changedFiles.Count, $rustSummary, $plan.mobileWeb, $plan.paseoOrchestration, $planPlatforms) -ForegroundColor DarkCyan
+# 变更路径只用于追溯；无法归因或回退时把原因全部打出来，避免“跳过了但没人知道为什么”。
+if ($plan.PSObject.Properties["fallbackReasons"] -and @($plan.fallbackReasons).Count -gt 0) {
+  Write-Host ("==> 保守回退原因：{0}" -f (@($plan.fallbackReasons) -join ' ; ')) -ForegroundColor Yellow
+}
 
 Invoke-Step "[1/7] 校验 Git Emoji 提交历史与隐私安全..." {
   pwsh -NoProfile -File scripts/verify-commits-and-privacy.ps1 -Mode CiCheck
@@ -75,22 +81,31 @@ if ($plan.rust) {
     cargo fmt --all -- --check
   }
 
-  $pkgArgs = @($plan.rustPackageArgs -split '\s+' | Where-Object { $_ })
+  # 包列表以结构化参数数组传递，不再把字符串再拆回令牌；统一加 --locked 保锁文件纪律。
+  $pkgArgs = [System.Collections.Generic.List[string]]::new()
+  foreach ($pkg in @($plan.rustPackages)) {
+    if ([string]::IsNullOrWhiteSpace($pkg)) { continue }
+    $pkgArgs.Add("-p")
+    $pkgArgs.Add([string]$pkg)
+  }
 
   if ($plan.rustScope -eq "workspace") {
     Invoke-Step "[5/7] 运行全工作区 Clippy 静态检查..." {
-      cargo clippy --workspace --all-targets -- -D warnings
+      cargo clippy --workspace --all-targets --locked -- -D warnings
     }
     Invoke-Step "[6/7] 运行全工作区 Rust 测试..." {
-      cargo test --workspace
+      cargo test --workspace --locked
     }
-  } else {
+  } elseif ($pkgArgs.Count -gt 0) {
     Invoke-Step "[5/7] 运行增量 Clippy 检查 ($($plan.rustPackages -join ', '))..." {
-      cargo clippy @pkgArgs --all-targets -- -D warnings
+      cargo clippy @pkgArgs --all-targets --locked -- -D warnings
     }
     Invoke-Step "[6/7] 运行增量 Rust 测试 ($($plan.rustPackages -join ', '))..." {
-      cargo test @pkgArgs
+      cargo test @pkgArgs --locked
     }
+  } else {
+    Write-Error "❌ 检测器给出 crates 范围但包列表为空，拒绝误跳过 Clippy 与测试"
+    exit 1
   }
 } else {
   Write-Host "==> [4/7]-[6/7] 跳过 Rust 格式、Clippy 与测试（未触及 Cargo/Crate 源码）" -ForegroundColor DarkGray

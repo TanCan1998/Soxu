@@ -1,4 +1,4 @@
-param(
+﻿param(
   [ValidateSet("Plan", "Verify", "Contract", "ReleaseContract", "ExtractRuns")]
   [string]$Mode = "Verify",
   [string]$ScopePath = "",
@@ -30,6 +30,13 @@ $DetectorJobId = "detect-changes"
 $GateJobId = "ci-gate"
 $ValidStatuses = @("success", "failure", "cancelled", "skipped")
 $ValidRustScopes = @("workspace", "crates", "none")
+
+# 计划路径契约。检测器输出的结构化 scope 带 schemaVersion=1，路径一律是仓库相对规范
+# 路径且原样传递：POSIX 合法的字面反斜杠不得被改写成分隔符，否则一个路径会变成另一个
+# 路径并误触发专项门禁。旧的无版本 scope 继续接受既有 Windows 路径格式并归一化。
+$CurrentScopeSchemaVersion = 1
+$PathContractVersioned = "repo-relative/v1"
+$PathContractLegacy = "repo-relative/legacy"
 
 # 发布仓 TanCan1998/soxu-releases 固定 SHA 33a21eb 的四平台资产精确文件名。
 $ReleaseAssetNames = @(
@@ -96,18 +103,53 @@ function Get-ScopeBoolean($Scope, [string]$Name) {
   return [bool]$value
 }
 
+function Get-ScopeSchemaVersion($Scope) {
+  $prop = $Scope.PSObject.Properties["schemaVersion"]
+  if ($null -eq $prop -or $null -eq $prop.Value) { return 0 }
+  $value = $prop.Value
+  if ($value -isnot [int] -and $value -isnot [long]) {
+    throw "变更范围字段 schemaVersion 必须是整数。"
+  }
+  if ([int]$value -lt 0 -or [int]$value -gt $CurrentScopeSchemaVersion) {
+    throw "不支持的变更范围 schemaVersion：$value（当前支持 0..$CurrentScopeSchemaVersion）。"
+  }
+  return [int]$value
+}
+
+function Assert-VersionedRepoPath([string]$PathValue, [string]$Origin) {
+  # 只拒绝真正越界或语义不确定的写法；字面反斜杠、逗号、空白与非 ASCII 全部合法。
+  if ($PathValue.IndexOf([char]0) -ge 0) { throw "变更范围路径 $Origin 含 NUL 字符。" }
+  if ($PathValue.StartsWith("/")) { throw "变更范围路径 $Origin 必须是仓库相对路径，不接受绝对路径。" }
+  if ($PathValue -match '^[A-Za-z]:') { throw "变更范围路径 $Origin 必须是仓库相对路径，不接受盘符路径。" }
+  if ($PathValue.EndsWith("/")) { throw "变更范围路径 $Origin 不能以 / 结尾。" }
+  foreach ($segment in $PathValue.Split('/')) {
+    if ($segment -eq "" -or $segment -eq "." -or $segment -eq "..") {
+      throw "变更范围路径 $Origin 含空段或相对段：$PathValue"
+    }
+  }
+}
+
 function Get-ChangedFileList($Scope) {
   # changedFiles 是门禁专项触发（selfTest / releaseContract）的唯一输入来源，
   # 缺失、null 或含非字符串条目都必须失败关闭，不能静默退化为“未触及工作流”。
+  # 归一化强度由 scope 的路径契约决定：版本化 scope 原样保留，旧 scope 归一化反斜杠。
   $prop = $Scope.PSObject.Properties["changedFiles"]
   if ($null -eq $prop) { throw "变更范围 JSON 缺少字段 changedFiles。" }
   if ($null -eq $prop.Value) { throw "变更范围字段 changedFiles 不能为 null。" }
 
+  $schemaVersion = Get-ScopeSchemaVersion $Scope
   $files = [System.Collections.Generic.List[string]]::new()
+  $index = 0
   foreach ($item in @($prop.Value)) {
+    $index++
     if ($item -isnot [string]) { throw "变更范围字段 changedFiles 含非字符串条目。" }
     if ([string]::IsNullOrWhiteSpace($item)) { throw "变更范围字段 changedFiles 含空路径。" }
-    $files.Add($item.Replace('\', '/'))
+    if ($schemaVersion -ge $CurrentScopeSchemaVersion) {
+      Assert-VersionedRepoPath $item "第 $index 项"
+      $files.Add($item)
+    } else {
+      $files.Add($item.Replace('\', '/'))
+    }
   }
   return @($files)
 }
@@ -147,6 +189,8 @@ function New-GatePlan($Scope) {
 
   Assert-ScopeConsistency $Scope $full $rust $rustScope $mobileWeb $paseoOrchestration $checkScopeSelfTest
 
+  $schemaVersion = Get-ScopeSchemaVersion $Scope
+  $pathContract = if ($schemaVersion -ge $CurrentScopeSchemaVersion) { $PathContractVersioned } else { $PathContractLegacy }
   $changed = Get-ChangedFileList $Scope
   # 门禁自身与其依赖脚本变更时必须跑回归矩阵；发布工作流变更时必须跑发布契约校验。
   $gateTouchPaths = @(
@@ -174,6 +218,8 @@ function New-GatePlan($Scope) {
   }
 
   $scopeSummary = [pscustomobject][ordered]@{
+    # 设问：这个 scope 用的是哪种路径契约。Verify 依此重算，不能靠猜。
+    schemaVersion      = [int]$schemaVersion
     full               = $full
     rust               = $rust
     rustScope          = $rustScope
@@ -186,6 +232,8 @@ function New-GatePlan($Scope) {
 
   return [pscustomobject][ordered]@{
     version         = $PlanVersion
+    # 显式声明路径契约，供 Verify 与下游消费者区分版本化入口和旧 Windows 入口。
+    pathContract    = $pathContract
     detector        = $DetectorJobId
     gate            = $GateJobId
     jobs            = @($jobs)
@@ -247,6 +295,15 @@ function Test-PlanContract($Plan, [System.Collections.Generic.List[string]]$Erro
     if ($null -ne $flagProp -and $flagProp.Value -is [bool] -and [bool]$flagProp.Value -ne [bool]$expected.$flag) {
       $Errors.Add("plan_flag_conflict:$flag")
     }
+  }
+
+  # 路径契约必须与 scope 推导一致：旧 scope 不能自封为版本化入口来保留反斜杠，
+  # 版本化 scope 也不能被降级为本机 Windows 形式，否则两个入口的路径身份会互相冒用。
+  $pathContractProp = $Plan.PSObject.Properties["pathContract"]
+  if ($null -eq $pathContractProp -or $pathContractProp.Value -isnot [string] -or [string]::IsNullOrWhiteSpace($pathContractProp.Value)) {
+    $Errors.Add("plan_path_contract_missing")
+  } elseif ([string]$pathContractProp.Value -ne [string]$expected.pathContract) {
+    $Errors.Add("plan_path_contract_conflict")
   }
 
   $jobsProp = $Plan.PSObject.Properties["jobs"]
@@ -614,6 +671,15 @@ function Invoke-ContractMode([string]$PathValue) {
   }
   if ($detectText -notmatch 'scripts/detect-check-scope\.ps1') { $errors.Add("detect_scope_script_missing") }
   if ($detectText -notmatch '(?m)-Mode Plan') { $errors.Add("detect_plan_mode_missing") }
+
+  # 结构化输出的数组序列化形式。管道形式下 ConvertTo-Json 对零元素输出空串、
+  # 对单元素输出 JSON 字符串，下游无法区分“空”与“一个值”，必须用 -InputObject 包住数组。
+  foreach ($outputName in @("required_platforms", "required_jobs", "test_profiles")) {
+    $arrayPattern = $outputName + '=\$\(ConvertTo-Json -InputObject @\(\$scope\.[A-Za-z]+\) -Compress\)'
+    if ($detectText -notmatch $arrayPattern) {
+      $errors.Add("detect_output_json_not_array:$outputName")
+    }
+  }
 
   # 治理作业：按计划触发门禁回归矩阵与发布契约校验。
   $govText = ($jobs["governance-and-privacy"] -join "`n")
