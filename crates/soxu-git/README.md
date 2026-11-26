@@ -80,6 +80,17 @@ M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控
 
 Windows 专项夹具验证四种基准、unborn、linked/detached 独立 index、基准树独有删除、二进制、CRLF 与非 UTF-8 文本。独占锁令未授权文件正文确实无法读取，同次选择其他文件仍能得到审阅结果。50,000 行夹具的元数据查询成功，超过 16 MiB 的审阅整个失败。配置、index、对象库及其余夹具文件的字节和 mtime 前后相同。Unix 真实换行、非 UTF-8 路径和链接替换用例由 Unix 门禁运行。
 
+## 受控仓库 Init 与本地源 Clone
+
+`RepositoryCreateCoordinator` 绑定宿主私有协调域；`RepositoryCreateRequest` 是一次性结构化授权：请求 ID、操作、已打开受控父根、直接目标名与固定参数。`GitProbe::create_repository` 只执行两种 Git 写入：`git init --template= --initial-branch=main -- <目标>` 与本地源 `git clone --no-local --no-checkout --no-recurse-submodules --template= -- <源> <目标>`；`GitProbe::diagnose_repository_create` 只读回查，不接受调用方另行提供的目标路径。
+
+- Init：默认只接受缺失目标；`InitMode::VerifiedEmptyDirectory` 显式接纳经持锁复核仍为空的纯空目录（含隐藏项全量枚举）。拒绝非空目录、现有仓库、bare 结构、损坏 gitfile、祖先仓库、链接与 reparse point。任何失败都保留用户预建的原空目录。
+- Clone：首版只开放本地绝对的普通仓库来源；`--no-checkout` 收下元数据后由 `repository_create/checkout` 用 `git ls-tree -r -z` 预检、再用 `git cat-file --batch` 逐对象发布工作树，从不调用 `git checkout` / `checkout-index`，因此不执行钩子、Git LFS、子模块、外部过滤器或项目脚本。拒绝 bare、关联工作树、UNC、alternates、promisor、shallow 与含 `120000`/`160000` 的提交。受控 HTTPS 与任何 `ext::`、`file://`、`git://`、`ssh://`、scp 风格来源一律以 `Unsupported` / `UnsupportedSource` 关闭。
+- 留痕：协调域内 `SOXURC1` 逐行 `key=value` 文本记录（单文件 ≤ 64 KiB、原子 `tmp` → `rename` 加目录同步、字段 `%` 转义）。阶段为 `Prepared` → `Started` → `Observed`，终态为 `NotStarted` / `Verified` / `PartialObserved` / `Unknown`。同 ID 变参报 `RequestConflict`；结果未知时拒绝重放；从不自动删除、覆盖或迁移目标。
+- 运行隔离：受控 Git 在协调域沙箱内运行，清除继承的 `GIT_*`、`SSH_*`、`GPG_*`、`LC_*`、`XDG_*`、代理与 home/临时目录变量，隔离 HOME/XDG/临时目录与全局配置，用宿主私有空目录覆盖 `core.hooksPath`，`protocol.allow=never` 且只放行本次操作声明的协议；单命令 120 秒、输出 16 MiB 上限，超时或超限先关闭管道再终止并回收直接子进程。
+
+平台边界（如实披露）：Linux 用 `O_DIRECTORY | O_NOFOLLOW` 逐段打开并绑定 `/proc/self/fd`，身份为 `dev:ino` 加目录创建时间（目录内容变化会推进 `ctime`，故不使用 `ctime`；创建时间不可得时 fail-closed）；Windows 从卷根逐段持有 `share_mode(1|2)`（不共享删除）且带 `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT` 的目录句柄并逐段核对非 reparse point，身份只有 `creation_time + file_attributes`（纯 `std` 无跨重启 NTFS FileId），仅在「同一进程持有句柄链」期间用于检测替换，不与 Linux 等价；其他平台 fail-closed 返回 `UnsupportedPlatform`。本仓库已在 Windows 与 WSL Ubuntu 26.04.1 LTS（rustc 1.99.1、clippy 0.1.99）两处实机执行 `tests/repository_create.rs` 全部 19 个用例并通过，两平台 `cargo clippy -- -D warnings` 均零告警；Windows 分支额外覆盖 junction 与 reparse point 拒绝，Linux 分支覆盖 `O_DIRECTORY | O_NOFOLLOW` 打开与 `/proc/self/fd` 身份绑定。其余 Unix（macOS、BSD）未验证，按 fail-closed 处理。
+
 ## 只读与限制
 
 所有子进程直接传参数并设置独立 `current_dir`，不启动 shell，不改变全局 cwd 或环境。子进程清除继承的 `GIT_*`，忽略系统/全局 Git 配置，保留仓库自身的语义配置；禁用 optional locks、fsmonitor、untracked cache、自动维护、子模块摘要和按需 fetch，关闭交互。单命令超时 15 秒，stdout/stderr 各上限 16 MiB；任一流读到上限加一字节立即返回 `OutputLimit`，不等待 EOF 或自然退出而退化成 `Timeout`。超限、超时或读取失败会终止并等待回收直接子进程，不承诺回收恶意入口派生的整个进程树。
@@ -94,8 +105,10 @@ Windows 专项夹具验证四种基准、unborn、linked/detached 独立 index�
 
 `mise exec -- cargo test -p soxu-git --locked` 覆盖 unborn/attached/detached、子目录、linked worktree、暂存/未暂存、Unicode/空格、冲突、目录错误、fsmonitor 与过滤器拒绝，以及解析器的换行、非 UTF-8、复制、七类冲突、SHA-256 和非法输入。临时内嵌 Git 工作树实测 `--untracked-files=all` 仍返回带单个 `/` 后缀的 `?` 目录记录；忽略枚举返回对应 `!` 目录记录。仅这两类允许单个目录后缀并保留原始字节，跟踪、重命名源/目标和冲突路径仍拒绝目录后缀；所有类型均拒绝内部空分量、双斜线、绝对路径及 `.`/`..`。探测前后比较整个临时仓库的文件列表与字节，确保索引和对象未变。Unix 专项真实路径用例只在 Unix 执行；Windows 上执行纯字节解析与拒绝转换用例。
 
+`tests/repository_create.rs` 覆盖缺失目标与显式空目录 Init、空目录被写入后的拒绝且保留原内容、现有仓库 / bare / gitfile / 祖先仓库 / 链接拒绝、预置 `GIT_*`、`GIT_CONFIG_*` 与外部 `init.templateDir` 不生效、unborn `refs/heads/main` 复核，以及本地源 `--no-local` 克隆、已存在空目录与源目标重叠拒绝、非法或未开放协议拒绝、空远端、symlink / gitlink / 外部过滤器 / alternates 源阻断发布、同 ID 变参与同参重放、命令失败留痕与只读诊断。全部夹具位于系统临时目录内，不访问外网，不留孤儿进程。
+
 副作用夹具在临时根中放置可写 marker 脚本，逐一验证 clean/process/fsmonitor 的本地、include、条件 include、linked worktree 与 worktree include 共 15 种组合：探测后 marker 不存在且仓库字节不变；原生 Git diff（过滤器）或 status（fsmonitor）正向对照必须写出 marker，避免以不存在的命令冒充安全证据。输出夹具复用原生 Rust 测试二进制，以较小限额验证 stdout/stderr 超限后仍存活的进程返回 `OutputLimit` 而非 `Timeout`、精确上限合法、空闲进程超时，均检查直接子进程已被等待回收。
 
 `mise exec -- cargo test -p soxu-git --locked --test project` 使用真实 Git 临时夹具验证项目身份、错误分类与只读边界。打开前后比较目录项、文件字节和修改时间。损坏索引与外部过滤器分别验证身份读取独立于状态查询。Windows 用独占文件句柄复现访问失败，Unix 在文件权限实际受限时断言拒绝。
 
-剩余 M3 包括显式初始化与克隆、Worktree 池与损坏恢复、direct MCP 上下文挂载、Checkpoint Diff 与 Safety Stash、拆分式提交及预检。Daemon 与协议接线另行协调。
+显式 Init 与本地源 Clone 已由 `create_repository` 交付，HTTPS 克隆、Worktree 池与损坏恢复、direct MCP 上下文挂载、Checkpoint Diff 与 Safety Stash、拆分式提交及预检。Daemon 与协议接线另行协调。
