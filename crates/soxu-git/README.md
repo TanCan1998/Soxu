@@ -2,6 +2,18 @@
 
 M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控检出。M3d 提供已跟踪文件的四种只读 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
 
+## 轮次 Checkpoint
+
+调用方用 `CheckpointScope::new()` 创建工作区和会话的私有作用域，并把同一作用域用于该会话后续轮次。`GitProbe::capture_checkpoint(root, &options)` 接收工作树根、轮次和既有的应用独占状态目录。状态目录须在工作树及 Git 元数据之外。Linux 上目录须拒绝组和其他用户访问，Windows 上由宿主提供独占 ACL。同一应用使用同一状态目录协调工作树锁。调用方可从 `CheckpointRecord::summary()` 取得既有的四字段摘要，`changed_files` 统计基树与捕获树之间禁用 rename 配对后的变更路径数。
+
+捕获固定 HEAD 对象，从独立临时 index 建树。未出生分支动态构建对应对象格式的空树。逐个审核跟踪路径及尊重 `.gitignore`、`info/exclude` 的未跟踪路径，再把已审核的文件字节送入 Git。归档提供 `raw-blob` 或 `deleted` 表示，省略 clean/process/LFS、工作树编码及 ident 转换路径。忽略路径、敏感路径或内容、特殊文件、预算耗尽均在 `CoverageManifest` 中可见。忽略目录只记录目录边界。遗漏的跟踪路径沿用基树条目，遗漏条目无恢复权威。预算默认在 1 MiB 提示、限制文本 8 MiB、授权二进制 32 MiB、合计 64 MiB、10,000 路径，并限制 Git 输出和运行时间。
+
+持久化 Intent 后，使用对象格式对应的全零旧值创建 `refs/soxu/checkpoints/<workspace-id>/<session-id>/<checkpoint-id>`，再原子发布应用目录记录。原 HEAD、分支、主 index、工作树文件和普通 reflog 字节保留。`GitProbe::inspect_checkpoint(root, state_directory.join(checkpoint_id))` 在重启后只读核验 Intent、提交树与 ref。若私有 ref 已发布且目录记录尚未落地，返回核验后的发布状态。漂移可重试，CAS 冲突保留已有 ref。文件检查和应用锁提供并发漂移检测，独立进程仍可编辑文件，因而捕获只能提供这些观测支持的覆盖范围。
+
+- Linux 通过 `O_DIRECTORY | O_NOFOLLOW`、`/proc/self/fd`、`dev/ino/ctime/nlink` 固定目录与验证文件。普通文件打开时使用 `O_NONBLOCK`。链接、设备、FIFO、嵌套仓库均不进入快照，原始非 UTF-8 路径以字节保存。
+- Windows 从卷根持有未授予 `FILE_SHARE_DELETE` 的目录链，拒绝 reparse point、ADS、保留名、尾随点空格及大小写碰撞。直接从通过校验的文件句柄流式读取，并在前后复核目录链、HEAD、主 index 与已纳入路径。观测记录标注 Windows 纯 `std` 不提供跨重启 NTFS FileId 与 `nlink` 硬链接计数检测。Linux 与 Windows 的原语覆盖范围不同。
+- 其他平台在读取候选文件和发布私有 ref 前返回 `UnsupportedPlatform`。
+
 ## 消费接口
 
 - `GitProbe::new(absolute_git_executable)`：绑定调用方信任的原生 Git 绝对路径，Windows 拒绝脚本 shim。
