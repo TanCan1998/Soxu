@@ -41,6 +41,7 @@ enum ReadOnlyAgent {
     Qwen,
     Copilot,
     OpenCode,
+    Antigravity,
 }
 
 impl ReadOnlyAgent {
@@ -56,6 +57,18 @@ impl ReadOnlyAgent {
                 }
                 "opencode" if matches!(session.target, SessionTarget::QuickChat { .. }) => {
                     return Ok(Self::OpenCode);
+                }
+                "agy" | "antigravity"
+                    if matches!(session.target, SessionTarget::QuickChat { .. }) =>
+                {
+                    return Ok(Self::Antigravity);
+                }
+                "agy" | "antigravity" => {
+                    return Err(turn_error(
+                        ErrorCode::DriverUnavailable,
+                        "Antigravity 只读当前仅支持本机快速对话",
+                        "请创建 Antigravity 只读快速对话",
+                    ));
                 }
                 "copilot" => {
                     return Err(turn_error(
@@ -76,7 +89,7 @@ impl ReadOnlyAgent {
         }
         Err(turn_error(
             ErrorCode::DriverUnavailable,
-            "目前支持 Codex、Pi、Claude Code、Qwen Code、Copilot 与 OpenCode 的未归档只读会话",
+            "目前支持 Codex、Pi、Claude Code、Qwen Code、Copilot、OpenCode 与 Antigravity 的未归档只读会话",
             "请选择已配置的代理与只读权限，或新建只读快速对话",
         ))
     }
@@ -89,6 +102,7 @@ impl ReadOnlyAgent {
             Self::Qwen => "Qwen Code",
             Self::Copilot => "Copilot",
             Self::OpenCode => "OpenCode",
+            Self::Antigravity => "Antigravity",
         }
     }
 
@@ -100,6 +114,7 @@ impl ReadOnlyAgent {
             Self::Qwen => NativeCliKind::QwenCode,
             Self::Copilot => NativeCliKind::Copilot,
             Self::OpenCode => NativeCliKind::OpenCode,
+            Self::Antigravity => NativeCliKind::Antigravity,
         }
     }
 
@@ -131,6 +146,9 @@ impl ReadOnlyAgent {
             Self::Copilot => "请通过 SOXU_COPILOT_EXE 指定可信 Copilot 平台可执行文件",
             Self::OpenCode => {
                 "请通过 SOXU_OPENCODE_EXE 指定可信 OpenCode，并设置只读快聊的模型配置"
+            }
+            Self::Antigravity => {
+                "请通过 SOXU_AGY_EXE 和 SOXU_AGY_NODE_EXE 指定可信原生程序并检查隔离资产"
             }
         };
         turn_error(ErrorCode::DriverUnavailable, error.to_string(), advice)
@@ -196,6 +214,7 @@ impl DaemonState {
                 NativeCliKind::QwenCode,
                 NativeCliKind::Copilot,
                 NativeCliKind::OpenCode,
+                NativeCliKind::Antigravity,
             ] {
                 let (Some(driver), Some(agent)) = (
                     drivers.get(&kind),
@@ -208,11 +227,16 @@ impl DaemonState {
                 agent.permissions.push(PermissionOptionMeta {
                     id: PermissionLevel::ReadOnly,
                     label: "只读对话".to_owned(),
-                    description: "仅投递文本，禁用工具、扩展和 MCP".to_owned(),
+                    description: if kind == NativeCliKind::Antigravity {
+                        "仅用于本机快速对话，隔离配置并拒绝原生工具"
+                    } else {
+                        "仅投递文本，禁用工具、扩展和 MCP"
+                    }
+                    .to_owned(),
                     tone: PermissionTone::Neutral,
                 });
                 agent.supports_live_steer = kind == NativeCliKind::Pi && driver.is_ok();
-                agent.installed = driver.is_ok();
+                agent.installed = kind != NativeCliKind::Antigravity && driver.is_ok();
             }
         }
         orchestrator.set_agent_catalog(agents);
@@ -262,6 +286,20 @@ impl DaemonState {
             anyhow::bail!("资产校验只能绑定已配置的可信驱动");
         }
         guard.verify()?;
+        if kind == NativeCliKind::Antigravity && guard.is_private() && !self.require_auth_for_all {
+            let orchestrator = self
+                .orchestrator
+                .get_mut()
+                .map_err(|_| lock_err("orchestrator"))?;
+            let mut agents = orchestrator.agents().to_vec();
+            if let Some(agent) = agents
+                .iter_mut()
+                .find(|agent| agent.agent_id == kind.binary_name())
+            {
+                agent.installed = true;
+            }
+            orchestrator.set_agent_catalog(agents);
+        }
         runtime.asset_guards.insert(kind, guard);
         Ok(self)
     }
@@ -458,6 +496,7 @@ impl DaemonState {
         &self,
         runtime: &NativeTurns,
         target: &SessionTarget,
+        guard: Option<&NativeAssetGuard>,
     ) -> Result<RunTarget, ActionableError> {
         match target {
             SessionTarget::QuickChat { chat_id } => {
@@ -474,14 +513,20 @@ impl DaemonState {
                 {
                     return Err(invalid_directory());
                 }
-                std::fs::create_dir_all(&runtime.quick_chat_root)
-                    .map_err(|_| invalid_directory())?;
-                let root = runtime
-                    .quick_chat_root
-                    .canonicalize()
-                    .map_err(|_| invalid_directory())?;
-                let dir = root.join(chat_id);
-                std::fs::create_dir_all(&dir).map_err(|_| invalid_directory())?;
+                let dir = if let Some(guard) = guard.filter(|guard| guard.is_private()) {
+                    crate::antigravity::quick_chat_directory(guard, chat_id)
+                        .map_err(|_| invalid_directory())?
+                } else {
+                    std::fs::create_dir_all(&runtime.quick_chat_root)
+                        .map_err(|_| invalid_directory())?;
+                    let root = runtime
+                        .quick_chat_root
+                        .canonicalize()
+                        .map_err(|_| invalid_directory())?;
+                    let dir = root.join(chat_id);
+                    std::fs::create_dir_all(&dir).map_err(|_| invalid_directory())?;
+                    dir
+                };
                 if dir.canonicalize().map_err(|_| invalid_directory())? != dir {
                     return Err(invalid_directory());
                 }
@@ -522,7 +567,13 @@ impl DaemonState {
     ) -> Result<(), ActionableError> {
         let agent = ReadOnlyAgent::for_session(&session)?;
         let driver = agent.driver(runtime)?;
-        let target = self.native_target(runtime, &session.target)?;
+        let guard = runtime.asset_guards.get(&agent.kind());
+        if agent == ReadOnlyAgent::Antigravity && !guard.is_some_and(NativeAssetGuard::is_private) {
+            return Err(
+                agent.driver_error(&DriverError::Unsupported("缺少 Antigravity 私有启动资产"))
+            );
+        }
+        let target = self.native_target(runtime, &session.target, guard)?;
         let mut request = RunRequest::new(target, text.clone());
         if let Some(id) = &session.native_session_id {
             request.session = SessionMode::Resume(id.into());
@@ -531,19 +582,25 @@ impl DaemonState {
             .store
             .next_turn_index(&session.session_id)
             .map_err(internal_err)?;
-        if let Some(guard) = runtime.asset_guards.get(&agent.kind()) {
-            guard
-                .verify_launch_directory(request.target.directory())
-                .map_err(|_| {
-                    turn_error(
-                        ErrorCode::DriverUnavailable,
-                        "原生启动资产或快聊目录未通过可信校验",
-                        "请恢复宿主声明的可信资产，并检查隔离目录是否被替换",
-                    )
-                })?;
-        }
+        let assets = if let Some(guard) = guard {
+            let verify = || -> anyhow::Result<_> {
+                if agent == ReadOnlyAgent::Antigravity {
+                    crate::antigravity::verify_config_layout(guard)?;
+                }
+                Ok(guard.hold_launch_assets(request.target.directory())?)
+            };
+            verify().map_err(|_| {
+                turn_error(
+                    ErrorCode::DriverUnavailable,
+                    "原生启动资产或快聊目录未通过可信校验",
+                    "请恢复宿主声明的可信资产，并检查隔离目录是否被替换",
+                )
+            })?
+        } else {
+            Vec::new()
+        };
         let turn = driver
-            .start(request)
+            .start_with_assets(request, assets)
             .map_err(|error| agent.driver_error(&error))?;
 
         session.lifecycle = TurnLifecycleState::Running;

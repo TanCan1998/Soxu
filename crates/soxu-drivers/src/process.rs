@@ -38,6 +38,7 @@ pub struct NativeDriver {
     program: PathBuf,
     prefix: Vec<OsString>,
     environment: Vec<(OsString, Option<OsString>)>,
+    inherit_environment: bool,
 }
 
 impl NativeDriver {
@@ -101,7 +102,14 @@ impl NativeDriver {
             program,
             prefix: prefix.into_iter().collect(),
             environment: Vec::new(),
+            inherit_environment: true,
         })
+    }
+
+    /// 只把显式配置的环境变量传给子进程。
+    pub fn without_inherited_env(mut self) -> Self {
+        self.inherit_environment = false;
+        self
     }
 
     /// 仅对当前驱动的子进程设置或移除环境变量。
@@ -111,12 +119,29 @@ impl NativeDriver {
     }
 
     pub fn start(&self, request: RunRequest) -> Result<RunningTurn, DriverError> {
+        self.start_with_assets(request, Vec::new())
+    }
+
+    /// 将校验过的资产句柄保留到原生进程退出。
+    pub fn start_with_assets(
+        &self,
+        request: RunRequest,
+        assets: Vec<std::fs::File>,
+    ) -> Result<RunningTurn, DriverError> {
         let (args, input) = invocation(self.kind, &request)?;
         let directory = request.target.directory();
         if !directory.is_absolute() {
             return Err(DriverError::RelativePath);
         }
         let mut command = Command::new(&self.program);
+        if !self.inherit_environment {
+            command.env_clear();
+        }
+        let tree_reaper = if self.kind == NativeCliKind::Antigravity {
+            Some(ProcessTreeReaper::configure(&mut command)?)
+        } else {
+            None
+        };
         if self.kind == NativeCliKind::OpenCode {
             command.env("OPENCODE_PERMISSION", r#"{"*":"deny"}"#);
         }
@@ -154,7 +179,7 @@ impl NativeDriver {
         let (active, activity) = watch::channel(false);
         let kind = self.kind;
         tokio::spawn(async move {
-            let outcome = tokio::select! {
+            let mut outcome = tokio::select! {
                 biased;
                 _ = cancelled.wait_for(|value| *value) => Outcome::Cancelled,
                 _ = events.closed() => Outcome::Cancelled,
@@ -172,9 +197,17 @@ impl NativeDriver {
             };
             active.send_replace(false);
             if matches!(outcome, Outcome::Cancelled | Outcome::IoFailed) {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                if let (Some(reaper), Some(pid)) = (tree_reaper, child.id())
+                    && !reaper.terminate(pid).await
+                {
+                    outcome = Outcome::IoFailed;
+                }
+                let _ = child.start_kill();
+                if child.wait().await.is_err() {
+                    outcome = Outcome::IoFailed;
+                }
             }
+            drop(assets);
             let _ = events.send(DriverEvent::Finished(outcome)).await;
         });
         Ok(RunningTurn {
@@ -186,6 +219,57 @@ impl NativeDriver {
                 activity,
             },
         })
+    }
+}
+
+struct ProcessTreeReaper {
+    program: PathBuf,
+}
+
+impl ProcessTreeReaper {
+    fn configure(command: &mut Command) -> Result<Self, DriverError> {
+        #[cfg(unix)]
+        {
+            command.process_group(0);
+            ["/bin/kill", "/usr/bin/kill"]
+                .into_iter()
+                .map(PathBuf::from)
+                .find(|path| path.is_file())
+                .map(|program| Self { program })
+                .ok_or(DriverError::Unsupported("系统缺少进程组终止程序"))
+        }
+        #[cfg(windows)]
+        {
+            let _ = command;
+            let program = std::env::var_os("SystemRoot")
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+                .map(|path| path.join("System32").join("taskkill.exe"))
+                .filter(|path| path.is_file())
+                .ok_or(DriverError::Unsupported("系统缺少进程树终止程序"))?;
+            Ok(Self { program })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = command;
+            Err(DriverError::Unsupported("当前系统无法回收原生进程树"))
+        }
+    }
+
+    async fn terminate(self, pid: u32) -> bool {
+        let mut command = Command::new(self.program);
+        #[cfg(unix)]
+        command.args(["-s", "KILL", "--", &format!("-{pid}")]);
+        #[cfg(windows)]
+        command.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        tokio::time::timeout(Duration::from_secs(5), command.status())
+            .await
+            .is_ok_and(|result| result.is_ok_and(|status| status.success()))
     }
 }
 

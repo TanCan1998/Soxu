@@ -62,18 +62,29 @@ async function main() {
     allowNonWorkspaceAccess: false,
     permissions: { deny: ["read_file(*)", "write_file(*)", "command(*)", "read_url(*)", "execute_url(*)", "mcp(*)"] },
   };
+  const temp = path.join(root, "tmp");
+  fs.mkdirSync(temp);
   const env = {
-    ...process.env,
     HOME: home,
     USERPROFILE: home,
     APPDATA: path.join(home, "roaming"),
     LOCALAPPDATA: path.join(home, "local"),
+    TEMP: temp,
+    TMP: temp,
+    TMPDIR: temp,
     GEMINI_API_KEY: randomUUID(),
     GOOGLE_GEMINI_BASE_URL: endpoint,
   };
-  delete env.GOOGLE_API_KEY;
-  delete env.GOOGLE_APPLICATION_CREDENTIALS;
-  delete env.GOOGLE_CLOUD_PROJECT;
+  if (process.platform === "win32") {
+    const windows = process.env.SystemRoot;
+    assert(windows && path.isAbsolute(windows));
+    const system32 = path.join(windows, "System32");
+    Object.assign(env, { SystemRoot: windows, WINDIR: windows,
+      COMSPEC: path.join(system32, "cmd.exe"), PATH: system32 });
+  } else {
+    env.PATH = "/usr/bin:/bin";
+  }
+  const stdio = ["ignore", "pipe", "pipe"];
   async function run(label, options = [], directory = work) {
     const firstRequest = requests.length;
     const hookAudit = path.join(root, "hook-invoked.jsonl");
@@ -84,12 +95,11 @@ async function main() {
       "--print", `仅回复验证标记，阶段 ${label}`, "--output-format", "stream-json",
       "--disable-slash-commands", "--model", "gemini-3.8-flash", "--print-timeout", "30s",
       "--settings", JSON.stringify(settings), ...options,
-    ], { cwd: directory, env });
+    ], { cwd: directory, env, stdio });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.stdin.end();
     const deadline = setTimeout(() => child.kill(), 45000);
     const exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
@@ -143,6 +153,10 @@ async function main() {
       assert(result.projectHookExecuted, "必须实际执行隔离项目的启动钩子，不能把未加载当成隔离证明");
       assert(result.declaredTools.includes("write_file"), "必须实际加载项目代理覆盖");
       assert(result.hookDenied, "项目覆盖后可信全局钩子仍须拒绝工具");
+    }
+    if (label === "parent-project-discovery") {
+      assert.equal(result.projectHookExecuted, false, "父目录的项目启动钩子不得被加载");
+      assert.deepEqual(result.declaredTools, ["manage_task"], "父目录不得覆盖空工具代理");
     }
     if (label.startsWith("hook-failure-")) {
       assert(writeErrors.some((error) => /hook/i.test(error.message)), "钩子运行故障必须拒绝工具");
@@ -218,6 +232,10 @@ async function main() {
     injected = false;
     injectedTool = "write_file";
     await run("project-agent-override", ["--agent", "soxu-no-tools"]);
+    const nestedWork = path.join(work, "nested");
+    fs.mkdirSync(nestedWork);
+    injected = false;
+    await run("parent-project-discovery", ["--agent", "soxu-no-tools"], nestedWork);
     const isolatedWork = path.join(root, "asset-check-work");
     fs.mkdirSync(isolatedWork);
     const hooksPath = path.join(home, ".gemini", "config", "hooks.json");
@@ -225,7 +243,8 @@ async function main() {
     for (const [label, script] of [
       ["nonzero", "process.exit(1);"],
       ["invalid-json", 'console.log("not-json");'],
-      ["timeout", "setInterval(() => {}, 1000);"],
+      // 超过 1 秒钩子超时，并在 CLI 未回收子进程时自行退出。
+      ["timeout", "setTimeout(() => {}, 1500);"],
     ]) {
       const failedHook = path.join(root, `${label}-hook.cjs`);
       fs.writeFileSync(failedHook, script);
@@ -254,10 +273,9 @@ async function main() {
     hold = true;
     const heldRequest = new Promise((resolve) => { onHeldRequest = resolve; });
     const heldClose = new Promise((resolve) => { onHeldClose = resolve; });
-    const child = spawn(program, ["--print", "等待回环模型", "--output-format", "stream-json", "--disable-slash-commands", "--model", "gemini-3.8-flash", "--settings", JSON.stringify(settings)], { cwd: work, env });
+    const child = spawn(program, ["--print", "等待回环模型", "--output-format", "stream-json", "--disable-slash-commands", "--model", "gemini-3.8-flash", "--settings", JSON.stringify(settings)], { cwd: work, env, stdio });
     child.stdout.resume();
     child.stderr.resume();
-    child.stdin.end();
     const exited = new Promise((resolve) => child.on("exit", resolve));
     const deadline = setTimeout(() => child.kill(), 30000);
     try {

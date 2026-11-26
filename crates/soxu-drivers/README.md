@@ -19,9 +19,8 @@ Pi 通过 `TurnControl::send` 发送 `follow_up`、`steer` 或 `abort`，
 反映解码器最近确认的 Pi `agent_start` / `agent_settled` 状态，在取消或控制通道关闭后
 返回 false。Daemon 应在 `TurnStarted` 后发送控制；发送时仍可能撞上 settled，须核对 ack。
 已经写入原生通道但退出前未获得应答的请求不合成拒绝 ack，调用方应报告结果未知。
-其余驱动将 Queue 交回 Daemon，Steer 返回不可用，Interrupt 请求终止所启动的
-直接子进程。`TurnControl::cancel` 对所有驱动可用。丢弃 `RunningTurn` 也会触发
-进程回收。进程级取消的范围是直接子进程。
+其余驱动将 Queue 交回 Daemon，Steer 返回不可用。`TurnControl::cancel`、Interrupt 和丢弃
+`RunningTurn` 会触发进程回收。Antigravity 回收其钩子进程树，其余驱动回收直接子进程。
 
 `discover_history` 只读扫描显式指定的绝对目录，无需启动 CLI。列表返回原生 ID、
 源路径和可取得的工作目录、起始时间与修改时间。`HistoryEntry::resume/fork`
@@ -144,7 +143,7 @@ OpenCode 配置、数据库、缓存与状态到 Daemon 的 `opencode` 子目录
 | Pi 1.5.2 | `--mode rpc`；`message_update`、`agent_settled`；模型步骤、token、成本、上下文 | Session JSONL，`--session` / `--fork`；真实 Pi 经 Daemon 接回环模型夹具，通过两轮流式续接并沿用同一会话 ID |
 | Claude Code 2.1.331 | `--print --output-format stream-json --verbose`；部分文本、`result`、报告的轮次、token 与美元成本 | `projects/<cwd>/<id>.jsonl`，`--resume` / `--fork-session`；真实 Claude Code 经 Daemon 接本机模型夹具，两轮回复使用同一 UUID，记录落在隔离目录 |
 | OpenCode 1.19.6 | `run --format json`、stdin；`text`、`tool_use`、`step_finish`；步骤、token、缓存、成本和工具执行时长 | `--session` / `--fork`；真实 OpenCode 经 Daemon 验证两轮回环、零工具、同一原生 ID 和停止后模型连接断开。SQLite 历史扫描不可用 |
-| Antigravity 1.5.17 | `--print --output-format stream-json`；`init`、`step_update`、`result`；步骤、时长、轮次与 token | 真实隔离回环验证 `--conversation` 两轮同 ID、上下文续接、写入拒绝与取消；仍声明工具，Daemon 尚未开放。历史扫描和 Fork 不可用 |
+| Antigravity 1.5.18 | `--print --output-format stream-json`；`init`、`step_update`、`result`；步骤、时长、轮次与 token | Daemon 仅开放隔离只读快聊。真实回环覆盖 `--conversation` 同 ID 续接、残留工具拒绝和取消。历史扫描和 Fork 不可用 |
 | Copilot 1.0.114 | `--output-format json --stream on`、stdin；助手增量、最终 `result`、有报告的用量、上下文和延迟 | `session-state/<id>/events.jsonl`，`--resume=<id>`；真实 Copilot 经 Daemon 通过两轮回环续接，沿用同一 UUID，且模型请求均无工具。Fork 不可用 |
 | Qwen Code 0.28.0 | `--output-format stream-json --include-partial-messages`；助手增量与 `result` 用量 | 项目 `chats/<id>.jsonl`，`--resume` / `--fork-session`；真实 Qwen 经 Daemon 通过两轮回环续接，模型请求不带工具，额外的工具请求被拦截 |
 
@@ -164,7 +163,15 @@ cargo test -p soxu-drivers --test native signed_in_codex_streams_both_targets --
 逐字节输入测试独立覆盖引号、Unicode、换行和 shell 元字符。已登录烟测继承
 现有 Codex 环境和默认模型，以临时工作目录和只读、临时会话模式运行。
 
-## Antigravity 只读边界调查（Daemon 尚未开放）
+## Antigravity 隔离只读快聊
+
+Daemon 接受 `agy` 和 `antigravity` 两个标识，启动范围为未归档的本机 QuickChat + ReadOnly。
+宿主通过 `SOXU_AGY_EXE` 指定可信原生程序的绝对路径。Windows 使用真实 EXE，拒绝脚本与
+已知 Scoop shim。钩子使用 PATH 中可信的原生 Node，也可通过 `SOXU_AGY_NODE_EXE` 固定入口。
+Gemini API 密钥可由宿主显式通过 `SOXU_AGY_GEMINI_API_KEY` 注入。AGY 子进程使用 Daemon
+私有 home、配置及临时目录，继承环境清空，系统变量按平台白名单设置。
+
+### 真实 CLI 边界探针
 
 真实 Windows Antigravity `1.5.17` 的隔离回环验证已覆盖两轮流式、同一 UUID、
 续接携带前轮模型回复，以及直接进程停止后模型连接断开。有效 `write_file`
@@ -173,16 +180,16 @@ cargo test -p soxu-drivers --test native signed_in_codex_streams_both_targets --
 
 驱动移除与 `--disable-slash-commands` 同时使用时无效的 `--mode plan`，改用
 会话级 `--settings` 固定严格权限、关闭非工作区访问，并拒绝文件、命令、网页和
-MCP 的全部权限命名空间。这不是工具注册过滤器：模型请求仍声明 15 种工具，
-包括调度、工作流及子代理。上述额外工具的副作用与项目插件加载尚未完整验证，
-因此没有注册 Antigravity 的 Daemon 只读路由，不能把它描述为零工具快聊。
+MCP 的权限命名空间。仅应用这组设置时，模型请求仍声明 15 种工具，其中包括调度、
+工作流及子代理。Daemon 另外固定空工具代理和全匹配 `PreToolUse` 钩子。
 
 可复跑探针仅复制可信 EXE 到临时目录，生成独立用户目录和随机本机模型夹具凭据，
 不读取或写入用户真实配置，不安装软件，并保留脱敏的 JSON 证据：
 
 ```powershell
 $env:SOXU_TEST_AGY = '<可信 Antigravity EXE 的绝对路径>'
-node crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs
+mise exec -- node crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs
+mise exec -- cargo test -p soxu-daemon --test rpc_ws_e2e antigravity_real_quick_chat_http_ws_loopback -- --ignored
 ```
 
 权限语义依据上游 [CLI Headless](https://antigravity.google/docs/cli/headless/)、
@@ -202,10 +209,10 @@ node crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs
 可以重新声明写入工具；即使关闭斜杠展开，项目 `SessionStart` 钩子仍真实执行。
 全局工具拒绝不是项目启动钩子隔离，也不是操作系统沙箱。
 
-以上探针现在同时验证工具过滤、过滤代理续接、未声明写入、全局钩子拒绝及真实
-项目覆盖。Daemon 仍未开放：接线还需在 Daemon 管理的快聊目录固定可信代理与
-钩子资产、隔离项目自定义加载并验证资产篡改和全部取消路径，不得直接借用用户
-真实全局目录或把该方案扩展到任意项目目录。
+边界探针覆盖工具过滤、续接、未声明写入、全局钩子拒绝及项目覆盖。另在 Windows
+使用真实 Antigravity `1.5.18` 经 Daemon HTTP/WS 回环验证同 UUID 两轮续聊、`manage_task`
+返回钩子拒绝和等待模型期间停止。父目录夹具中的项目钩子未加载，快聊工作目录中的项目
+自定义资产会使生产路由拒绝启动。
 
 ### 钩子故障与资产完整性
 
@@ -214,22 +221,29 @@ node crates/soxu-drivers/tests/fixtures/antigravity-boundary.cjs
 配置文件缺失或被替换为自动批准配置时，`manage_task` 的合法 `list` 调用实际
 执行成功。测试只列举当前隔离进程的后台任务，不停止或控制用户任务。
 
-因此钩子运行失败关闭不能代替可信资产完整性检查。正式接线必须在每轮启动前
-验证代理、钩子配置和执行入口的固定内容及安全路径，缺失、篡改或链接替换必须
-拒绝启动；原生程序和配置在运行期间仍需受保护。Antigravity 的可信原生入口、
-配置来源和运行期保护尚未闭合，不能宣称完整只读能力已交付。
+Daemon 在首次、续聊和 FIFO 启动前校验固定代理、钩子脚本、钩子配置及其他配置资产。
+缺失、篡改、链接和意外配置文件均拒绝启动。
 
 Daemon 库提供独立的 `NativeAssetGuard` 校验底座：调用方提供可信内容，校验器不从
 磁盘学习并接受当前内容；每次校验都复核大小、SHA-256、普通文件与祖先目录，并
 拒绝符号链接及 Windows reparse point。启动目录必须位于声明根内，根到工作目录
 之间出现 `.agents` 即拒绝。先拒绝链接，再规范化根和工作目录，以兼容 Windows
-绝对路径的普通及 verbatim 表示。它没有自动写配置，也尚未挂入 Antigravity 的启动路由。
-该校验不能消除校验和启动间的竞态，不能检测全部原生配置来源，也不是运行期
-操作系统隔离；正式接线仍需固定原生入口、配置来源与运行期保护。
+绝对路径的普通及 verbatim 表示。Windows 使用私有目录 ACL，并以仅共享读取的方式持有
+已校验资产，直到回收原生进程。Unix 校验所有者和私有权限，从打开的文件句柄计算摘要。
+目录身份和原生程序由宿主维护。同权限进程、管理员及上游对路径的重新打开仍受操作系统
+权限与上游实现约束。应用层检查无法消除所有路径竞态。
 
 宿主在 `with_native_driver_set` 后可用 `with_native_asset_guard(kind, guard)` 将声明
 绑定已配置的可信驱动。绑定时校验一次，实际 `start_native` 在调用 `driver.start`
 前再次校验，覆盖首轮、续接、停止后的下一轮和自动 FIFO 出队；拒绝时不生成新轮次
 消息、不消费排队条目。HTTP/WS 测试以 Node 夹具验证两轮启动、等长篡改、缺失与
-项目覆盖拒绝，以及出队前篡改、恢复后原队列继续。未绑定的六种驱动沿用现有行为；
-本入口不会为 Antigravity 开放路由，真实 AGY 的资产和运行期门禁仍待闭合。
+项目覆盖拒绝，以及出队前篡改、恢复后原队列继续。Antigravity 路由要求绑定由私有配置
+生成的守卫。Windows 夹具还验证了回合中资产可读且拒绝外部写入和删除。
+
+### 取消与平台边界
+
+Windows 在回收直接子进程前通过系统目录中的 `taskkill /T /F` 终止 AGY 及其钩子子进程。
+Unix 启动时创建独立进程组，通过系统 `kill` 向整组发信号并等待组首退出。Windows 夹具
+分别验证显式取消和丢弃回合后父子 PID 退出。Windows 的进程树快照存在父进程提前退出或
+后代同时派生的竞态，Unix 主动脱离进程组的后代超出回收范围。系统回收命令失败或超时会
+回退终止直接子进程，并报告 I/O 失败。
