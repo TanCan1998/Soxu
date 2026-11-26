@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T18:36:00Z",
+  "updated_at": "2026-11-26T18:40:15Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "99492d12063dab96171dc98dd99bc68e064c67c6269d403650ac718c8820c2e9",
-      "size": 77804,
-      "normalized_sha256": "99492d12063dab96171dc98dd99bc68e064c67c6269d403650ac718c8820c2e9"
+      "sha256": "2116a30967f834f7803098d4e69b1f3be1e16a9c071ee1fd6735106442319003",
+      "size": 77840,
+      "normalized_sha256": "2116a30967f834f7803098d4e69b1f3be1e16a9c071ee1fd6735106442319003"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1091,9 +1091,9 @@
     },
     "scripts/detect-check-scope.ps1": {
       "role": "index",
-      "sha256": "6b743003816afc8bf1384b6ce83a4794e2a073edddfc73d8f2b935bc9c66e595",
-      "size": 11606,
-      "normalized_sha256": "6b743003816afc8bf1384b6ce83a4794e2a073edddfc73d8f2b935bc9c66e595"
+      "sha256": "0693b97fd0685fc9fbf12aacd49cf022c04c6f7c22ae00fcbdcfc2765444b00c",
+      "size": 11612,
+      "normalized_sha256": "0693b97fd0685fc9fbf12aacd49cf022c04c6f7c22ae00fcbdcfc2765444b00c"
     },
     "scripts/mise-doctor.ps1": {
       "role": "index",
@@ -1145,9 +1145,9 @@
     },
     "scripts/test-check-scope.ps1": {
       "role": "index",
-      "sha256": "dd088d91d140296bbfd87a6c04c97af2910f06e89b5e13a4db031edb4bbc2b3c",
-      "size": 5014,
-      "normalized_sha256": "dd088d91d140296bbfd87a6c04c97af2910f06e89b5e13a4db031edb4bbc2b3c"
+      "sha256": "d83f52682f809dcf1608cb1bdaee491586cafe285038819d0360585b3638e1f9",
+      "size": 5821,
+      "normalized_sha256": "d83f52682f809dcf1608cb1bdaee491586cafe285038819d0360585b3638e1f9"
     },
     "scripts/test-paseo-orchestration.ps1": {
       "role": "index",
