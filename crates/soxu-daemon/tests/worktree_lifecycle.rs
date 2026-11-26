@@ -576,7 +576,7 @@ mod linux {
                         source: &source,
                         workspace_root: &self.workspaces,
                         target_name: "target",
-                        branch_ref: "refs/heads/fixture",
+                        branch_ref: "refs/heads/soxu/fixture",
                         base_oid: &oid,
                     },
                 )
@@ -878,7 +878,7 @@ mod linux {
         assert_eq!(
             workspace.isolation,
             WorkspaceIsolation::Worktree {
-                branch: "fixture".to_owned(),
+                branch: "soxu/fixture".to_owned(),
                 base_ref: registration.intent.base_oid
             }
         );
