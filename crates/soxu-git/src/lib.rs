@@ -6,6 +6,7 @@ mod checkpoint;
 mod diff;
 mod probe;
 mod project;
+mod repository_create;
 mod status;
 mod worktree_checkout;
 mod worktree_lifecycle;
@@ -24,6 +25,12 @@ pub use diff::{
 };
 pub use probe::{GitError, GitProbe, HeadState, RepositorySnapshot};
 pub use project::{LocalProject, ProjectOpenError, WorktreeIdentity};
+pub use repository_create::{
+    InitMode, RepositoryCreateCoordinator, RepositoryCreateError, RepositoryCreateOutcome,
+    RepositoryCreateRequest, RepositoryCreateResult, RepositoryCreateStage, RepositoryObservation,
+    RepositoryOperation, RepositoryOperationRecord, RepositorySource, RepositoryTargetState,
+    RepositoryTerminalState,
+};
 pub use status::{
     ChangeStatus, GitPath, OrdinaryChange, ParseError, RenameChange, StatusEntry, StatusHeader,
     StatusSnapshot, SubmoduleStatus, UnmergedChange, parse_status,
