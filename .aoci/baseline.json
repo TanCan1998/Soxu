@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T18:03:34Z",
+  "updated_at": "2026-11-26T18:28:24Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -59,9 +59,9 @@
     },
     ".gitignore": {
       "role": "index",
-      "sha256": "c4f1d37b4457c6553c2f681da6dff6631473025c8bf2039f3e082157491d16a1",
-      "size": 1168,
-      "normalized_sha256": "c4f1d37b4457c6553c2f681da6dff6631473025c8bf2039f3e082157491d16a1"
+      "sha256": "7ba5d2fc6e1bdffa42bb32c406b5b71eef8a14d5eb6025be5f570f6d29edccf3",
+      "size": 1271,
+      "normalized_sha256": "7ba5d2fc6e1bdffa42bb32c406b5b71eef8a14d5eb6025be5f570f6d29edccf3"
     },
     ".gitleaks.toml": {
       "role": "index",
@@ -71,9 +71,9 @@
     },
     ".pi/settings.json": {
       "role": "index",
-      "sha256": "84fa04c452797480ea5087fbaa81fababb7ea86cf8b8070d9ebce4cc635e22d4",
-      "size": 115,
-      "normalized_sha256": "84fa04c452797480ea5087fbaa81fababb7ea86cf8b8070d9ebce4cc635e22d4"
+      "sha256": "c0ca9698f8fa5d18b95a5fdd6076cf340c26c3bad2cef36523686986b525e41a",
+      "size": 150,
+      "normalized_sha256": "c0ca9698f8fa5d18b95a5fdd6076cf340c26c3bad2cef36523686986b525e41a"
     },
     "AGENTS.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "94e2f8a5fe89df170c52266b303d3c55ba6fce8ec32013c8a4b8f0a87cef5fda",
-      "size": 77655,
-      "normalized_sha256": "94e2f8a5fe89df170c52266b303d3c55ba6fce8ec32013c8a4b8f0a87cef5fda"
+      "sha256": "9e4dd0d8f90438cae9c363bcf92b2a2437b5f1e26e203b39fc8c673deaa6c940",
+      "size": 77673,
+      "normalized_sha256": "9e4dd0d8f90438cae9c363bcf92b2a2437b5f1e26e203b39fc8c673deaa6c940"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1049,9 +1049,9 @@
     },
     "docs/ops/LESSONS.md": {
       "role": "index",
-      "sha256": "023de82083fedec58aa89b87c2b5a0c1cd7fc28fe77431060a5229a3b7322db2",
-      "size": 12074,
-      "normalized_sha256": "023de82083fedec58aa89b87c2b5a0c1cd7fc28fe77431060a5229a3b7322db2"
+      "sha256": "587c499de7619c7d5358404b75da6e23e1c4a6c0ccf75d96b98227acec81c002",
+      "size": 12315,
+      "normalized_sha256": "587c499de7619c7d5358404b75da6e23e1c4a6c0ccf75d96b98227acec81c002"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",

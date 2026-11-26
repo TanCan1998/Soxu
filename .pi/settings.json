@@ -2,8 +2,9 @@
   "packages": [
     {
       "source": "npm:context-mode",
-      "extensions": [],
-      "skills": []
+      "autoload": false,
+      "extensions": ["!**"],
+      "skills": ["!**"]
     }
   ]
 }
