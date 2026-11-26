@@ -197,7 +197,7 @@ emit({type: 'thread.started', thread_id: session});
 emit({type: 'turn.started'});
 const finish = () => {
   emit({type: 'item.completed', item: {type: 'agent_message', text: prompt}});
-  emit({type: 'turn.completed'});
+  emit({type: 'turn.completed', usage: {input_tokens: 12, output_tokens: 4, cached_input_tokens: 0}});
 };
 if (prompt === 'hold') {
   const timer = setInterval(() => {
@@ -641,8 +641,8 @@ mod linux {
         let fixture = Fixture::new();
         let stub = NativeStub::new(fixture._temp.path());
         let (rpc, workspace) = ready_native_worktree(&fixture, &stub).await;
-        let mut events = rpc.state.subscribe_events();
         let session = create_native_session(&rpc.state, &workspace.workspace_id, "codex");
+        let mut events = rpc.state.subscribe_events();
 
         for prompt in ["首轮", "续接"] {
             assert!(rpc.submit(&session.session_id, prompt).await.ok);
@@ -679,8 +679,8 @@ mod linux {
         let fixture = Fixture::new();
         let stub = NativeStub::new(fixture._temp.path());
         let (rpc, workspace) = ready_native_worktree(&fixture, &stub).await;
-        let mut events = rpc.state.subscribe_events();
         let session = create_native_session(&rpc.state, &workspace.workspace_id, "codex");
+        let mut events = rpc.state.subscribe_events();
         let session_id = &session.session_id;
         assert!(rpc.submit(session_id, "首轮").await.ok);
         wait_for_native_event(&mut events, |event| {
@@ -730,8 +730,8 @@ mod linux {
         let fixture = Fixture::new();
         let stub = NativeStub::new(fixture._temp.path());
         let (rpc, workspace) = ready_native_worktree(&fixture, &stub).await;
-        let mut events = rpc.state.subscribe_events();
         let session = create_native_session(&rpc.state, &workspace.workspace_id, "codex");
+        let mut events = rpc.state.subscribe_events();
         let session_id = &session.session_id;
         assert!(rpc.submit(session_id, "hold").await.ok);
         tokio::time::timeout(Duration::from_secs(10), async {
