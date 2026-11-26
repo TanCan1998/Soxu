@@ -19,6 +19,8 @@ Invoke-Step "[2/7] 校验双端设计令牌同源无漂移 (tokens.json -> CSS).
 
 Invoke-Step "[3/7] 校验设计规范完整性、原型语法与零 Emoji UI 纪律..." {
   node scripts/verify-design-system.mjs
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  pwsh -NoProfile -File scripts/test-paseo-orchestration.ps1
 }
 
 Invoke-Step "[4/7] 检查 Rust 代码格式 (cargo fmt)..." {

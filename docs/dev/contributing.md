@@ -2,18 +2,18 @@
 
 ## 1. 环境准备
 
-项目使用 `mise` 统一锁定工具链（Rust `1.99+`、Node `26`、`pnpm 12`），并通过 Scoop 使用 `gitleaks` 执行提交前隐私与密钥扫描。
+项目使用 `mise.toml` 统一锁定工具链（Rust `1.99.1` 含 `rustfmt`/`clippy`、Node `26.13.1`、`pnpm 12.21.0`），通过 `disable_tools = ["python", "java", "maven"]` 隔离宿主全局无关或缺失工具，并通过 Scoop 使用 `gitleaks` 执行提交前隐私与密钥扫描。
 
 ```powershell
-# 1. 信任工具链配置（自动启用跨 Worktree 共享 CARGO_TARGET_DIR）
-mise trust
+# 1. 一键激活仓库级 Git Hooks 并信任当前工作树的 mise.toml（启用 CARGO_TARGET_DIR 与工具链隔离）
+pwsh -NoProfile -File scripts/setup-worktree.ps1
 
-# 2. 激活仓库级 Git Hooks（主工作区与所有子 Worktree 自动共享生效）
-pwsh -NoProfile -File scripts/setup-hooks.ps1
+# 2. 核对项目 mise 锁定环境与工具链版本
+mise run doctor
 
-# 3. 安装移动端前端依赖并执行全工作区一键检查
-Push-Location apps/mobile-web; pnpm install; Pop-Location
-pwsh -NoProfile -File scripts/check-all.ps1
+# 3. 安装移动端前端依赖并执行全工作区一键检查（自动在 mise 锁定环境内执行）
+mise run mobile-install
+mise run check-all
 ```
 
 ---

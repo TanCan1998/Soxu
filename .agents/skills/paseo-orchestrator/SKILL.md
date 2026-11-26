@@ -1,6 +1,6 @@
 ---
 name: paseo-orchestrator
-description: 跨 AGY 桌面端与 Codex 桌面端共享的 Soxu Paseo 多工作树与代理编排规范。在任一桌面端接手 Soxu 开发、盘点 Paseo 工作区、创建隔离 Worktree、启动/调控子代理或在 AGY 与 Codex 之间切换控制权时使用。
+description: 跨 AGY 桌面端与 Codex 桌面端编排 Soxu 工作树和子代理，核验任务书送达，并让子代理复用参考项目既有 AOCI 与 CodeGraph。用于接手、派发、调控及主控切换。
 ---
 
 # Soxu 跨桌面端 Paseo 协同编排指南
@@ -16,6 +16,8 @@ description: 跨 AGY 桌面端与 Codex 桌面端共享的 Soxu Paseo 多工作�
 ```powershell
 pwsh -NoProfile -File scripts/paseo-ctl.ps1 <Paseo 参数...>
 ```
+
+参考入口盘点用 `scripts/paseo-reference-context.ps1`，`pi` 专用带环境启动用 `scripts/paseo-run-pi.ps1`，文件投递及全文核验用 `scripts/paseo-dispatch.ps1`；盘点与核验脚本不创建代理、不改全局配置，也不初始化或重建索引。
 
 脚本特性：
 1. 自动探测 `$env:PASEO_CLI`、PATH、Scoop 默认路径及常见安装目录中的 `paseo.cmd`；
@@ -34,7 +36,7 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 <Paseo 参数...>
 | **宿主项目注册与全局配置** | 隔离 | **AGY**：项目注册在 `~/.gemini/config/projects/`，MCP 在 `~/.gemini/config/mcp_config.json`；**Codex**：项目注册在 `~/.codex/state_5.sqlite`，仓库级覆盖在已忽略的 `.codex/config.toml`。双端严禁相互篡改对方宿主配置或 `~/.claude` / `~/.pi` / `~/.config/magpie` |
 | **工作树写操作（并发边界）** | 隔离 | 主检出仓库目录（项目根路径）仅作**主控编排、审查与工程治理台（Control Plane）**。**严禁** AGY 与 Codex 同时在主检出目录直接并发修改业务源码；功能开发一律下沉至独立的 `--isolation worktree` 分支并严守 Issue `Owned Paths` 白名单 |
 
-> 说明：新建的 Paseo 隔离 Worktree 会通过 `paseo.json` 中的 `worktree.setup` 自动运行 `scripts/setup-hooks.ps1`，确保每个隔离工作树继承 `.githooks` 隐私与 Git Emoji 提交检查。
+> 说明：新建的 Paseo 隔离 Worktree 会通过 `paseo.json` 中的 `worktree.setup` 自动运行 `scripts/setup-worktree.ps1`，完成 `.githooks` 隐私与 Git Emoji 提交检查配置并自动执行 `mise trust` 激活项目锁定环境。
 
 ---
 
@@ -45,7 +47,7 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 <Paseo 参数...>
 pwsh -NoProfile -File scripts/paseo-ctl.ps1 status --json | ConvertFrom-Json
 pwsh -NoProfile -File scripts/paseo-ctl.ps1 project ls --json | ConvertFrom-Json
 pwsh -NoProfile -File scripts/paseo-ctl.ps1 workspace ls --json | ConvertFrom-Json
-pwsh -NoProfile -File scripts/paseo-ctl.ps1 ls --json | ConvertFrom-Json
+pwsh -NoProfile -File scripts/paseo-ctl.ps1 ls --all --global --json | ConvertFrom-Json
 ```
 
 ### 2. 创建隔离 Git Worktree 工作区
@@ -60,20 +62,49 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 workspace create `
   --json
 ```
 
-### 3. 在目标 Worktree 中启动编码代理
+### 3. 派发任务并核验全文送达
+
+**准备任务书与规定环境。** 后续所有子代理派发**仅使用 `pi` agent**（`--provider pi` + 经 `pi --list-models` 核实的 `magpie/...` 模型与思考等级），禁止新派发或续派 `codex` / `claude` / `antigravity` 等其他驱动。用 UTF-8 文件保存正文，第一行放本次唯一派发标记（例如 `Soxu #49 / <派发批次>`）。任务书放系统临时目录或已忽略的 `.agents/local/`，不提交本机路径或运行凭据。先盘点全局代理与 Worktree 环境，按本次用户指定的 `pi` 模型和思考强度选型；不改全局偏好、不静默换型或重启整个服务。
+
+- **规定环境（Mise Toolchain）**。写明目标 Worktree 须先执行 `scripts/setup-worktree.ps1`（完成 `mise trust` 与 hooks 安装），锁定使用项目 `mise.toml` 工具链（`rust 1.99.1` 含 `rustfmt`/`clippy`、`node 26.13.1`、`pnpm 12.21.0`，`disable_tools = ["python", "java", "maven"]`，`PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false`）及构建缓存目录（默认 `CARGO_TARGET_DIR` 或主控指定独立 `--target-dir`）；要求全部 Rust/Node/pnpm/门禁命令通过 `mise exec -- ...` 或 `mise run ...` 执行，并在开工回执上报 `mise run doctor` 实测结果。
+- **任务和范围**。写明 Issue、目标、工作树和分支、`Owned Paths`、依赖和禁止碰触的范围。
+- **参考项目**。AOCI 和 CodeGraph 在派发中的主要用途是帮助子代理理解参考项目，而不是让其在 Soxu 工作树重新建图。逐项给出参考根、版本、既有索引及查询入口，再标明源码文件、符号、采用点和边界。`.refs/` 不随 Worktree 检出；必须提供目标宿主可读的真实入口，远程代理不能直接沿用主控本机路径。
+- **参考 AOCI**。复用参考根已有 `aoci.txt`（Legacy）或 Root 所声明的 Volumes，绑定该根的 MCP 先 `aoci_rules`、再 `aoci_overview`，遵守各自实时合同、分块和 Attestation。当前宿主 MCP 若绑定 Soxu，不能拿它查询参考仓库；改用已核实的 `aoci --repo <参考根> mcp` stdio 会话，按 `initialize`、`notifications/initialized`、`tools/list`、`tools/call` 调用。读取索引文件只能称为读取参考索引，不能冒充完整认知校验。不同参考仓库的收据和 Challenge 不混用。
+- **参考 CodeGraph**。复用同一参考根的 `.codegraph`；Magpie `codegraph__codegraph_explore` 参数按实际 Schema 显式绑定参考根。MCP 无法切根时，用 `codegraph explore --path <参考根> <查询>` / `codegraph node --path <参考根> <符号>`。禁止指向目标工作树或把参考数据库复制进去。索引缺失、过期、解析缺口或入口不可访问时报告，按任务允许范围回退 `rg` 与源码；不得自动 `init`、`index`、`sync` 或升级参考索引。
+- **目标工程治理另列**。Soxu 工作树仍遵守其 AGENTS 与 AOCI 认知/收尾维护要求，但这不替代参考索引复用。不得因参考调查修改参考源码、AOCI 正式资产或 CodeGraph 图；查询工具可能有自身本地运行审计，不把普通查询声称为严格零写入。
+- **验收与交付**。写明必须通过的检查、PR 要报告的参考采用及工具使用证据，以及需要立即回报的阻塞。正文要求代理等待主控核验后发出的开工指令。
+
+生成确定性参考清单（只查资产、版本和工具状态，不生成语义、不建索引）：
+
 ```powershell
-pwsh -NoProfile -File scripts/paseo-ctl.ps1 run `
-  --no-wait `
-  --workspace <wks_id> `
-  --provider codex `
-  "请阅读 AGENTS.md 与对应 Issue 的 Owned Paths，完成实现并通过 scripts/check-all.ps1"
+pwsh -NoProfile -File scripts/paseo-reference-context.ps1 `
+  -Names paseo,codeg,padu | Set-Content -Encoding utf8 .agents/local/reference-context.json
 ```
-（当前本机 Paseo 已识别的原生驱动含 `codex`、`claude`、`pi`、`antigravity`、`copilot`。）
+
+检查清单的 `issues`、`aoci.statusChecked` 与 `codegraph.statusChecked`，把选中参考的根、资产摘要、查询参数及明确回退完整写进任务书；清单本身不证明子代理已经读懂参考。资产缺失或状态异常不能隐藏，也不自动重建。若需开工前强制所有参考可查询，给盘点脚本加 `-RequireReady`。子代理开工后应回报参考根与 HEAD、AOCI 实际读取/校验状态、CodeGraph 实际查询与源码定位，PR 保留证据及取舍。
+
+**启动（仅限 `pi` agent + 绑定 `mise` 环境）。** 从主控仓库根执行。以下变量使用本次已核实的实际值（`$model` 须为 `pi --list-models` 验证过的 `magpie/...` 模型，如 `magpie/group/gpt-6.2-sol` / `magpie/group/gpt-6.2-astra`）。首条可见消息用短单行写明 Issue、参考项目名称、AOCI 和 CodeGraph、规定 `mise` 环境，并说明随后还有完整任务书。当前 `run --help` 只提供位置参数 `<prompt>`，禁止经 `run` 的位置参数传递多行任务书。统一通过 `scripts/paseo-run-pi.ps1` 启动，自动注入工作区 `mise env --json` 工具链前置 `PATH`、`MISE_DISABLE_TOOLS=python,java,maven` 与锁定变量：
+
+```powershell
+pwsh -NoProfile -File scripts/paseo-run-pi.ps1 `
+  -WorkspaceId $workspaceId -WorkspacePath $workspacePath `
+  -Title "Soxu #$issueNumber" `
+  -Model $model -Thinking $thinking `
+  -Prompt "Soxu #$issueNumber。参考 $referenceNames，复用这些参考项目已有的 AOCI 和 CodeGraph；按项目 mise.toml（rust 1.99.1 / node 26.13.1 / pnpm 12.21.0）规定环境运行。请先回执，等待完整任务书与开工确认。"
+```
+
+**投递与核验。** 记录实际代理 ID。首轮回执结束后，用 `send --prompt-file` 发送 UTF-8 文件。对仍在执行的代理补发正文时使用 `--behavior steer`。人工主控直接发送时避免使用需要发送方 Agent ID 的 `queue`。
+
+```powershell
+pwsh -NoProfile -File scripts/paseo-dispatch.ps1 `
+  -AgentId $agentId -PromptFile $promptFile
+```
+
+脚本通过 `paseo-ctl.ps1` 发文件并有限等待日志，只统一 CRLF/LF 和末尾换行，核对完整 `user_message.text`；返回代理 ID、消息 ID、正文摘要和长度。它不自动确认开工、不重发、不创建代理。仅复查已发送正文时加 `-VerifyOnly`。日志缺失或截断时先诊断，再按同一标记向同一代理补发并复核；全文核验通过且参考入口与回退已确认后，主控才发含标记的开工指令。首句预览、启动成功和资产存在均不能替代全文或参考实际使用证据。
 
 ### 4. 实时干预（热纠偏 / 排队 / 打断）与日志观察
 ```powershell
 pwsh -NoProfile -File scripts/paseo-ctl.ps1 send <agent_id> "请补充边界测试后重跑 check-all" --behavior steer
-pwsh -NoProfile -File scripts/paseo-ctl.ps1 send <agent_id> "完成后检查 git status" --behavior queue
 pwsh -NoProfile -File scripts/paseo-ctl.ps1 send <agent_id> "暂停当前方案并改用增量游标" --behavior interrupt
 pwsh -NoProfile -File scripts/paseo-ctl.ps1 logs <agent_id> --tail 30
 pwsh -NoProfile -File scripts/paseo-ctl.ps1 wait <agent_id>
@@ -104,6 +135,6 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 script stop check-all --workspace <w
       gh issue list --limit 20 --json number,title,milestone,assignees
       gh pr list --json number,title,headRefName,state
       pwsh -NoProfile -File scripts/paseo-ctl.ps1 workspace ls --json
-      pwsh -NoProfile -File scripts/paseo-ctl.ps1 ls --json
+      pwsh -NoProfile -File scripts/paseo-ctl.ps1 ls --all --global --json
       ```
    4. 若有正在运行的 Paseo Agent，直接通过 `logs <agent_id> --tail 30` 检查进度，并用 `send <agent_id> ...` 继续调控，**无需推倒重来**。
