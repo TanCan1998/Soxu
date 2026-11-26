@@ -604,3 +604,10 @@ pub(crate) fn open_regular_anchored(
         "本平台没有受限只读打开原语",
     ))
 }
+/// Windows 写入入口已 fail-closed，本入口不额外断言；其他平台按同一契约拒绝。
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn require_supported_filesystem(
+    _root: &AuthorizedDirectory,
+) -> Result<(), RepositoryCreateError> {
+    Ok(())
+}

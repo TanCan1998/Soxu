@@ -612,11 +612,17 @@ async fn execute(
         Some(facts) => Some(clone::snapshot(&sandbox, facts)?),
         None => None,
     };
-    // 固定 HEAD 取自快照本身；克隆与终态复核都以该值为准。
+    // 固定 HEAD 取自快照本身；预检、克隆与终态复核共用该身份。
     let snapshot_head = match source_snapshot.as_ref() {
         Some((handle, _)) => {
             let path = handle.child_process_path()?;
-            checkout::read_head(&sandbox, &program, &path).await?
+            match checkout::probe_head(&sandbox, &program, &path).await? {
+                checkout::HeadState::Commit(oid) => Some(oid),
+                checkout::HeadState::Unborn(_) => None,
+                checkout::HeadState::Unverifiable(reason) => {
+                    return Err(RepositoryCreateError::UnsafeContent(reason));
+                }
+            }
         }
         None => None,
     };
@@ -627,7 +633,12 @@ async fn execute(
                 .as_ref()
                 .map(|(_, path)| path.clone())
                 .ok_or(RepositoryCreateError::InvalidInput("克隆请求缺少源快照"))?;
-            clone::run(&sandbox, &program, &source, &staged_for_git).await?
+            let origin = plan
+                .source_facts
+                .as_ref()
+                .map(|facts| facts.root.clone())
+                .ok_or(RepositoryCreateError::InvalidInput("克隆请求缺少源快照"))?;
+            clone::run(&sandbox, &program, &source, &staged_for_git, &origin).await?
         }
         RepositoryOperation::CloneUrl => {
             return Err(RepositoryCreateError::Unsupported(
@@ -649,7 +660,17 @@ async fn execute(
     };
     let mut verify_error = match &staged_handle {
         Some(handle) => match handle.child_process_path() {
-            Ok(path) => verify_staged(&sandbox, &program, &plan, &path, Some(handle)).await,
+            Ok(path) => {
+                verify_staged(
+                    &sandbox,
+                    &program,
+                    &plan,
+                    &path,
+                    Some(handle),
+                    snapshot_head.as_deref(),
+                )
+                .await
+            }
             Err(error) => Some(error_class(&error)),
         },
         None if matches!(result, RepositoryCreateResult::Succeeded) => Some("staged-missing"),
@@ -805,6 +826,7 @@ async fn verify_staged(
     plan: &Plan,
     staged: &Path,
     holder: Option<&AuthorizedDirectory>,
+    expected: Option<&str>,
 ) -> Option<&'static str> {
     let result = match plan.operation {
         RepositoryOperation::Init => init::verify(sandbox, program, staged, holder)
@@ -813,7 +835,12 @@ async fn verify_staged(
         _ => clone::stage(sandbox, program, staged, holder)
             .await
             .map(|facts| {
-                facts.git_dir_present && (facts.empty_remote() || facts.head_oid.is_some())
+                let consistent = match (expected, facts.head_oid.as_deref()) {
+                    (None, None) => facts.empty_remote(),
+                    (Some(fixed), Some(actual)) => fixed == actual,
+                    _ => false,
+                };
+                facts.git_dir_present && consistent
             }),
     };
     match result {

@@ -34,6 +34,9 @@ pub(super) fn verify_source(source_root: &Path) -> Result<SourceFacts, Repositor
     let directory = AuthorizedDirectory::open(source_root)?;
     // `.git` 从源根句柄派生，不做路径重开；链接与 reparse 由句柄链拒绝。
     let git_dir = directory.child(OsStr::new(".git"))?;
+    // 源根与源 .git 的挂载类型也必须属于受支持的本地文件系统。
+    super::platform::require_supported_filesystem(&directory)?;
+    super::platform::require_supported_filesystem(&git_dir)?;
     // 结构判定全部在句柄锚定路径下完成，与后续快照复制读取同一对象。
     drop(super::platform::open_regular_anchored(
         &git_dir,
@@ -252,11 +255,12 @@ pub(super) fn snapshot(
 pub(super) async fn run(
     sandbox: &Sandbox,
     program: &Path,
-    source: &Path,
+    snapshot: &Path,
     target: &Path,
+    origin: &Path,
 ) -> Result<RepositoryCreateResult, RepositoryCreateError> {
-    let source = platform::native_path(source)?;
-    let target = platform::native_path(target)?;
+    let source = platform::native_path(snapshot)?;
+    let destination = platform::native_path(target)?;
     let mut command = sandbox.command(program, sandbox.root());
     command
         .args(CLONE_ARGS)
@@ -264,14 +268,44 @@ pub(super) async fn run(
         .arg("core.hooksPath=")
         .arg("--")
         .arg(&source)
-        .arg(&target);
-    super::init::outcome(
+        .arg(&destination);
+    let result = super::init::outcome(
         sandbox::run(
             &mut command,
             sandbox::OUTPUT_LIMIT,
             sandbox::COMMAND_TIMEOUT,
         )
         .await,
+    )?;
+    if result != RepositoryCreateResult::Succeeded {
+        return Ok(result);
+    }
+    // 快照路径是进程级句柄锚定，不能成为持久远端地址：改写为已授权源路径。
+    let origin = platform::native_path(origin)?;
+    let mut command = sandbox.command(program, sandbox.root());
+    command
+        .arg("-C")
+        .arg(&destination)
+        .args(["config", "--local", "remote.origin.url"])
+        .arg(&origin);
+    Ok(
+        match sandbox::run(
+            &mut command,
+            sandbox::OUTPUT_LIMIT,
+            sandbox::COMMAND_TIMEOUT,
+        )
+        .await
+        {
+            Ok(output) if output.status.success() => RepositoryCreateResult::Succeeded,
+            Ok(_) => RepositoryCreateResult::Unknown {
+                stop_confirmed: true,
+                reason: "无法规范化克隆远端地址".to_owned(),
+            },
+            Err(failure) => RepositoryCreateResult::Unknown {
+                stop_confirmed: failure.direct_child_reaped,
+                reason: "无法规范化克隆远端地址".to_owned(),
+            },
+        },
     )
 }
 
@@ -282,18 +316,16 @@ pub(super) struct CloneObservation {
     pub git_dir_identity: Option<DirectoryIdentity>,
     pub head_branch: Option<String>,
     pub head_oid: Option<String>,
+    /// 确证 unborn：HEAD 是分支引用且该分支确实不存在。
+    pub unborn: bool,
     pub published_entries: usize,
     pub notes: Vec<String>,
 }
 
 impl CloneObservation {
-    /// 远端为空仓库：已克隆但没有可检出提交。
+    /// 确证空仓库：只有 `probe_head` 返回 Unborn 时为真。
     pub(super) fn empty_remote(&self) -> bool {
-        self.head_oid.is_none()
-            && self
-                .head_branch
-                .as_deref()
-                .is_some_and(|branch| branch.starts_with("refs/heads/"))
+        self.unborn
     }
 }
 
@@ -341,6 +373,26 @@ pub(super) async fn inspect(
     let config = std::fs::read(git_dir.join("config")).map_err(RepositoryCreateError::Io)?;
     super::config_scan::reject_unsafe(&config, "克隆产物配置")?;
 
+    match super::checkout::probe_head(sandbox, program, target).await? {
+        super::checkout::HeadState::Commit(oid) => {
+            observation.head_oid = Some(oid);
+        }
+        super::checkout::HeadState::Unborn(branch) => {
+            observation.unborn = true;
+            observation.head_branch = Some(branch);
+            observation
+                .notes
+                .push("远端为空仓库，已克隆但没有可检出提交".to_owned());
+            return Ok(observation);
+        }
+        super::checkout::HeadState::Unverifiable(reason) => {
+            return Err(RepositoryCreateError::UnsafeContent(reason));
+        }
+    }
+    let oid = observation
+        .head_oid
+        .clone()
+        .ok_or(RepositoryCreateError::UnsafeContent("缺少已解析的 HEAD"))?;
     observation.head_branch = capture(sandbox, program, target, &["symbolic-ref", "-q", "HEAD"])
         .await?
         .map(|stdout| String::from_utf8_lossy(&stdout).trim().to_owned());
@@ -351,24 +403,6 @@ pub(super) async fn inspect(
             "远端 HEAD 指向非分支引用",
         ));
     }
-    observation.head_oid = capture(
-        sandbox,
-        program,
-        target,
-        &["rev-parse", "--verify", "HEAD^{commit}"],
-    )
-    .await?
-    .map(|stdout| String::from_utf8_lossy(&stdout).trim().to_owned());
-
-    let Some(oid) = observation.head_oid.clone() else {
-        if observation.empty_remote() {
-            observation
-                .notes
-                .push("远端为空仓库，已克隆但没有可检出提交".to_owned());
-            return Ok(observation);
-        }
-        return Err(RepositoryCreateError::UnsafeContent("远端 HEAD 无法解析"));
-    };
     let sized = oid.len() == 40 || oid.len() == 64;
     if !sized || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(RepositoryCreateError::UnsafeContent(

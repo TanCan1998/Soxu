@@ -1280,3 +1280,37 @@ async fn unsupported_platform_refuses_write_before_touching_state() {
     let entries = fs::read_dir(fixture.state()).expect("协调域可读").count();
     assert_eq!(entries, 0, "拒绝必须发生在任何写入之前：{entries} 项残留");
 }
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn clone_records_authorized_source_without_temporary_path() {
+    let fixture = Fixture::new("origin-url");
+    let source = source_repository(&fixture, "origin-src");
+    let before = snapshot_tree(&source);
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let outcome = probe()
+        .create_repository(
+            &coordinator,
+            clone_request("rc-origin-1", &fixture.parent(), "origin-clone", &source),
+        )
+        .await
+        .expect("受控 Clone");
+    assert!(matches!(outcome, RepositoryCreateOutcome::Verified { .. }));
+    let cloned = fixture.parent().join("origin-clone");
+    let config = fs::read_to_string(cloned.join(".git").join("config")).expect("产物配置");
+    let url = config
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("url = "))
+        .map(str::trim)
+        .expect("origin url");
+    assert!(
+        !url.contains("/proc/"),
+        "origin 不得保存进程级临时路径：{url}"
+    );
+    let canonical = fs::canonicalize(&source).expect("源规范路径");
+    assert_eq!(
+        Path::new(url),
+        canonical.as_path(),
+        "origin 必须指向已授权本地源"
+    );
+    assert_eq!(snapshot_tree(&source), before, "克隆不得修改源");
+}

@@ -534,73 +534,131 @@ fn set_executable(_file: &File, _mode: &str) -> Result<(), RepositoryCreateError
     Ok(())
 }
 
-/// 只读解析指定目录的固定 HEAD；unborn 或非提交引用返回 `None`。
-pub(super) async fn read_head(
+/// 目录 HEAD 的只读判定：区分确证提交、确证 unborn 与无法核验。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum HeadState {
+    Commit(String),
+    Unborn(String),
+    Unverifiable(&'static str),
+}
+
+/// 只读解析指定目录的 HEAD；三分结果不允许被当作同一种"没有提交"。
+pub(super) async fn probe_head(
     sandbox: &Sandbox,
     program: &Path,
     target: &Path,
-) -> Result<Option<String>, RepositoryCreateError> {
+) -> Result<HeadState, RepositoryCreateError> {
+    if let Some(bytes) = capture(
+        sandbox,
+        program,
+        target,
+        &["rev-parse", "--verify", "HEAD^{commit}"],
+    )
+    .await?
+    {
+        let oid = String::from_utf8_lossy(&bytes).trim().to_owned();
+        let sized = oid.len() == 40 || oid.len() == 64;
+        if !sized || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Ok(HeadState::Unverifiable("HEAD 不是完整提交 OID"));
+        }
+        return Ok(HeadState::Commit(oid));
+    }
+    // 无提交：先证 HEAD 是分支引用，再证该分支确实不存在，才能声称 unborn。
+    let Some(bytes) = capture(sandbox, program, target, &["symbolic-ref", "-q", "HEAD"]).await?
+    else {
+        return Ok(HeadState::Unverifiable("HEAD 既不是提交也不是分支引用"));
+    };
+    let branch = String::from_utf8_lossy(&bytes).trim().to_owned();
+    if !branch.starts_with("refs/heads/") {
+        return Ok(HeadState::Unverifiable("HEAD 指向非分支引用"));
+    }
     let mut command = sandbox.command(program, sandbox.root());
     command
         .arg("-C")
         .arg(target)
-        .args(["rev-parse", "--verify", "HEAD^{commit}"]);
+        .args(["show-ref", "--exists", &branch]);
     let output = sandbox::run(
         &mut command,
         sandbox::OUTPUT_LIMIT,
         sandbox::COMMAND_TIMEOUT,
     )
     .await?;
-    if !output.status.success() {
-        return Ok(None);
+    // 只有 Git 官方约定的 exit 2 才表示"引用不存在"；其余非零一律视为无法核验。
+    match output.status.code() {
+        Some(0) => Ok(HeadState::Unverifiable("分支存在但提交对象不可解析")),
+        Some(2) => Ok(HeadState::Unborn(branch)),
+        _ => Ok(HeadState::Unverifiable("无法确认分支引用是否存在")),
     }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let sized = text.len() == 40 || text.len() == 64;
-    if !sized || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(RepositoryCreateError::UnsafeContent(
-            "快照 HEAD 不是完整提交 OID",
-        ));
-    }
-    Ok(Some(text))
+}
+
+async fn capture(
+    sandbox: &Sandbox,
+    program: &Path,
+    target: &Path,
+    arguments: &[&str],
+) -> Result<Option<Vec<u8>>, RepositoryCreateError> {
+    let mut command = sandbox.command(program, sandbox.root());
+    command.arg("-C").arg(target).args(arguments);
+    let output = sandbox::run(
+        &mut command,
+        sandbox::OUTPUT_LIMIT,
+        sandbox::COMMAND_TIMEOUT,
+    )
+    .await?;
+    Ok(output.status.success().then_some(output.stdout))
 }
 
 /// 发布后在最终目标复核 HEAD、index 与工作树内容一致。
 ///
-/// unborn HEAD（初次 Init）没有可比对象，由调用方的 Init 复核负责。
+/// `expected` 为捕获时的固定 HEAD：有值必须解出且相等，无值必须是确证 unborn。
+/// 任何无法解释的失败都不授予 `Verified`。
 pub(super) async fn verify_published(
     sandbox: &Sandbox,
     program: &Path,
     target: &Path,
     expected: Option<&str>,
 ) -> Result<(), RepositoryCreateError> {
-    let mut command = sandbox.command(program, sandbox.root());
-    command
-        .arg("-C")
-        .arg(target)
-        .args(["rev-parse", "--verify", "HEAD^{commit}"]);
-    let output = sandbox::run(
-        &mut command,
-        sandbox::OUTPUT_LIMIT,
-        sandbox::COMMAND_TIMEOUT,
-    )
-    .await?;
-    if !output.status.success() {
-        return Ok(());
-    }
-    let oid = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if let Some(expected) = expected
-        && oid != expected
-    {
-        return Err(RepositoryCreateError::UnsafeContent(
-            "发布后的 HEAD 与捕获时的固定 HEAD 不一致",
-        ));
-    }
-    let sized = oid.len() == 40 || oid.len() == 64;
-    if !sized || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(RepositoryCreateError::UnsafeContent(
-            "发布后的 HEAD 不是完整提交 OID",
-        ));
-    }
+    let oid = match probe_head(sandbox, program, target).await? {
+        HeadState::Unverifiable(reason) => {
+            return Err(RepositoryCreateError::UnsafeContent(reason));
+        }
+        HeadState::Unborn(_) => {
+            if expected.is_some() {
+                return Err(RepositoryCreateError::UnsafeContent(
+                    "预期固定 HEAD 但目标是 unborn 引用",
+                ));
+            }
+            let mut command = sandbox.command(program, sandbox.root());
+            command
+                .arg("-C")
+                .arg(target)
+                .args(["ls-files", "--stage", "-z"]);
+            let output = sandbox::run(
+                &mut command,
+                sandbox::OUTPUT_LIMIT,
+                sandbox::COMMAND_TIMEOUT,
+            )
+            .await?;
+            if !output.status.success() || !output.stdout.is_empty() {
+                return Err(RepositoryCreateError::UnsafeContent(
+                    "空仓库的 index 不应包含条目",
+                ));
+            }
+            return Ok(());
+        }
+        HeadState::Commit(oid) => {
+            // 固定源为 unborn 时，目标不得变成提交态。
+            let expected = expected.ok_or(RepositoryCreateError::UnsafeContent(
+                "固定源为 unborn，但目标出现了提交",
+            ))?;
+            if oid != expected {
+                return Err(RepositoryCreateError::UnsafeContent(
+                    "发布后的 HEAD 与捕获时的固定 HEAD 不一致",
+                ));
+            }
+            oid
+        }
+    };
     let entries = precheck_tree(sandbox, program, target, &oid).await?;
     let mut command = sandbox.command(program, sandbox.root());
     command
@@ -620,7 +678,6 @@ pub(super) async fn verify_published(
     }
     verify_worktree_matches_head(sandbox, program, target, &oid).await
 }
-
 fn ensure_only_git_dir(target: &Path) -> Result<(), RepositoryCreateError> {
     let mut entries = std::fs::read_dir(target).map_err(RepositoryCreateError::Io)?;
     while let Some(entry) = entries
@@ -635,4 +692,104 @@ fn ensure_only_git_dir(target: &Path) -> Result<(), RepositoryCreateError> {
         }
     }
     Ok(())
+}
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unverifiable_head_is_not_accepted_as_published() {
+        let root = std::env::temp_dir().join(format!("soxu-rc-head-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let state = root.join("state");
+        let target = root.join("target");
+        std::fs::create_dir_all(&state).expect("state");
+        std::fs::create_dir_all(target.join(".git").join("refs").join("heads")).expect("git");
+        std::fs::write(target.join(".git").join("HEAD"), b"ref: refs/heads/main\n").expect("HEAD");
+        std::fs::write(
+            target.join(".git").join("refs").join("heads").join("main"),
+            b"0000000000000000000000000000000000000000\n",
+        )
+        .expect("ref");
+        let sandbox = Sandbox::prepare(&state, "head-1").expect("sandbox");
+        let program = crate::GitProbe::discover()
+            .expect("本机 Git")
+            .program()
+            .to_owned();
+        let observed = probe_head(&sandbox, &program, &target)
+            .await
+            .expect("probe");
+        assert!(
+            matches!(observed, HeadState::Unverifiable(_)),
+            "分支存在但对象不可解析必须判为无法核验：{observed:?}"
+        );
+        let error = verify_published(
+            &sandbox,
+            &program,
+            &target,
+            Some("0000000000000000000000000000000000000000"),
+        )
+        .await
+        .expect_err("无法核验的 HEAD 不得通过发布复核");
+        assert!(matches!(error, RepositoryCreateError::UnsafeContent(_)));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn fixed_source_unborn_but_target_commit_is_rejected() {
+        let root = std::env::temp_dir().join(format!("soxu-rc-unborn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let state = root.join("state");
+        let target = root.join("target");
+        std::fs::create_dir_all(&state).expect("state");
+        std::fs::create_dir_all(&target).expect("target");
+        let sandbox = Sandbox::prepare(&state, "unborn-1").expect("sandbox");
+        let program = crate::GitProbe::discover()
+            .expect("本机 Git")
+            .program()
+            .to_owned();
+        let mut command = sandbox.command(&program, sandbox.root());
+        command
+            .arg("init")
+            .args(["--template=", "--initial-branch=main", "--"])
+            .arg(&target);
+        assert!(
+            sandbox::run(
+                &mut command,
+                sandbox::OUTPUT_LIMIT,
+                sandbox::COMMAND_TIMEOUT
+            )
+            .await
+            .expect("init")
+            .status
+            .success()
+        );
+        let mut command = sandbox.command(&program, &target);
+        command.args([
+            "-c",
+            "user.name=Soxu Test",
+            "-c",
+            "user.email=soxu-test@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "x",
+        ]);
+        assert!(
+            sandbox::run(
+                &mut command,
+                sandbox::OUTPUT_LIMIT,
+                sandbox::COMMAND_TIMEOUT
+            )
+            .await
+            .expect("commit")
+            .status
+            .success()
+        );
+        let error = verify_published(&sandbox, &program, &target, None)
+            .await
+            .expect_err("固定源为 unborn 时目标不得变成提交态");
+        assert!(matches!(error, RepositoryCreateError::UnsafeContent(_)));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
