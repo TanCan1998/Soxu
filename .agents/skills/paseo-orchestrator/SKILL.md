@@ -66,13 +66,42 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 workspace create `
 
 **准备任务书与规定环境。** 后续所有子代理派发**仅使用 `pi` agent**（`--provider pi` + 经 `pi --list-models` 核实的 `magpie/...` 模型与思考等级），禁止新派发或续派 `codex` / `claude` / `antigravity` 等其他驱动。用 UTF-8 文件保存正文，第一行放本次唯一派发标记（例如 `Soxu #49 / <派发批次>`）。任务书放系统临时目录或已忽略的 `.agents/local/`，不提交本机路径或运行凭据。先盘点全局代理与 Worktree 环境，按本次用户指定的 `pi` 模型和思考强度选型；不改全局偏好、不静默换型或重启整个服务。
 
-- **规定环境（Mise Toolchain）**。写明目标 Worktree 须先执行 `scripts/setup-worktree.ps1`（完成 `mise trust` 与 hooks 安装），锁定使用项目 `mise.toml` 工具链（`rust 1.99.1` 含 `rustfmt`/`clippy`、`node 26.13.1`、`pnpm 12.21.0`，`disable_tools = ["python", "java", "maven"]`，`PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false`）及构建缓存目录（默认 `CARGO_TARGET_DIR` 或主控指定独立 `--target-dir`）；要求全部 Rust/Node/pnpm/门禁命令通过 `mise exec -- ...` 或 `mise run ...` 执行，并在开工回执上报 `mise run doctor` 实测结果。
+- **规定环境（Mise Toolchain）**。写明目标 Worktree 须先执行 `scripts/setup-worktree.ps1`（完成 `mise trust` 与 hooks 安装），锁定使用项目 `mise.toml` 工具链（`rust 1.99.1` 含 `rustfmt`/`clippy`、`node 26.13.1`、`pnpm 12.21.0`，`disable_tools = ["python", "java", "maven"]`，`PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false`）与构建缓存目录。并行任务书必须指定每路独立的 `CARGO_TARGET_DIR`，按下方示例加载锁定环境并上报 doctor 实测结果。
 - **任务和范围**。写明 Issue、目标、工作树和分支、`Owned Paths`、依赖和禁止碰触的范围。
 - **参考项目**。AOCI 和 CodeGraph 在派发中的主要用途是帮助子代理理解参考项目，而不是让其在 Soxu 工作树重新建图。逐项给出参考根、版本、既有索引及查询入口，再标明源码文件、符号、采用点和边界。`.refs/` 不随 Worktree 检出；必须提供目标宿主可读的真实入口，远程代理不能直接沿用主控本机路径。
 - **参考 AOCI**。复用参考根已有 `aoci.txt`（Legacy）或 Root 所声明的 Volumes，绑定该根的 MCP 先 `aoci_rules`、再 `aoci_overview`，遵守各自实时合同、分块和 Attestation。当前宿主 MCP 若绑定 Soxu，不能拿它查询参考仓库；改用已核实的 `aoci --repo <参考根> mcp` stdio 会话，按 `initialize`、`notifications/initialized`、`tools/list`、`tools/call` 调用。读取索引文件只能称为读取参考索引，不能冒充完整认知校验。不同参考仓库的收据和 Challenge 不混用。
 - **参考 CodeGraph**。复用同一参考根的 `.codegraph`；Magpie `codegraph__codegraph_explore` 参数按实际 Schema 显式绑定参考根。MCP 无法切根时，用 `codegraph explore --path <参考根> <查询>` / `codegraph node --path <参考根> <符号>`。禁止指向目标工作树或把参考数据库复制进去。索引缺失、过期、解析缺口或入口不可访问时报告，按任务允许范围回退 `rg` 与源码；不得自动 `init`、`index`、`sync` 或升级参考索引。
-- **目标工程治理另列**。Soxu 工作树仍遵守其 AGENTS 与 AOCI 认知/收尾维护要求，但这不替代参考索引复用。不得因参考调查修改参考源码、AOCI 正式资产或 CodeGraph 图；查询工具可能有自身本地运行审计，不把普通查询声称为严格零写入。
+- **目标工程治理另列**。Soxu 工作树仍遵守其 AGENTS 与 AOCI 认知/收尾维护要求，但这不替代参考索引复用。 若授权收尾维护，在任务书的 Owned Paths 中写明「本分支 AOCI 托管资产（`aoci*.txt`、`.aoci/**`）」。不得因参考调查修改参考源码、AOCI 正式资产或 CodeGraph 图；查询工具可能有自身本地运行审计，不把普通查询声称为严格零写入。
 - **验收与交付**。写明必须通过的检查、PR 要报告的参考采用及工具使用证据，以及需要立即回报的阻塞。正文要求代理等待主控核验后发出的开工指令。
+
+- **即时上报与停点协议**。遇环境、工具链或文件锁冲突，AOCI / CodeGraph 或脚本异常、截断，Owned Paths 或契约冲突、冻结代码缺陷，设计歧义或平台原语缺失，或同一问题连续排查两轮未果时，立即停止后续修改。按下方模板上报并结束当前回合，等待主控 `steer`。禁止越权试改或推迟到交稿才报告。
+
+```text
+[BLOCKED / NEED-DECISION]
+- 阶段：<当前步骤>
+- 阻塞点：<一句话说明>
+- 复现命令与摘要：<精确命令及关键报错原文，去除凭据和隐私路径>
+- 已尝试动作：<至多两轮只读排查>
+- 可选方案与影响：<选项及 Owned Paths、依赖、契约影响>
+- 需要主控裁决：<明确需要决定的问题>
+```
+
+**并行构建环境示例。** 严禁用 `mise run ...` 启动门禁或 doctor，子任务会重读 `mise.toml` 并覆盖独立 target。先注入 `mise env --json`，再显式覆写 `$env:CARGO_TARGET_DIR` 为各自独立目录，随后直接运行脚本或 `cargo`。
+
+```powershell
+$env:MISE_DISABLE_TOOLS = "python,java,maven"
+$env:PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS = "false"
+$miseEnvJson = mise env --json
+if ($LASTEXITCODE -ne 0) { throw "mise env --json 执行失败" }
+$miseEnv = ($miseEnvJson | Out-String) | ConvertFrom-Json
+foreach ($entry in $miseEnv.PSObject.Properties) {
+  [Environment]::SetEnvironmentVariable($entry.Name, [string]$entry.Value, "Process")
+}
+$env:CARGO_TARGET_DIR = Join-Path $PWD.Path "../.cargo-target/soxu-示例任务" # 替换为任务书指定目录
+pwsh -NoProfile -File scripts/mise-doctor.ps1
+cargo --version
+pwsh -NoProfile -File scripts/check-all.ps1
+```
 
 生成确定性参考清单（只查资产、版本和工具状态，不生成语义、不建索引）：
 
@@ -109,6 +138,8 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 send <agent_id> "暂停当前方案�
 pwsh -NoProfile -File scripts/paseo-ctl.ps1 logs <agent_id> --tail 30
 pwsh -NoProfile -File scripts/paseo-ctl.ps1 wait <agent_id>
 ```
+
+**阻塞协同闭环。** 主控派发后持续巡检活跃代理。发现 `[BLOCKED / NEED-DECISION]` 时，先用 `logs <agent_id> --tail 30` 查看阻塞原文与上下文，核实复现、实际影响及 Owned Paths 和契约边界，再裁决或就重大决策报请用户。裁决后用 `send <agent_id> "<裁决、允许范围与恢复步骤>" --behavior steer` 放行，并复查日志确认收到裁决和恢复状态。
 
 ### 5. 工作区后台服务与脚本控制
 ```powershell
