@@ -12,7 +12,7 @@ use soxu_protocol::{
     PairedDeviceSummary, PendingUserInputRequest, ProjectSummary, QueuedMessageItem,
     QuickChatSummary, RpcCommand, RpcRequest, RpcResponse, RpcResultData, SessionSummary,
     SessionTarget, StateSnapshot, SubagentSummary, TurnLifecycleState, TurnMessageRole,
-    TurnMessageSnapshot, WorkspaceBucket, WorkspaceSummary,
+    TurnMessageSnapshot, WorkspaceBucket, WorkspaceIsolation, WorkspaceSummary,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -21,6 +21,9 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 mod native;
+mod worktrees;
+
+pub use worktrees::{WorktreeAdmission, WorktreeAdmissionRequest};
 
 /// 默认本机 Magpie 配置目录探测（优先 `USERPROFILE`，未设置时取 `HOME`）。
 #[must_use]
@@ -46,6 +49,8 @@ pub struct DaemonState {
     events_tx: broadcast::Sender<EventEnvelope<DaemonEvent>>,
     event_order: Mutex<()>,
     native_turns: Option<native::NativeTurns>,
+    worktree_admission_lock: tokio::sync::Mutex<()>,
+    worktree_ready: Mutex<BTreeMap<String, soxu_magpie::WorktreeDirectory>>,
     daemon_fingerprint: String,
     magpie_detected: bool,
     require_auth_for_all: bool,
@@ -58,6 +63,21 @@ impl DaemonState {
         endpoint_base_url: &str,
         require_auth_for_all: bool,
     ) -> Result<Self> {
+        Self::open_with_environment(
+            data_dir,
+            endpoint_base_url,
+            require_auth_for_all,
+            discover_environment().mode,
+        )
+    }
+
+    /// 使用宿主已经探测的环境模式打开状态。
+    pub fn open_with_environment(
+        data_dir: Option<&Path>,
+        endpoint_base_url: &str,
+        require_auth_for_all: bool,
+        environment_mode: EnvironmentMode,
+    ) -> Result<Self> {
         let store = match data_dir {
             Some(dir) => SqliteStore::open(&dir.join("soxu-daemon.db"))?,
             None => SqliteStore::open_in_memory()?,
@@ -65,7 +85,7 @@ impl DaemonState {
         let daemon_fingerprint = store.get_or_create_daemon_fingerprint()?;
         let pairing = PairingManager::new(daemon_fingerprint.clone(), endpoint_base_url.to_owned());
         let (events_tx, _) = broadcast::channel(512);
-        let magpie_detected = detect_local_magpie();
+        let magpie_detected = environment_mode == EnvironmentMode::MagpieManaged;
 
         Ok(Self {
             store,
@@ -76,6 +96,8 @@ impl DaemonState {
             events_tx,
             event_order: Mutex::new(()),
             native_turns: None,
+            worktree_admission_lock: tokio::sync::Mutex::new(()),
+            worktree_ready: Mutex::new(BTreeMap::new()),
             daemon_fingerprint,
             magpie_detected,
             require_auth_for_all,
@@ -151,9 +173,20 @@ impl DaemonState {
             .values()
             .cloned()
             .collect();
-        self.store
+        let mut snapshot = self
+            .store
             .load_snapshot(&agents, &models, subagents, pending_inputs)
-            .map_err(internal_err)
+            .map_err(internal_err)?;
+        for workspace in &mut snapshot.workspaces {
+            if matches!(workspace.isolation, WorkspaceIsolation::Worktree { .. })
+                && !workspace.needs_recovery
+                && !self.worktree_directory_ready(&workspace.workspace_id)?
+            {
+                workspace.needs_recovery = true;
+                workspace.recovery_reason = Some("Worktree 需要重新通过宿主接入复核".to_owned());
+            }
+        }
+        Ok(snapshot)
     }
 
     /// 校验远程设备 Bearer 令牌（含未吊销、存在性及空闲锁定超时检查）。
@@ -239,6 +272,27 @@ impl DaemonState {
     }
 
     pub fn upsert_workspace(&self, workspace: WorkspaceSummary) -> Result<(), ActionableError> {
+        if workspace.workspace_id.starts_with("worktree:")
+            || matches!(workspace.isolation, WorkspaceIsolation::Worktree { .. })
+            || self
+                .store
+                .get_workspace(&workspace.workspace_id)
+                .map_err(internal_err)?
+                .is_some_and(|existing| {
+                    matches!(existing.isolation, WorkspaceIsolation::Worktree { .. })
+                })
+        {
+            return Err(ActionableError::new(
+                ErrorCode::SafetyRedlineBlocked,
+                "Worktree 须经受控接入登记",
+                "工作区尚未通过 Git 检出复核",
+                "请使用宿主 Worktree 接入入口",
+            ));
+        }
+        self.persist_workspace(workspace)
+    }
+
+    fn persist_workspace(&self, workspace: WorkspaceSummary) -> Result<(), ActionableError> {
         self.store
             .upsert_workspace(&workspace)
             .map_err(internal_err)?;
@@ -399,19 +453,7 @@ impl DaemonState {
             } => {
                 match &target {
                     SessionTarget::Workspace { workspace_id } => {
-                        if self
-                            .store
-                            .get_workspace(workspace_id)
-                            .map_err(internal_err)?
-                            .is_none()
-                        {
-                            return Err(ActionableError::new(
-                                ErrorCode::NotFound,
-                                "指定的工作区不存在",
-                                "无法创建该工作区下的会话",
-                                "请先刷新工作区列表或重新绑定项目目录",
-                            ));
-                        }
+                        self.require_workspace_for_session(workspace_id)?;
                     }
                     SessionTarget::QuickChat { chat_id } => {
                         if self

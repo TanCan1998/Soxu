@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T07:48:29Z",
+  "updated_at": "2026-11-26T09:32:50Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -95,9 +95,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "13b64d0c8c62a8db586b1d749cbb8a1f2265215862bc5456e725d75f93ef4733",
-      "size": 67645,
-      "normalized_sha256": "13b64d0c8c62a8db586b1d749cbb8a1f2265215862bc5456e725d75f93ef4733"
+      "sha256": "25bbb76420c157edd00e5130f935e511fb2b949637d4bad7abdbfbf338296515",
+      "size": 69047,
+      "normalized_sha256": "25bbb76420c157edd00e5130f935e511fb2b949637d4bad7abdbfbf338296515"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -491,15 +491,21 @@
     },
     "crates/soxu-daemon/src/state.rs": {
       "role": "index",
-      "sha256": "c26b6102d1b65eda7fc32da7e997493cdf165ffff8566e6d1f37fac9f948af5b",
-      "size": 42644,
-      "normalized_sha256": "c26b6102d1b65eda7fc32da7e997493cdf165ffff8566e6d1f37fac9f948af5b"
+      "sha256": "b74989a38cb6989b6290074da262dc1f9db4ebbb576f4871c7ca67e7afb3f1fa",
+      "size": 44288,
+      "normalized_sha256": "b74989a38cb6989b6290074da262dc1f9db4ebbb576f4871c7ca67e7afb3f1fa"
     },
     "crates/soxu-daemon/src/state/native.rs": {
       "role": "index",
       "sha256": "21b97b3d40a6c3729fc4915cf4eb0de0f3baae27e4c4259ba3c9bd76423845ef",
       "size": 38174,
       "normalized_sha256": "21b97b3d40a6c3729fc4915cf4eb0de0f3baae27e4c4259ba3c9bd76423845ef"
+    },
+    "crates/soxu-daemon/src/state/worktrees.rs": {
+      "role": "index",
+      "sha256": "74be5790bb77b70f39ed0a2c2b73534b2be00a7aaf88a4e8675116d515cb2900",
+      "size": 20594,
+      "normalized_sha256": "74be5790bb77b70f39ed0a2c2b73534b2be00a7aaf88a4e8675116d515cb2900"
     },
     "crates/soxu-daemon/src/store.rs": {
       "role": "index",
@@ -518,6 +524,12 @@
       "sha256": "6b63b256ea52a039996007c106ba8f74accc268f398be342f1bc21cb419f0208",
       "size": 84242,
       "normalized_sha256": "6b63b256ea52a039996007c106ba8f74accc268f398be342f1bc21cb419f0208"
+    },
+    "crates/soxu-daemon/tests/worktree_lifecycle.rs": {
+      "role": "observe",
+      "sha256": "4cb44cb2177d6ec1a042f5700c9b804bc4d7e63b2d942fe27fcb58f5296e683a",
+      "size": 15071,
+      "normalized_sha256": "4cb44cb2177d6ec1a042f5700c9b804bc4d7e63b2d942fe27fcb58f5296e683a"
     },
     "crates/soxu-desktop/Cargo.toml": {
       "role": "index",
@@ -749,15 +761,15 @@
     },
     "crates/soxu-magpie/src/lib.rs": {
       "role": "index",
-      "sha256": "4086b32563066d1dcee95ce548ccc29cc45c76f7f6e4d582e138c60eb03642aa",
-      "size": 5217,
-      "normalized_sha256": "4086b32563066d1dcee95ce548ccc29cc45c76f7f6e4d582e138c60eb03642aa"
+      "sha256": "2273572cbcfbb84773f507d255267c5826d6d2349db91195181b1aa23c90546c",
+      "size": 5408,
+      "normalized_sha256": "2273572cbcfbb84773f507d255267c5826d6d2349db91195181b1aa23c90546c"
     },
     "crates/soxu-magpie/src/magpie.rs": {
       "role": "index",
-      "sha256": "abb8cc7d246c2e674950f7817e6eeb98fd71770fdc65361d8622538ffd28bda5",
-      "size": 4965,
-      "normalized_sha256": "abb8cc7d246c2e674950f7817e6eeb98fd71770fdc65361d8622538ffd28bda5"
+      "sha256": "edf8db176071d63d43e93b214d58969ba2d5e4e325aaa6c3ff3106068b95ef84",
+      "size": 6305,
+      "normalized_sha256": "edf8db176071d63d43e93b214d58969ba2d5e4e325aaa6c3ff3106068b95ef84"
     },
     "crates/soxu-magpie/src/native.rs": {
       "role": "index",
@@ -770,6 +782,18 @@
       "sha256": "7fb1d8cf52db19f4e972c5be936989c41271aa7770361aab46a3e08cacc270e6",
       "size": 10098,
       "normalized_sha256": "7fb1d8cf52db19f4e972c5be936989c41271aa7770361aab46a3e08cacc270e6"
+    },
+    "crates/soxu-magpie/src/worktree_context.rs": {
+      "role": "index",
+      "sha256": "766306c22858271a10d8931fdcfe5e69f0b35f7312553ce4ffa480492ab31763",
+      "size": 11113,
+      "normalized_sha256": "766306c22858271a10d8931fdcfe5e69f0b35f7312553ce4ffa480492ab31763"
+    },
+    "crates/soxu-magpie/tests/worktree_context.rs": {
+      "role": "observe",
+      "sha256": "0be844dfed07cafa2938f14c854d155433f66fb9788094faf73539463911bf5a",
+      "size": 7516,
+      "normalized_sha256": "0be844dfed07cafa2938f14c854d155433f66fb9788094faf73539463911bf5a"
     },
     "crates/soxu-protocol/Cargo.toml": {
       "role": "index",

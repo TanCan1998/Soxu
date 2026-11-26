@@ -1,4 +1,4 @@
-use crate::{McpRouteMode, ProbeStatus, SkillRouteMode};
+use crate::{McpRouteMode, ProbeStatus, SkillRouteMode, WorktreeContextServer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -70,6 +70,42 @@ impl MagpieDiscovery {
             ),
         }
     }
+}
+
+pub(crate) fn direct_worktree_servers(
+    directory: Option<&Path>,
+) -> Result<Vec<WorktreeContextServer>, ProbeStatus> {
+    let library = read_metadata(directory, "library.json")?;
+    let Some(entries) = library.get("mcp") else {
+        return Ok(Vec::new());
+    };
+    let entries = entries.as_array().ok_or(ProbeStatus::Invalid)?;
+    let default_direct = match library.get("mcpHub") {
+        Some(Value::Bool(enabled)) => Some(!enabled),
+        Some(_) => return Err(ProbeStatus::Invalid),
+        None => None,
+    };
+    let mut direct = Vec::new();
+    for entry in entries {
+        let server = match entry.get("name").and_then(Value::as_str) {
+            Some(name) if name.eq_ignore_ascii_case("aoci") => WorktreeContextServer::Aoci,
+            Some(name) if name.eq_ignore_ascii_case("codegraph") => {
+                WorktreeContextServer::CodeGraph
+            }
+            _ => continue,
+        };
+        let selected = match entry.get("local") {
+            Some(Value::Bool(true)) => true,
+            Some(Value::Bool(false)) | None => default_direct.ok_or(ProbeStatus::Invalid)?,
+            Some(_) => return Err(ProbeStatus::Invalid),
+        };
+        if selected {
+            direct.push(server);
+        }
+    }
+    direct.sort_unstable();
+    direct.dedup();
+    Ok(direct)
 }
 
 fn nonempty_string(value: &Value) -> bool {
