@@ -8,6 +8,8 @@
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
@@ -291,6 +293,7 @@ if (-not $forceFull) {
         "AGENTS.md", "CLAUDE.md", "README.md",
         "aoci.txt", "aoci.meta.txt", "aoci.code.txt", "aoci.database.txt",
         ".editorconfig", ".gitattributes", ".gitignore", ".gitleaks.toml",
+        ".github/workflows/release.yml",
         "paseo.json", "scripts/mise-doctor.ps1", "scripts/setup-hooks.ps1", "scripts/setup-worktree.ps1"
       ) -or
       $path -like "docs/*" -or
@@ -361,3 +364,4 @@ if ($Json) {
 } else {
   $result
 }
+exit 0

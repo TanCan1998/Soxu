@@ -62,4 +62,9 @@ if ($LASTEXITCODE -ne 0) { throw "外部 CLI 调用 detect-check-scope.ps1 失�
 $cliObj = $cliRaw | ConvertFrom-Json -ErrorAction Stop
 Assert-Condition ($cliObj.changedFiles.Count -eq 2 -and (-not $cliObj.rust) -and (-not $cliObj.mobileWeb)) "pwsh -File 逗号传参兼容多个变更路径"
 
+# 9. 发版编排与编码标准变更仅跑治理隐私门禁，不拖累 Rust 与 PWA
+$releaseDocs = Invoke-Detect @(".github/workflows/release.yml", "docs/ops/CODE_STANDARDS.md")
+Assert-Condition ($releaseDocs.governance -and (-not $releaseDocs.rust) -and (-not $releaseDocs.mobileWeb)) "release.yml 与 CODE_STANDARDS.md 变更跳过无关 Rust 与 PWA 构建"
+
 Write-Host "✓ 共 $passed 项作用域检测回归全部通过！" -ForegroundColor Green
+exit 0

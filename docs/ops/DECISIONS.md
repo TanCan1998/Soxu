@@ -45,3 +45,11 @@
 - **背景**：多波次多 Worktree 并行研发与双平台真机验证持续暴露跨工具链、环境隔离、AOCI 协议及缓存容量等高频陷阱；仅靠人工回顾容易重复踩坑，且单靠上下文总结无法跨 AGY/Codex 会话无损传承。
 - **决策**：建立三层随仓库 Git 版本化的自优化闭环：在 `AGENTS.md`（第三章第 5 条、第五章）确立制度与安全红线；在 `.agents/skills/paseo-orchestrator/SKILL.md`（第五章）定义 4 类自动捕获时机、L1/L2/L3 分级晋升漏斗、派发前 10 秒预检与容量剪枝机制；在 `docs/ops/LESSONS.md` 维护脱敏工程经验台账与 <= 25 条活跃速查表。
 - **约束与边界**：任何流程自主晋升均不得削弱 `AGENTS.md` 第一章安全红线，不得改写 `AGENTS.md` 中 `<!-- aoci:begin -->`~`<!-- aoci:end -->` 托管区块，不得修改本机用户全局配置，也不得将真实用户名路径或凭据写入版本化文件；已被脚本或自动化测试完全机器防呆的条目须及时归档剪枝。
+
+## ADR-009：双仓解耦联动发版（soxu-releases）与分级抗压 CI 架构
+- **状态**：已采纳（2026-11-27，治理 Issue `#76` / 对标 `yetone/magpie`）
+- **背景**：私有主仓无法直接向公网分发公开包管理器（Scoop / Homebrew / Winget）与下载直链，且单仓 CI 此前缺乏修改域分级、`main` 并发保护与超时护栏。
+- **决策**：
+  1. 主仓 CI（`.github/workflows/ci.yml` + `scripts/detect-check-scope.ps1`）实行按路径域与 Cargo 反向依赖闭包的精确分级检查，同时对齐 Magpie 抗压规则：`main` 永不因新推送取消在途 run、全 Job 显式 `timeout-minutes`、`CARGO_INCREMENTAL=0`、设置汇总门禁 `ci-gate` 兼容 skipped job；
+  2. 新建公开联动发版仓库 `TanCan1998/soxu-releases` 与主仓 `.github/workflows/release.yml`：主仓以只读 Deploy Key（配于联动仓 `SOXU_DEPLOY_KEY`）配合限流退避 `repository_dispatch` 触发联动仓执行多平台 release 编译、实机 `--version`/`--help` 冒烟验证、`SHA256SUMS` + SLSA 构建溯源及包管理器清单自动更新，随后主仓镜像产物并用双重 `sort -V` 保护最高语义版本 `Latest` 标记；
+  3. 新增 `docs/ops/CODE_STANDARDS.md` 并在 `docs/ops/LESSONS.md` 引入 `Seen N×` 复现自动晋升规则与 `--match-head-commit` 锁 SHA 合入纪律。

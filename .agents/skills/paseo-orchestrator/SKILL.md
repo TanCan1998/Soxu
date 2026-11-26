@@ -30,7 +30,7 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 <Paseo 参数...>
 
 | 维度 | 类别 | 具体载体与边界约束 |
 | :--- | :--- | :--- |
-| **工程规范与进度认知** | 共享 | `AGENTS.md`、`docs/ops/PROGRESS.md`、`docs/ops/DECISIONS.md`、`docs/ops/LESSONS.md`、`aoci.txt` + `.aoci/`、`.agents/skills/`（全仓 Git 版本化，双端读取同一份事实来源） |
+| **工程规范与进度认知** | 共享 | `AGENTS.md`、`docs/ops/PROGRESS.md`、`docs/ops/DECISIONS.md`、`docs/ops/CODE_STANDARDS.md`、`docs/ops/LESSONS.md`、`aoci.txt` + `.aoci/`、`.agents/skills/`（全仓 Git 版本化，双端读取同一份事实来源） |
 | **工具链与构建缓存** | 共享 | `mise.toml`、`paseo.json`、`Cargo.toml` 与上级共享缓存 `../.cargo-target/soxu`（双端均启用工作区 `scripts/check-all.ps1` 门禁） |
 | **Paseo 运行状态池** | 共享 | 本机 Paseo 守护进程（`127.0.0.1:6767`）、项目 `Soxu`（`prj_24ffa03410264684`）、主控工作台（`wks_21203a9ef0f5e2e5`）、全部隔离 Worktree 与活跃子代理会话 |
 | **宿主项目注册与全局配置** | 隔离 | **AGY**：项目注册在 `~/.gemini/config/projects/`，MCP 在 `~/.gemini/config/mcp_config.json`；**Codex**：项目注册在 `~/.codex/state_5.sqlite`，仓库级覆盖在已忽略的 `.codex/config.toml`。双端严禁相互篡改对方宿主配置或 `~/.claude` / `~/.pi` / `~/.config/magpie` |
@@ -160,7 +160,7 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 script stop check-all --workspace <w
    - 若完成了里程碑、PR 状态变更或重要决策，同步更新 `docs/ops/PROGRESS.md` 与 `aoci` 索引。
 2. **切入方（接手前 30 秒恢复）**：
    1. 阅读根目录 `AGENTS.md`；
-   2. 阅读 `docs/ops/PROGRESS.md`、`docs/ops/DECISIONS.md` 与 `docs/ops/LESSONS.md`「活跃规则速查表」；
+   2. 阅读 `docs/ops/PROGRESS.md`、`docs/ops/DECISIONS.md`、`docs/ops/CODE_STANDARDS.md` 与 `docs/ops/LESSONS.md`「活跃规则速查表」；
    3. 执行只读盘点与接管：
       ```powershell
       git status -sb
@@ -170,6 +170,9 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 script stop check-all --workspace <w
       pwsh -NoProfile -File scripts/paseo-ctl.ps1 ls --json
       ```
    4. 若有正在运行的 Paseo Agent，直接通过 `logs <agent_id> --tail 30` 检查进度，并用 `send <agent_id> ...` 继续调控，**无需推倒重来**。
+3. **PR 审查、合入与发版收口**：
+   - 合并 PR 必须锁定已审提交 SHA：`gh pr merge <pr> --squash --delete-branch --match-head-commit <reviewed_sha>`，且 PR 正文裸写 `Closes #<issue>`；
+   - 正式发版由主仓 `.github/workflows/release.yml` 打 `v*` tag 触发，联动公开仓 `TanCan1998/soxu-releases` 构建、实机冒烟校验、生成 SLSA 溯源、更新 Scoop/Homebrew/Winget 清单并回传镜像与单调 `Latest` 校正。
 
 ---
 
@@ -185,12 +188,12 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 script stop check-all --workspace <w
 
 ### 2. 三级沉淀与自主晋升漏斗
 - **L1（偶发观察）**：仅影响单次孤立变更，留在对应 PR 说明或单波汇报，不写入持久经验账本。
-- **L2（可复用经验）**：提炼为严格脱敏的结构化条目写入 `docs/ops/LESSONS.md`（包含 `ID`、`适用环节`、`根因`、`预防动作`、`验证方式`、`晋升落点`、`状态`；单条 <= 8 行，严禁写入真实用户名或个人目录路径）。
+- **L2（可复用经验）**：提炼为严格脱敏的结构化条目写入 `docs/ops/LESSONS.md`（标注 `Seen N× (日期)`、根因、预防动作、验证方式、状态；单条 <= 8 行，严禁写入真实用户名或个人目录路径）。
 - **L3（流程自主晋升）**：满足以下任一条件时，主控无需用户再次提醒即可自主发起治理升级：
   - 高危安全边界或数据/磁盘空间风险（如系统盘 `%TEMP%` 防爆与联接禁忌）；
   - 跨平台（Windows vs Linux）真机必然复现的构建/测试陷阱；
-  - 同类 L2 经验在实战中命中 **>= 2 次**。
-  晋升去向按收益递增依次为：① 下轮任务书「规定环境 / Owned Paths / 验收清单」默认强制条款 → ② 更新 `.agents/skills/paseo-orchestrator/SKILL.md` 与 `AGENTS.md` → ③ 单开防呆脚本或门禁测试治理 Issue/PR（彻底变成机器检查）。
+  - 同类 L2 经验在实战中复现 **Seen >= 3×**。
+  晋升去向按收益递增依次为：① 下轮任务书「规定环境 / Owned Paths / 验收清单」默认强制条款 → ② 固化进 `docs/ops/CODE_STANDARDS.md`、`.agents/skills/paseo-orchestrator/SKILL.md` 与 `AGENTS.md` → ③ 单开防呆脚本或门禁测试治理 Issue/PR（彻底变成机器检查）。
 
 ### 3. 派发前 10 秒预检与容量剪枝机制
 - **派发前必扫**：起草任何新 Issue 任务书前，快速扫读 `docs/ops/LESSONS.md`「活跃规则速查表」，将命中本次任务特征的规则（如 WSL shims 绕过、AOCI stdio `.mjs`、双平台实测命令）直接内嵌到任务书对应小节。

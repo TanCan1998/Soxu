@@ -7,17 +7,19 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 对标 Magpie 抗压并发策略：PR 推送新提交时取消旧 run 节省算力；main 永远跑完保障发版基准
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   detect-changes:
     name: Detect Check Scope
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       rust: ${{ steps.scope.outputs.rust }}
       rust_scope: ${{ steps.scope.outputs.rust_scope }}
@@ -56,6 +58,7 @@ jobs:
     name: Git Emoji & Privacy Guard
     needs: detect-changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -90,11 +93,18 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.rust == 'true'
     runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -109,11 +119,11 @@ jobs:
           RUST_PACKAGE_ARGS: ${{ needs.detect-changes.outputs.rust_package_args }}
         run: |
           if ($env:RUST_SCOPE -eq 'workspace') {
-            cargo clippy --workspace --all-targets -- -D warnings
+            cargo clippy --workspace --all-targets --locked -- -D warnings
           } else {
             $pkgArgs = @($env:RUST_PACKAGE_ARGS -split '\s+' | Where-Object { $_ })
             Write-Host "增量 Clippy 范围: $($pkgArgs -join ' ')"
-            cargo clippy @pkgArgs --all-targets -- -D warnings
+            cargo clippy @pkgArgs --all-targets --locked -- -D warnings
           }
 
       - name: Run scoped unit & integration tests
@@ -123,11 +133,11 @@ jobs:
           RUST_PACKAGE_ARGS: ${{ needs.detect-changes.outputs.rust_package_args }}
         run: |
           if ($env:RUST_SCOPE -eq 'workspace') {
-            cargo test --workspace
+            cargo test --workspace --locked
           } else {
             $pkgArgs = @($env:RUST_PACKAGE_ARGS -split '\s+' | Where-Object { $_ })
             Write-Host "增量测试范围: $($pkgArgs -join ' ')"
-            cargo test @pkgArgs
+            cargo test @pkgArgs --locked
           }
 
   mobile-web-check:
@@ -135,6 +145,7 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.mobile_web == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: apps/mobile-web
@@ -171,6 +182,7 @@ jobs:
     needs: [detect-changes, governance-and-privacy, rust-check, mobile-web-check]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Summarize scoped CI execution
         shell: pwsh

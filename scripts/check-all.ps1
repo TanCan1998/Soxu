@@ -6,6 +6,8 @@
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 function Invoke-Step([string]$Title, [scriptblock]$Block) {
   Write-Host "==> $Title" -ForegroundColor Cyan
