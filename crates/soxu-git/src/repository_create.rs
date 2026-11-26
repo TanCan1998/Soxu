@@ -13,6 +13,7 @@ mod clone;
 mod config_scan;
 mod init;
 mod platform;
+mod publish;
 mod sandbox;
 mod state;
 mod target;
@@ -319,6 +320,10 @@ struct Plan {
     target_root: AuthorizedDirectory,
     target: PathBuf,
     source: Option<PathBuf>,
+    /// 显式空目录模式下由预检取得的目柄，持有到发布与复核结束。
+    target_dir: Option<AuthorizedDirectory>,
+    /// 已核验源的句柄；持有到私有快照捕获完成，子进程此后只读快照。
+    source_facts: Option<clone::SourceFacts>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -336,7 +341,13 @@ impl GitProbe {
         coordinator: &RepositoryCreateCoordinator,
         request: RepositoryCreateRequest<'_>,
     ) -> Result<RepositoryCreateOutcome, RepositoryCreateError> {
-        let plan = plan(&request)?;
+        if !WRITE_BACKEND_SUPPORTED {
+            let _ = (coordinator, &request);
+            return Err(RepositoryCreateError::UnsupportedPlatform(
+                "Windows 缺少目录创建与打开的原子锚定原语，受控仓库创建 fail-closed",
+            ));
+        }
+        let mut plan = plan(&request)?;
         let lock = state::acquire(&coordinator.state_root).await?;
         let records = state::read_records(&coordinator.state_root)?;
         if let Some(existing) = records
@@ -346,7 +357,9 @@ impl GitProbe {
             if !same_binding(existing, &plan) {
                 return Err(RepositoryCreateError::RequestConflict);
             }
-            if matches!(existing.result, RepositoryCreateResult::Unknown { .. }) {
+            if matches!(existing.result, RepositoryCreateResult::Unknown { .. })
+                || existing.terminal == Some(RepositoryTerminalState::Unknown)
+            {
                 return Ok(RepositoryCreateOutcome::UnknownOutcome {
                     record: existing.clone(),
                     observation: None,
@@ -365,7 +378,8 @@ impl GitProbe {
             });
         }
 
-        let before = preflight(&plan)?;
+        let (before, target_dir) = preflight(&plan)?;
+        plan.target_dir = target_dir;
         let mut record = RepositoryOperationRecord {
             request_id: plan.request_id.clone(),
             operation: plan.operation,
@@ -390,19 +404,20 @@ impl GitProbe {
 
         plan.target_root.refresh()?;
         lock.refresh(&coordinator.state_root)?;
-        if preflight(&plan)? != before {
+        if preflight(&plan)?.0 != before {
             return Err(RepositoryCreateError::IdentityChanged);
         }
         if let (RepositoryOperation::CloneLocal, Some(source)) =
             (plan.operation, plan.source.as_deref())
         {
-            let facts = clone::verify_source(self, source).await?;
+            let facts = clone::verify_source(source)?;
             if target::overlaps(&facts.root, &plan.target) {
                 return Err(RepositoryCreateError::InvalidInput("来源与目标重叠"));
             }
             record
                 .notes
-                .push(format!("来源对象库：{}", facts.git_dir.to_string_lossy()));
+                .push("来源仓库已通过配置与对象库预检".to_owned());
+            plan.source_facts = Some(facts);
         }
         record.stage = RepositoryCreateStage::Started;
         record.started_at = Some(SystemTime::now());
@@ -458,6 +473,7 @@ fn plan(request: &RepositoryCreateRequest<'_>) -> Result<Plan, RepositoryCreateE
         ));
     }
     let target_root = AuthorizedDirectory::open(request.target_root)?;
+    require_private_root(&target_root)?;
     let direct = target::child_of(target_root.path(), request.target_name)?;
     let parent = direct
         .parent()
@@ -494,8 +510,30 @@ fn plan(request: &RepositoryCreateRequest<'_>) -> Result<Plan, RepositoryCreateE
         target_root,
         target: direct,
         source,
+        target_dir: None,
+        source_facts: None,
     })
 }
+
+/// Linux 上以固定句柄证明属主、权限与受支持文件系统（内部已包含挂载类型校验）。
+#[cfg(target_os = "linux")]
+fn require_private_root(root: &AuthorizedDirectory) -> Result<(), RepositoryCreateError> {
+    platform::require_private_owner(root)
+}
+
+/// Windows 上该证据需原生句柄原语与进程隔离，当前不在本入口断言。
+#[cfg(not(target_os = "linux"))]
+fn require_private_root(_root: &AuthorizedDirectory) -> Result<(), RepositoryCreateError> {
+    Ok(())
+}
+
+/// 本构建是否具备受控写入所需的平台原语。
+/// Windows 缺少目录创建与打开的原子锚定（无 `openat` 等价接口，且空目录 reparse 属性可被就地改写），
+/// 因此写入入口在该平台明确 fail-closed；只读诊断路径不受影响。
+#[cfg(windows)]
+const WRITE_BACKEND_SUPPORTED: bool = false;
+#[cfg(not(windows))]
+const WRITE_BACKEND_SUPPORTED: bool = true;
 
 fn same_binding(record: &RepositoryOperationRecord, plan: &Plan) -> bool {
     record.operation == plan.operation
@@ -505,7 +543,9 @@ fn same_binding(record: &RepositoryOperationRecord, plan: &Plan) -> bool {
         && record.source == plan.source
 }
 
-fn preflight(plan: &Plan) -> Result<Preflight, RepositoryCreateError> {
+fn preflight(
+    plan: &Plan,
+) -> Result<(Preflight, Option<AuthorizedDirectory>), RepositoryCreateError> {
     let state = target::inspect(&plan.target)?;
     let mut preflight = Preflight {
         state,
@@ -513,6 +553,7 @@ fn preflight(plan: &Plan) -> Result<Preflight, RepositoryCreateError> {
         absent: false,
         empty: false,
     };
+    let mut target_dir = None;
     match state {
         RepositoryTargetState::LinkOrReparse => {
             return Err(RepositoryCreateError::Unauthorized(
@@ -538,11 +579,13 @@ fn preflight(plan: &Plan) -> Result<Preflight, RepositoryCreateError> {
                 preflight.identity = Some(authorized.identity());
                 preflight.empty = true;
                 authorized.refresh()?;
+                require_private_root(&authorized)?;
+                target_dir = Some(authorized);
             }
             _ => return Err(RepositoryCreateError::TargetExists),
         },
     }
-    Ok(preflight)
+    Ok((preflight, target_dir))
 }
 
 async fn execute(
@@ -561,14 +604,30 @@ async fn execute(
     let sandbox = sandbox::Sandbox::prepare(state_root.path(), &plan.request_id)?;
     let program = git.program().to_owned();
 
+    // Git 只在宿主私有暂存内执行，子进程经宿主 PID 的句柄路径访问暂存。
+    let staged_name = std::ffi::OsStr::new("repo");
+    let staged_for_git = sandbox.work().child_process_path()?.join(staged_name);
+    // 克隆输入只能是已授权源的私有快照；捕获失败在启动 Git 之前返回。
+    let source_snapshot = match plan.source_facts.as_ref() {
+        Some(facts) => Some(clone::snapshot(&sandbox, facts)?),
+        None => None,
+    };
+    // 固定 HEAD 取自快照本身；克隆与终态复核都以该值为准。
+    let snapshot_head = match source_snapshot.as_ref() {
+        Some((handle, _)) => {
+            let path = handle.child_process_path()?;
+            checkout::read_head(&sandbox, &program, &path).await?
+        }
+        None => None,
+    };
     let result = match plan.operation {
-        RepositoryOperation::Init => init::run(&sandbox, &program, &plan.target).await?,
+        RepositoryOperation::Init => init::run(&sandbox, &program, &staged_for_git).await?,
         RepositoryOperation::CloneLocal => {
-            let source = plan
-                .source
-                .clone()
-                .ok_or(RepositoryCreateError::InvalidInput("克隆请求缺少来源"))?;
-            clone::run(&sandbox, &program, &source, &plan.target).await?
+            let source = source_snapshot
+                .as_ref()
+                .map(|(_, path)| path.clone())
+                .ok_or(RepositoryCreateError::InvalidInput("克隆请求缺少源快照"))?;
+            clone::run(&sandbox, &program, &source, &staged_for_git).await?
         }
         RepositoryOperation::CloneUrl => {
             return Err(RepositoryCreateError::Unsupported(
@@ -580,38 +639,91 @@ async fn execute(
     record.stage = RepositoryCreateStage::Observed;
     record.result = result.clone();
     record.observed_at = Some(SystemTime::now());
+
+    // 只有确实成功的 Git 调用才允许进入发布；失败、超时与未知结果只做只读观察。
+    let mut published_files = 0_usize;
+    let staged_handle = if matches!(result, RepositoryCreateResult::Succeeded) {
+        sandbox.work().child(staged_name).ok()
+    } else {
+        None
+    };
+    let mut verify_error = match &staged_handle {
+        Some(handle) => match handle.child_process_path() {
+            Ok(path) => verify_staged(&sandbox, &program, &plan, &path, Some(handle)).await,
+            Err(error) => Some(error_class(&error)),
+        },
+        None if matches!(result, RepositoryCreateResult::Succeeded) => Some("staged-missing"),
+        None => None,
+    };
+    if verify_error.is_none()
+        && let Some(handle) = &staged_handle
+    {
+        match publish_target(&plan) {
+            Ok(target_dir) => {
+                let with_worktree = matches!(plan.operation, RepositoryOperation::CloneLocal);
+                match handle
+                    .anchor()
+                    .and_then(|staged| publish::repository(&staged, &target_dir, with_worktree))
+                {
+                    Ok(publication) => {
+                        record.target_identity = Some(target_dir.identity());
+                        published_files = publication.worktree_files;
+                        record.notes.push(format!(
+                            "已发布 {} 个条目、{} 个文件、{} 字节",
+                            publication.entries, publication.files, publication.bytes
+                        ));
+                        if matches!(plan.operation, RepositoryOperation::CloneLocal)
+                            && let Err(error) = checkout::verify_published(
+                                &sandbox,
+                                &program,
+                                &plan.target,
+                                snapshot_head.as_deref(),
+                            )
+                            .await
+                        {
+                            verify_error = Some(error_class(&error));
+                        }
+                    }
+                    Err(error) => verify_error = Some(error_class(&error)),
+                }
+            }
+            Err(error) => verify_error = Some(error_class(&error)),
+        }
+    }
+
     let observed_state =
         target::inspect(&plan.target).unwrap_or(RepositoryTargetState::Inaccessible);
     let mut observation = None;
-    let mut verify_error = None;
     let verified = match plan.operation {
-        RepositoryOperation::Init => match init::verify(&sandbox, &program, &plan.target).await {
+        RepositoryOperation::Init => {
+            match init::verify(&sandbox, &program, &plan.target, None).await {
+                Ok(facts) => {
+                    record.git_dir_identity = facts.git_dir_identity;
+                    let ok = result == RepositoryCreateResult::Succeeded && facts.unborn_main();
+                    let entries = facts.notes;
+                    observation = Some(RepositoryObservation {
+                        observed_at: SystemTime::now(),
+                        target_state: observed_state,
+                        git_dir_present: facts.git_dir_present,
+                        head_branch: facts.head_branch,
+                        head_oid: facts.head_oid,
+                        published_entries: 0,
+                        notes: entries,
+                        target_identity: record.target_identity,
+                        git_dir_identity: record.git_dir_identity,
+                    });
+                    ok
+                }
+                Err(error) => {
+                    verify_error = Some(error_class(&error));
+                    false
+                }
+            }
+        }
+        _ => match clone::inspect(&sandbox, &program, &plan.target, None).await {
             Ok(facts) => {
                 record.git_dir_identity = facts.git_dir_identity;
-                let ok = result == RepositoryCreateResult::Succeeded && facts.unborn_main();
-                let entries = facts.notes;
-                observation = Some(RepositoryObservation {
-                    observed_at: SystemTime::now(),
-                    target_state: observed_state,
-                    git_dir_present: facts.git_dir_present,
-                    head_branch: facts.head_branch,
-                    head_oid: facts.head_oid,
-                    published_entries: 0,
-                    notes: entries,
-                    target_identity: record.target_identity,
-                    git_dir_identity: record.git_dir_identity,
-                });
-                ok
-            }
-            Err(error) => {
-                verify_error = Some(error.to_string());
-                false
-            }
-        },
-        _ => match clone::verify(&sandbox, &program, &plan.target).await {
-            Ok(facts) => {
-                record.git_dir_identity = facts.git_dir_identity;
-                let ok = result == RepositoryCreateResult::Succeeded
+                let ok = matches!(record.result, RepositoryCreateResult::Succeeded)
                     && facts.git_dir_present
                     && (facts.empty_remote() || facts.head_oid.is_some());
                 observation = Some(RepositoryObservation {
@@ -620,7 +732,7 @@ async fn execute(
                     git_dir_present: facts.git_dir_present,
                     head_branch: facts.head_branch,
                     head_oid: facts.head_oid,
-                    published_entries: facts.published_entries,
+                    published_entries: published_files,
                     notes: facts.notes,
                     target_identity: record.target_identity,
                     git_dir_identity: record.git_dir_identity,
@@ -628,7 +740,7 @@ async fn execute(
                 ok
             }
             Err(error) => {
-                verify_error = Some(error.to_string());
+                verify_error = Some(error_class(&error));
                 false
             }
         },
@@ -637,8 +749,7 @@ async fn execute(
     let git_dir_present = observation
         .as_ref()
         .is_some_and(|observation| observation.git_dir_present);
-    let terminal = if let Some(error) = verify_error {
-        record.notes.push(format!("只读复核失败：{error}"));
+    let terminal = if verify_error.is_some() {
         RepositoryTerminalState::Unknown
     } else if git_dir_present && verified {
         RepositoryTerminalState::Verified
@@ -646,10 +757,17 @@ async fn execute(
         RepositoryTerminalState::PartialObserved
     } else if matches!(record.result, RepositoryCreateResult::Unknown { .. }) {
         RepositoryTerminalState::Unknown
-    } else {
+    } else if matches!(record.result, RepositoryCreateResult::SpawnFailed) {
+        // 只有确证命令未启动才允许声称 NotStarted。
         RepositoryTerminalState::NotStarted
+    } else {
+        // 命令已启动并退出（成功或非零）却看不到 Git 元数据：不得声称“从未启动”。
+        RepositoryTerminalState::PartialObserved
     };
     record.terminal = Some(terminal);
+    if let Some(error) = verify_error {
+        record.notes.push(format!("只读复核失败（分类={error}）"));
+    }
     if let Some(observation) = &observation {
         record.notes.extend(observation.notes.iter().cloned());
     }
@@ -680,16 +798,61 @@ async fn execute(
     })
 }
 
+/// 在宿主私有暂存内做完整预检；返回 `Some(分类)` 表示暂存不可发布。
+async fn verify_staged(
+    sandbox: &sandbox::Sandbox,
+    program: &Path,
+    plan: &Plan,
+    staged: &Path,
+    holder: Option<&AuthorizedDirectory>,
+) -> Option<&'static str> {
+    let result = match plan.operation {
+        RepositoryOperation::Init => init::verify(sandbox, program, staged, holder)
+            .await
+            .map(|facts| facts.unborn_main()),
+        _ => clone::stage(sandbox, program, staged, holder)
+            .await
+            .map(|facts| {
+                facts.git_dir_present && (facts.empty_remote() || facts.head_oid.is_some())
+            }),
+    };
+    match result {
+        Ok(true) => None,
+        Ok(false) => Some("staged-not-verified"),
+        Err(error) => Some(error_class(&error)),
+    }
+}
+
+/// 取得可写入的目标目录句柄：显式空目录沿用预检句柄，缺失目标在受控父根句柄下独占创建。
+fn publish_target(plan: &Plan) -> Result<AuthorizedDirectory, RepositoryCreateError> {
+    if let Some(directory) = plan.target_dir.as_ref() {
+        directory.refresh()?;
+        require_private_root(directory)?;
+        return directory.try_clone();
+    }
+    plan.target_root.refresh()?;
+    require_private_root(&plan.target_root)?;
+    let name = plan
+        .target
+        .file_name()
+        .ok_or(RepositoryCreateError::InvalidInput("目标缺少名称"))?;
+    // 在同一个父句柄的锚定路径下创建并打开，不重开原始绝对路径。
+    // 新建目标继承父根的保护，只需核对身份，不额外要求 0700（否则会改写用户仓库权限）。
+    let target = plan.target_root.create_child(name)?;
+    target.refresh()?;
+    Ok(target)
+}
+
 async fn observe(
     git: &GitProbe,
     state_root: &AuthorizedDirectory,
     record: &RepositoryOperationRecord,
 ) -> Option<RepositoryObservation> {
-    let sandbox = sandbox::Sandbox::prepare(state_root.path(), &record.request_id).ok()?;
+    let sandbox = sandbox::Sandbox::prepare_readonly(state_root.path(), &record.request_id).ok()?;
     let program = git.program().to_owned();
     let facts = match record.operation {
         RepositoryOperation::Init => {
-            let facts = init::verify(&sandbox, &program, &record.target)
+            let facts = init::verify(&sandbox, &program, &record.target, None)
                 .await
                 .ok()?;
             CloneFact {
@@ -702,7 +865,7 @@ async fn observe(
             }
         }
         _ => {
-            let facts = clone::verify(&sandbox, &program, &record.target)
+            let facts = clone::inspect(&sandbox, &program, &record.target, None)
                 .await
                 .ok()?;
             CloneFact {
@@ -736,6 +899,29 @@ struct CloneFact {
     published_entries: usize,
     notes: Vec<String>,
     git_dir_identity: Option<DirectoryIdentity>,
+}
+
+/// 把复核错误折叠为固定分类标记，避免把路径或原始字符串写入留痕与对外输出。
+fn error_class(error: &RepositoryCreateError) -> &'static str {
+    match error {
+        RepositoryCreateError::InvalidInput(_) => "invalid-input",
+        RepositoryCreateError::Unauthorized(_) => "unauthorized",
+        RepositoryCreateError::TargetExists => "target-exists",
+        RepositoryCreateError::TargetReserved { .. } => "target-reserved",
+        RepositoryCreateError::RequestConflict => "request-conflict",
+        RepositoryCreateError::StateBusy => "state-busy",
+        RepositoryCreateError::IdentityChanged => "identity-changed",
+        RepositoryCreateError::Unsupported(_) => "unsupported",
+        RepositoryCreateError::UnsupportedSource(_) => "unsupported-source",
+        RepositoryCreateError::UnsafeContent(_) => "unsafe-content",
+        RepositoryCreateError::UnsupportedFilesystem(_) => "unsupported-filesystem",
+        RepositoryCreateError::UnsupportedPlatform(_) => "unsupported-platform",
+        RepositoryCreateError::GitTimeout => "git-timeout",
+        RepositoryCreateError::OutputLimit => "output-limit",
+        RepositoryCreateError::Io(_) => "io",
+        RepositoryCreateError::Git(_) => "git",
+        RepositoryCreateError::Project(_) => "project",
+    }
 }
 
 fn platform_note() -> &'static str {

@@ -1,6 +1,7 @@
-//! 受控检出发布：只读枚举提交树、按固定规则预检，再用 `cat-file --batch` 逐对象落盘。
+//! 受控检出发布：只读枚举提交树、完整预检对象与属性，再按固定规则落盘并建立匹配 HEAD 的 index。
 //!
 //! 这里从不调用 `git checkout` / `git checkout-index`，因此不会执行钩子、LFS、子模块、外部过滤器或项目脚本。
+//! 预检（树条目、对象类型与体积、属性内容）全部完成后才开始写入；任一步失败都不创建任何工作树文件。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
@@ -21,13 +22,28 @@ const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// 单次发布总体积上限。
 const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 
-/// 预检并发布指定提交的工作树，返回已发布条目数。
+/// 预检并发布指定提交的工作树与 index，返回已发布条目数。
 pub(super) async fn publish_tree(
     sandbox: &Sandbox,
     program: &Path,
     target: &Path,
     oid: &str,
+    entries: &[TreeEntry],
 ) -> Result<usize, RepositoryCreateError> {
+    precheck_attributes(sandbox, program, target, entries).await?;
+    publish_files(sandbox, program, target, entries).await?;
+    write_index(sandbox, program, target, oid, entries).await?;
+    verify_worktree_matches_head(sandbox, program, target, oid).await?;
+    Ok(entries.len())
+}
+
+/// 只读枚举并预检提交树，不做任何发布。
+pub(super) async fn precheck_tree(
+    sandbox: &Sandbox,
+    program: &Path,
+    target: &Path,
+    oid: &str,
+) -> Result<Vec<TreeEntry>, RepositoryCreateError> {
     let mut command = sandbox.command(program, sandbox.root());
     command
         .arg("-C")
@@ -44,11 +60,13 @@ pub(super) async fn publish_tree(
     }
     let entries = parse_tree(&output.stdout)?;
     validate_tree(&entries)?;
-    publish(sandbox, program, target, &entries).await
+    precheck_objects(sandbox, program, target, &entries).await?;
+    precheck_attributes(sandbox, program, target, &entries).await?;
+    Ok(entries)
 }
 
 #[derive(Debug, Clone)]
-struct TreeEntry {
+pub(super) struct TreeEntry {
     mode: String,
     oid: String,
     path: String,
@@ -136,7 +154,98 @@ fn remember(
     }
 }
 
-async fn publish(
+/// 用 `cat-file --batch-check` 一次性预检全部对象的存在性、类型与体积。
+async fn precheck_objects(
+    sandbox: &Sandbox,
+    program: &Path,
+    target: &Path,
+    entries: &[TreeEntry],
+) -> Result<(), RepositoryCreateError> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let request = sandbox.root().join("cat-file-check.txt");
+    let mut batch = File::create(&request).map_err(RepositoryCreateError::Io)?;
+    for entry in entries {
+        batch
+            .write_all(entry.oid.as_bytes())
+            .and_then(|()| batch.write_all(b"\n"))
+            .map_err(RepositoryCreateError::Io)?;
+    }
+    batch.sync_all().map_err(RepositoryCreateError::Io)?;
+    drop(batch);
+
+    let mut command = sandbox.command(program, sandbox.root());
+    command
+        .arg("-C")
+        .arg(target)
+        .args(["cat-file", "--batch-check"])
+        .stdin(Stdio::from(
+            File::open(&request).map_err(RepositoryCreateError::Io)?,
+        ));
+    let output = sandbox::run(
+        &mut command,
+        sandbox::OUTPUT_LIMIT,
+        sandbox::COMMAND_TIMEOUT,
+    )
+    .await?;
+    if !output.status.success() {
+        return Err(RepositoryCreateError::UnsafeContent("对象预检失败"));
+    }
+    let text = std::str::from_utf8(&output.stdout)
+        .map_err(|_| RepositoryCreateError::UnsafeContent("对象预检输出不是合法 UTF-8"))?;
+    let mut total = 0_u64;
+    let mut seen = 0_usize;
+    for (line, entry) in text.lines().zip(entries.iter()) {
+        let mut parts = line.split(' ');
+        let oid = parts.next().unwrap_or_default();
+        let kind = parts.next().unwrap_or_default();
+        let size = parts.next().unwrap_or_default();
+        if oid != entry.oid || kind != "blob" || parts.next().is_some() {
+            return Err(RepositoryCreateError::UnsafeContent("对象预检类型不符"));
+        }
+        let size: u64 = size
+            .parse()
+            .map_err(|_| RepositoryCreateError::UnsafeContent("对象预检体积无效"))?;
+        if size > MAX_FILE_BYTES || total.saturating_add(size) > MAX_TOTAL_BYTES {
+            return Err(RepositoryCreateError::UnsafeContent("对象体积超过发布上限"));
+        }
+        total += size;
+        seen += 1;
+    }
+    if seen != entries.len() {
+        return Err(RepositoryCreateError::UnsafeContent("对象预检条目数不符"));
+    }
+    Ok(())
+}
+
+/// 发布前读取全部 `.gitattributes` 对象内容并校验，避免"先写再拒"。
+async fn precheck_attributes(
+    sandbox: &Sandbox,
+    program: &Path,
+    target: &Path,
+    entries: &[TreeEntry],
+) -> Result<(), RepositoryCreateError> {
+    for entry in entries
+        .iter()
+        .filter(|entry| entry.path.ends_with(".gitattributes"))
+    {
+        let mut command = sandbox.command(program, sandbox.root());
+        command
+            .arg("-C")
+            .arg(target)
+            .args(["cat-file", "blob", &entry.oid]);
+        let output =
+            sandbox::run(&mut command, MAX_FILE_BYTES + 1, sandbox::COMMAND_TIMEOUT).await?;
+        if !output.status.success() {
+            return Err(RepositoryCreateError::UnsafeContent("无法读取属性对象"));
+        }
+        super::config_scan::reject_filter_attributes(&output.stdout)?;
+    }
+    Ok(())
+}
+
+async fn publish_files(
     sandbox: &Sandbox,
     program: &Path,
     target: &Path,
@@ -197,9 +306,6 @@ async fn publish(
     let attempt = tokio::time::timeout(sandbox::COMMAND_TIMEOUT, async {
         for entry in entries {
             let contents = read_object(&mut reader, entry, &mut total).await?;
-            if entry.path.ends_with(".gitattributes") {
-                super::config_scan::reject_filter_attributes(&contents)?;
-            }
             write_entry(target, entry, &contents)?;
             written += 1;
         }
@@ -223,6 +329,93 @@ async fn publish(
         return Err(RepositoryCreateError::UnsafeContent("对象读取进程失败"));
     }
     Ok(written)
+}
+
+/// 建立与指定提交完全一致的 `.git/index`，并与提交树逐条比对。
+async fn write_index(
+    sandbox: &Sandbox,
+    program: &Path,
+    target: &Path,
+    oid: &str,
+    entries: &[TreeEntry],
+) -> Result<(), RepositoryCreateError> {
+    let mut command = sandbox.command(program, sandbox.root());
+    command.arg("-C").arg(target).args(["read-tree", oid]);
+    let output = sandbox::run(
+        &mut command,
+        sandbox::OUTPUT_LIMIT,
+        sandbox::COMMAND_TIMEOUT,
+    )
+    .await?;
+    if !output.status.success() {
+        return Err(RepositoryCreateError::UnsafeContent(
+            "无法建立与提交匹配的 index",
+        ));
+    }
+    let mut command = sandbox.command(program, sandbox.root());
+    command
+        .arg("-C")
+        .arg(target)
+        .args(["ls-files", "--stage", "-z"]);
+    let output = sandbox::run(
+        &mut command,
+        sandbox::OUTPUT_LIMIT,
+        sandbox::COMMAND_TIMEOUT,
+    )
+    .await?;
+    if !output.status.success() || output.stdout != expected_index(entries) {
+        return Err(RepositoryCreateError::UnsafeContent("index 与提交树不一致"));
+    }
+    Ok(())
+}
+
+fn expected_index(entries: &[TreeEntry]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for entry in entries {
+        let line = format!("{} {} 0\t{}\0", entry.mode, entry.oid, entry.path);
+        bytes.extend_from_slice(line.as_bytes());
+    }
+    bytes
+}
+
+/// 发布后复核：HEAD、index 与工作树三者一致，`git status` 必须为空。
+async fn verify_worktree_matches_head(
+    sandbox: &Sandbox,
+    program: &Path,
+    target: &Path,
+    oid: &str,
+) -> Result<(), RepositoryCreateError> {
+    let mut command = sandbox.command(program, sandbox.root());
+    command
+        .arg("-C")
+        .arg(target)
+        .args(["diff-index", "--cached", "--quiet", oid, "--"]);
+    let output = sandbox::run(
+        &mut command,
+        sandbox::OUTPUT_LIMIT,
+        sandbox::COMMAND_TIMEOUT,
+    )
+    .await?;
+    if !output.status.success() {
+        return Err(RepositoryCreateError::UnsafeContent("index 与 HEAD 不一致"));
+    }
+    let mut command = sandbox.command(program, sandbox.root());
+    command
+        .arg("-C")
+        .arg(target)
+        .args(["status", "--porcelain=v2", "-z", "--untracked-files=all"]);
+    let output = sandbox::run(
+        &mut command,
+        sandbox::OUTPUT_LIMIT,
+        sandbox::COMMAND_TIMEOUT,
+    )
+    .await?;
+    if !output.status.success() || !output.stdout.is_empty() {
+        return Err(RepositoryCreateError::UnsafeContent(
+            "克隆工作树与 HEAD 不一致",
+        ));
+    }
+    Ok(())
 }
 
 async fn stop(child: &mut tokio::process::Child, drained: tokio::task::JoinHandle<()>) {
@@ -339,6 +532,93 @@ fn set_executable(file: &File, mode: &str) -> Result<(), RepositoryCreateError> 
 #[cfg(not(unix))]
 fn set_executable(_file: &File, _mode: &str) -> Result<(), RepositoryCreateError> {
     Ok(())
+}
+
+/// 只读解析指定目录的固定 HEAD；unborn 或非提交引用返回 `None`。
+pub(super) async fn read_head(
+    sandbox: &Sandbox,
+    program: &Path,
+    target: &Path,
+) -> Result<Option<String>, RepositoryCreateError> {
+    let mut command = sandbox.command(program, sandbox.root());
+    command
+        .arg("-C")
+        .arg(target)
+        .args(["rev-parse", "--verify", "HEAD^{commit}"]);
+    let output = sandbox::run(
+        &mut command,
+        sandbox::OUTPUT_LIMIT,
+        sandbox::COMMAND_TIMEOUT,
+    )
+    .await?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let sized = text.len() == 40 || text.len() == 64;
+    if !sized || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(RepositoryCreateError::UnsafeContent(
+            "快照 HEAD 不是完整提交 OID",
+        ));
+    }
+    Ok(Some(text))
+}
+
+/// 发布后在最终目标复核 HEAD、index 与工作树内容一致。
+///
+/// unborn HEAD（初次 Init）没有可比对象，由调用方的 Init 复核负责。
+pub(super) async fn verify_published(
+    sandbox: &Sandbox,
+    program: &Path,
+    target: &Path,
+    expected: Option<&str>,
+) -> Result<(), RepositoryCreateError> {
+    let mut command = sandbox.command(program, sandbox.root());
+    command
+        .arg("-C")
+        .arg(target)
+        .args(["rev-parse", "--verify", "HEAD^{commit}"]);
+    let output = sandbox::run(
+        &mut command,
+        sandbox::OUTPUT_LIMIT,
+        sandbox::COMMAND_TIMEOUT,
+    )
+    .await?;
+    if !output.status.success() {
+        return Ok(());
+    }
+    let oid = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if let Some(expected) = expected
+        && oid != expected
+    {
+        return Err(RepositoryCreateError::UnsafeContent(
+            "发布后的 HEAD 与捕获时的固定 HEAD 不一致",
+        ));
+    }
+    let sized = oid.len() == 40 || oid.len() == 64;
+    if !sized || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(RepositoryCreateError::UnsafeContent(
+            "发布后的 HEAD 不是完整提交 OID",
+        ));
+    }
+    let entries = precheck_tree(sandbox, program, target, &oid).await?;
+    let mut command = sandbox.command(program, sandbox.root());
+    command
+        .arg("-C")
+        .arg(target)
+        .args(["ls-files", "--stage", "-z"]);
+    let output = sandbox::run(
+        &mut command,
+        sandbox::OUTPUT_LIMIT,
+        sandbox::COMMAND_TIMEOUT,
+    )
+    .await?;
+    if !output.status.success() || output.stdout != expected_index(&entries) {
+        return Err(RepositoryCreateError::UnsafeContent(
+            "发布后的 index 与 HEAD 不一致",
+        ));
+    }
+    verify_worktree_matches_head(sandbox, program, target, &oid).await
 }
 
 fn ensure_only_git_dir(target: &Path) -> Result<(), RepositoryCreateError> {

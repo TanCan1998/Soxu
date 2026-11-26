@@ -4,14 +4,18 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use soxu_git::{
     GitProbe, InitMode, RepositoryCreateCoordinator, RepositoryCreateError,
-    RepositoryCreateOutcome, RepositoryCreateRequest, RepositoryCreateResult,
-    RepositoryCreateStage, RepositoryOperation, RepositorySource, RepositoryTargetState,
-    RepositoryTerminalState,
+    RepositoryCreateRequest, RepositorySource,
+};
+#[cfg(target_os = "linux")]
+use soxu_git::{
+    RepositoryCreateOutcome, RepositoryCreateResult, RepositoryCreateStage, RepositoryOperation,
+    RepositoryTargetState, RepositoryTerminalState,
 };
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -29,6 +33,7 @@ impl Fixture {
         fs::create_dir_all(root.join("parent")).expect("受控父根");
         fs::create_dir_all(root.join("state")).expect("协调域");
         private_directory(&root.join("state"));
+        private_directory(&root.join("parent"));
         Self { root }
     }
 
@@ -40,6 +45,7 @@ impl Fixture {
         self.root.join("state")
     }
 
+    #[cfg(target_os = "linux")]
     fn path(&self, name: &str) -> PathBuf {
         self.root.join(name)
     }
@@ -66,6 +72,7 @@ fn probe() -> GitProbe {
     GitProbe::discover().expect("需要本机 Git 原生入口")
 }
 
+#[cfg(target_os = "linux")]
 fn git(directory: &Path, arguments: &[&str]) -> Output {
     let program = probe().program().to_owned();
     let mut command = Command::new(program);
@@ -99,6 +106,7 @@ fn git(directory: &Path, arguments: &[&str]) -> Output {
     output
 }
 
+#[cfg(target_os = "linux")]
 fn git_stdout(directory: &Path, arguments: &[&str]) -> String {
     String::from_utf8_lossy(&git(directory, arguments).stdout)
         .trim()
@@ -106,10 +114,12 @@ fn git_stdout(directory: &Path, arguments: &[&str]) -> String {
 }
 
 /// 建立一个含单个提交的本地普通仓库。
+#[cfg(target_os = "linux")]
 fn source_repository(fixture: &Fixture, name: &str) -> PathBuf {
     source_repository_at(&fixture.path(name))
 }
 
+#[cfg(target_os = "linux")]
 fn source_repository_at(source: &Path) -> PathBuf {
     let source = source.to_owned();
     fs::create_dir_all(&source).expect("源仓库目录");
@@ -120,6 +130,7 @@ fn source_repository_at(source: &Path) -> PathBuf {
     source
 }
 
+#[cfg(target_os = "linux")]
 fn create_directory_link(target: &Path, link: &Path) -> bool {
     #[cfg(unix)]
     {
@@ -155,6 +166,7 @@ fn init_request<'a>(id: &'a str, root: &'a Path, name: &'a str) -> RepositoryCre
     }
 }
 
+#[cfg(target_os = "linux")]
 fn empty_directory_request<'a>(
     id: &'a str,
     root: &'a Path,
@@ -170,6 +182,7 @@ fn empty_directory_request<'a>(
     }
 }
 
+#[cfg(target_os = "linux")]
 fn clone_request<'a>(
     id: &'a str,
     root: &'a Path,
@@ -184,6 +197,7 @@ fn clone_request<'a>(
     }
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn init_creates_target_with_unborn_main_branch_and_no_hooks() {
     let fixture = Fixture::new("init-missing");
@@ -226,11 +240,13 @@ async fn init_creates_target_with_unborn_main_branch_and_no_hooks() {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn init_accepts_explicit_verified_empty_directory() {
     let fixture = Fixture::new("init-empty");
     let target = fixture.parent().join("beta");
     fs::create_dir(&target).expect("用户预建空目录");
+    private_directory(&target);
     let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
     let outcome = probe()
         .create_repository(
@@ -247,6 +263,7 @@ async fn init_accepts_explicit_verified_empty_directory() {
     assert!(target.join(".git").is_dir());
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn init_rejects_default_mode_when_target_directory_exists() {
     let fixture = Fixture::new("init-exists");
@@ -265,6 +282,7 @@ async fn init_rejects_default_mode_when_target_directory_exists() {
     assert!(!target.join(".git").exists());
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn init_rejects_non_empty_or_hidden_content_and_preserves_it() {
     let fixture = Fixture::new("init-nonempty");
@@ -291,6 +309,7 @@ async fn init_rejects_non_empty_or_hidden_content_and_preserves_it() {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn init_rejects_existing_repository_and_ancestor_repository() {
     let fixture = Fixture::new("init-repo");
@@ -314,6 +333,7 @@ async fn init_rejects_existing_repository_and_ancestor_repository() {
     fs::create_dir(outer.join(".git")).expect("外层 .git");
     let nested_root = outer.join("inner");
     fs::create_dir(&nested_root).expect("嵌套父根");
+    private_directory(&nested_root);
     let error = probe()
         .create_repository(
             &coordinator,
@@ -325,6 +345,7 @@ async fn init_rejects_existing_repository_and_ancestor_repository() {
     assert!(!nested_root.join("zeta").exists());
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn init_rejects_directory_link_or_reparse_target() {
     let fixture = Fixture::new("init-link");
@@ -346,6 +367,7 @@ async fn init_rejects_directory_link_or_reparse_target() {
     assert!(!real.join(".git").exists());
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn init_rejects_bare_and_gitfile_targets() {
     let fixture = Fixture::new("init-bare");
@@ -376,6 +398,7 @@ async fn init_rejects_bare_and_gitfile_targets() {
     assert!(gitfile.join(".git").is_file());
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn clone_copies_objects_and_publishes_worktree() {
     let fixture = Fixture::new("clone-ok");
@@ -412,6 +435,7 @@ async fn clone_copies_objects_and_publishes_worktree() {
     assert!(!cloned.join(".git").join("shallow").exists());
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn clone_rejects_existing_empty_target_and_overlap() {
     let fixture = Fixture::new("clone-target");
@@ -431,6 +455,7 @@ async fn clone_rejects_existing_empty_target_and_overlap() {
 
     let nested_source = fixture.path("nested-source");
     fs::create_dir_all(nested_source.join("inner")).expect("嵌套目录");
+    private_directory(&nested_source.join("inner"));
     git(&nested_source, &["init", "--initial-branch=main"]);
     let error = probe()
         .create_repository(
@@ -450,6 +475,7 @@ async fn clone_rejects_existing_empty_target_and_overlap() {
     ));
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn clone_rejects_unsupported_url_and_non_local_sources() {
     let fixture = Fixture::new("clone-protocol");
@@ -494,6 +520,7 @@ async fn clone_rejects_unsupported_url_and_non_local_sources() {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn clone_reports_empty_remote_without_publishing() {
     let fixture = Fixture::new("clone-empty");
@@ -524,6 +551,7 @@ async fn clone_reports_empty_remote_without_publishing() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn clone_refuses_symlink_and_gitlink_entries() {
     let fixture = Fixture::new("clone-unsafe");
@@ -561,12 +589,11 @@ async fn clone_refuses_symlink_and_gitlink_entries() {
         };
         assert_eq!(record.terminal, Some(RepositoryTerminalState::Unknown));
         let blocked = fixture.parent().join(&target_name);
-        assert!(blocked.join(".git").is_dir(), "克隆元数据应保留");
-        assert!(!blocked.join("unsafe-entry").exists());
-        assert!(!blocked.join("nested-repo").exists());
+        assert!(!blocked.exists(), "预检失败不得在目标留下任何内容");
     }
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn clone_refuses_source_with_external_filter_or_alternates() {
     let fixture = Fixture::new("clone-source");
@@ -606,6 +633,7 @@ async fn clone_refuses_source_with_external_filter_or_alternates() {
     assert!(matches!(error, RepositoryCreateError::UnsupportedSource(_)));
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn duplicate_request_id_with_different_arguments_is_rejected() {
     let fixture = Fixture::new("dup-id");
@@ -628,6 +656,7 @@ async fn duplicate_request_id_with_different_arguments_is_rejected() {
     assert!(!fixture.parent().join("second").exists());
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn repeated_request_id_returns_existing_record() {
     let fixture = Fixture::new("replay");
@@ -654,6 +683,7 @@ async fn repeated_request_id_returns_existing_record() {
     assert!(observation.is_some_and(|observation| observation.git_dir_present));
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn failed_command_leaves_started_evidence_and_diagnose_is_read_only() {
     let Some(stand_in) = stand_in_failing_program() else {
@@ -669,15 +699,25 @@ async fn failed_command_leaves_started_evidence_and_diagnose_is_read_only() {
         )
         .await
         .expect("命令失败必须留痕而不是静默返回错误");
-    let RepositoryCreateOutcome::NotStarted { record, .. } = outcome else {
-        panic!("命令失败且无目标时应为 NotStarted：{outcome:?}");
+    let RepositoryCreateOutcome::PartialObserved {
+        record,
+        command_succeeded,
+        ..
+    } = outcome
+    else {
+        panic!("命令已启动并退出但无残留时不得声称 NotStarted：{outcome:?}");
     };
+    assert!(!command_succeeded);
     assert_eq!(record.stage, RepositoryCreateStage::Observed);
     assert!(matches!(
         record.result,
         RepositoryCreateResult::Failed { .. }
     ));
-    assert_eq!(record.terminal, Some(RepositoryTerminalState::NotStarted));
+    assert_eq!(
+        record.terminal,
+        Some(RepositoryTerminalState::PartialObserved),
+        "只有确证命令未启动才允许 NotStarted"
+    );
     assert!(record.started_at.is_some());
     assert!(!fixture.parent().join("never-created").exists());
 
@@ -702,6 +742,7 @@ async fn failed_command_leaves_started_evidence_and_diagnose_is_read_only() {
     assert!(missing.is_none());
 }
 
+#[cfg(target_os = "linux")]
 fn stand_in_failing_program() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -711,13 +752,14 @@ fn stand_in_failing_program() -> Option<PathBuf> {
             .join("where.exe");
         candidate.is_file().then_some(candidate)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
         let candidate = PathBuf::from("/bin/false");
         candidate.is_file().then_some(candidate)
     }
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn init_rejects_invalid_request_shapes() {
     let fixture = Fixture::new("shapes");
@@ -741,6 +783,7 @@ async fn init_rejects_invalid_request_shapes() {
     let _ = RepositoryTargetState::Missing;
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn child_init_with_poisoned_environment() {
     if std::env::var("SOXU_RC_CHILD").is_err() {
@@ -768,6 +811,7 @@ fn child_init_with_poisoned_environment() {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn init_ignores_inherited_git_environment_and_external_template() {
     let fixture = Fixture::new("poison");
@@ -815,4 +859,424 @@ fn init_ignores_inherited_git_environment_and_external_template() {
         .expect("运行子进程");
     assert!(status.success(), "子进程必须在预置 Git 环境下仍然成功");
     assert!(!marker.exists(), "外部模板钩子不得被执行");
+}
+
+#[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn non_private_parent_root_is_rejected() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new("private-root");
+    let parent = fixture.parent();
+    let mut permissions = fs::metadata(&parent).expect("父根元数据").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&parent, permissions).expect("放宽父根权限");
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let error = probe()
+        .create_repository(
+            &coordinator,
+            init_request("rc-private-1", &parent, "rejected"),
+        )
+        .await
+        .expect_err("非私有父根必须 fail-closed");
+    assert!(matches!(error, RepositoryCreateError::Unauthorized(_)));
+    assert!(!parent.join("rejected").exists());
+}
+
+#[cfg(target_os = "linux")]
+fn fnv(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+#[cfg(target_os = "linux")]
+fn collect_tree(root: &Path, current: &Path, out: &mut Vec<(String, u64, u64)>) {
+    let Ok(reader) = fs::read_dir(current) else {
+        return;
+    };
+    for entry in reader.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = path.symlink_metadata() else {
+            continue;
+        };
+        let rel = path
+            .strip_prefix(root)
+            .map(|value| value.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if metadata.is_dir() {
+            out.push((rel, 0, 0));
+            collect_tree(root, &path, out);
+        } else {
+            let bytes = fs::read(&path).unwrap_or_default();
+            out.push((rel, metadata.len(), fnv(&bytes)));
+        }
+    }
+}
+
+/// 返回目录树快照（相对路径、长度、内容摘要），用于判定一次调用是否零写入。
+#[cfg(target_os = "linux")]
+fn snapshot_tree(root: &Path) -> Vec<(String, u64, u64)> {
+    let mut entries = Vec::new();
+    collect_tree(root, root, &mut entries);
+    entries.sort();
+    entries
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn repeated_request_is_strictly_read_only() {
+    let fixture = Fixture::new("replay-readonly");
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let parent = fixture.parent();
+    probe()
+        .create_repository(&coordinator, init_request("rc-ro-1", &parent, "frozen"))
+        .await
+        .expect("首次 Init");
+    let state_before = snapshot_tree(&fixture.state());
+    let parent_before = snapshot_tree(&parent);
+    let second = probe()
+        .create_repository(&coordinator, init_request("rc-ro-1", &parent, "frozen"))
+        .await
+        .expect("同参重放");
+    let RepositoryCreateOutcome::ExistingRecord { observation, .. } = second else {
+        panic!("同参重放应得到 ExistingRecord：{second:?}");
+    };
+    assert!(observation.is_some_and(|value| value.git_dir_present));
+    assert_eq!(
+        snapshot_tree(&fixture.state()),
+        state_before,
+        "重复请求不得写协调域"
+    );
+    assert_eq!(
+        snapshot_tree(&parent),
+        parent_before,
+        "重复请求不得写目标与沙箱之外的任何文件"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn repeated_clone_request_does_not_republish() {
+    let fixture = Fixture::new("replay-clone-readonly");
+    let source = source_repository(&fixture, "src-ro");
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let parent = fixture.parent();
+    probe()
+        .create_repository(
+            &coordinator,
+            clone_request("rc-ro-2", &parent, "cloned-ro", &source),
+        )
+        .await
+        .expect("首次 Clone");
+    let state_before = snapshot_tree(&fixture.state());
+    let parent_before = snapshot_tree(&parent);
+    let second = probe()
+        .create_repository(
+            &coordinator,
+            clone_request("rc-ro-2", &parent, "cloned-ro", &source),
+        )
+        .await
+        .expect("同参重放");
+    let RepositoryCreateOutcome::ExistingRecord { observation, .. } = second else {
+        panic!("同参重放应得到 ExistingRecord：{second:?}");
+    };
+    assert!(observation.is_some_and(|value| value.git_dir_present));
+    assert_eq!(snapshot_tree(&fixture.state()), state_before);
+    assert_eq!(
+        snapshot_tree(&parent),
+        parent_before,
+        "重复 Clone 请求不得重新发布工作树"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn clone_publishes_index_matching_head_and_clean_status() {
+    let fixture = Fixture::new("clone-index");
+    let source = fixture.path("index-src");
+    source_repository_at(&source);
+    fs::create_dir_all(source.join("nested")).expect("子目录");
+    fs::write(source.join("nested").join("deep.txt"), b"deep\n").expect("子文件");
+    let script = source.join("run.sh");
+    fs::write(&script, b"#!/bin/sh\necho ok\n").expect("脚本");
+    git(&source, &["add", "."]);
+    git(&source, &["commit", "-m", "多条目"]);
+
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let outcome = probe()
+        .create_repository(
+            &coordinator,
+            clone_request("rc-index-1", &fixture.parent(), "indexed", &source),
+        )
+        .await
+        .expect("受控 Clone");
+    assert!(
+        matches!(outcome, RepositoryCreateOutcome::Verified { .. }),
+        "正常 Clone 应得到 Verified：{outcome:?}"
+    );
+    let cloned = fixture.parent().join("indexed");
+    assert!(
+        cloned.join(".git").join("index").is_file(),
+        "必须建立 index"
+    );
+    let head_tree = git_stdout(&cloned, &["ls-tree", "-r", "--full-tree", "HEAD"]);
+    let staged = git_stdout(&cloned, &["ls-files", "--stage"]);
+    let mut from_tree: Vec<String> = head_tree
+        .lines()
+        .map(|line| {
+            let (head, path) = line.split_once('\t').expect("ls-tree 行");
+            let mut parts = head.split(' ');
+            let mode = parts.next().expect("mode");
+            let _kind = parts.next().expect("kind");
+            let oid = parts.next().expect("oid");
+            format!("{mode} {oid} 0\t{path}")
+        })
+        .collect();
+    let mut from_index: Vec<String> = staged.lines().map(str::to_owned).collect();
+    from_tree.sort();
+    from_index.sort();
+    assert_eq!(from_index, from_tree, "index 必须与 HEAD 树逐条一致");
+    assert!(
+        git_stdout(
+            &cloned,
+            &["status", "--porcelain=v2", "--untracked-files=all"]
+        )
+        .is_empty(),
+        "克隆后 status 必须干净"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn unsafe_tree_is_rejected_before_any_worktree_file_is_published() {
+    let fixture = Fixture::new("precheck-publish");
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let source = fixture.path("unsafe-src");
+    fs::create_dir_all(&source).expect("源目录");
+    git(&source, &["init", "--initial-branch=main"]);
+    fs::write(source.join("safe.txt"), b"safe").expect("普通文件");
+    git(&source, &["add", "safe.txt"]);
+    let blob = git_stdout(&source, &["hash-object", "-w", "safe.txt"]);
+    git(
+        &source,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("120000,{blob},link-entry"),
+        ],
+    );
+    let tree = git_stdout(&source, &["write-tree"]);
+    let commit = git_stdout(&source, &["commit-tree", &tree, "-m", "含符号链接"]);
+    git(&source, &["update-ref", "refs/heads/main", &commit]);
+
+    let outcome = probe()
+        .create_repository(
+            &coordinator,
+            clone_request("rc-precheck-1", &fixture.parent(), "blocked", &source),
+        )
+        .await
+        .expect("预检失败必须留痕");
+    assert!(
+        matches!(outcome, RepositoryCreateOutcome::UnknownOutcome { .. }),
+        "不安全提交树必须阻断：{outcome:?}"
+    );
+    let blocked = fixture.parent().join("blocked");
+    assert!(!blocked.exists(), "预检失败不得在目标留下任何内容");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn unknown_outcome_is_not_replayed() {
+    let fixture = Fixture::new("unknown-replay");
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let source = fixture.path("unknown-src");
+    fs::create_dir_all(&source).expect("源目录");
+    git(&source, &["init", "--initial-branch=main"]);
+    fs::write(source.join("placeholder"), b"x").expect("占位文件");
+    let blob = git_stdout(&source, &["hash-object", "-w", "placeholder"]);
+    git(
+        &source,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{blob},nested"),
+        ],
+    );
+    let tree = git_stdout(&source, &["write-tree"]);
+    let commit = git_stdout(&source, &["commit-tree", &tree, "-m", "gitlink"]);
+    git(&source, &["update-ref", "refs/heads/main", &commit]);
+
+    let first = probe()
+        .create_repository(
+            &coordinator,
+            clone_request("rc-unknown-1", &fixture.parent(), "unknown-target", &source),
+        )
+        .await
+        .expect("首次执行");
+    assert!(matches!(
+        first,
+        RepositoryCreateOutcome::UnknownOutcome { .. }
+    ));
+    let before = snapshot_tree(&fixture.parent());
+    let second = probe()
+        .create_repository(
+            &coordinator,
+            clone_request("rc-unknown-1", &fixture.parent(), "unknown-target", &source),
+        )
+        .await
+        .expect("结果不确定的重放必须被拒绝");
+    assert!(
+        matches!(second, RepositoryCreateOutcome::UnknownOutcome { .. }),
+        "不得重放未知结果：{second:?}"
+    );
+    assert_eq!(
+        snapshot_tree(&fixture.parent()),
+        before,
+        "拒绝重放不得产生新的写入"
+    );
+}
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_write_is_refused_without_touching_target_or_state() {
+    let fixture = Fixture::new("win-refuse");
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let error = probe()
+        .create_repository(
+            &coordinator,
+            init_request("rc-win-1", &fixture.parent(), "blocked"),
+        )
+        .await
+        .expect_err("Windows 缺少目录创建与打开的原子锚定，必须 fail-closed");
+    assert!(matches!(
+        error,
+        RepositoryCreateError::UnsupportedPlatform(_)
+    ));
+    assert!(!fixture.parent().join("blocked").exists(), "不得创建目标");
+    assert!(
+        !fixture.state().join("sandbox").exists(),
+        "不得建立或写入暂存"
+    );
+    assert!(
+        !fixture.state().join("records").exists(),
+        "不得写入留痕记录"
+    );
+    let entries = fs::read_dir(fixture.state()).expect("协调域可读").count();
+    assert_eq!(entries, 0, "拒绝必须发生在任何写入之前：{entries} 项残留");
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_diagnose_stays_read_only() {
+    let fixture = Fixture::new("win-diagnose");
+    let record = probe()
+        .diagnose_repository_create(fixture.state(), "rc-win-missing")
+        .await
+        .expect("只读诊断");
+    assert!(record.is_none());
+    let entries = fs::read_dir(fixture.state()).expect("协调域可读").count();
+    assert_eq!(entries, 0, "只读诊断不得写入协调域：{entries} 项残留");
+}
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn clone_rejects_link_inside_source_git_directory() {
+    let fixture = Fixture::new("clone-link-inner");
+    let source = source_repository(&fixture, "inner-link-src");
+    let heads = source.join(".git").join("refs").join("heads");
+    let link = heads.join("alias");
+    #[cfg(unix)]
+    {
+        if std::os::unix::fs::symlink("main", &link).is_err() {
+            return;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        if !create_directory_link(&heads.join("main"), &link) {
+            return;
+        }
+    }
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let error = probe()
+        .create_repository(
+            &coordinator,
+            clone_request("rc-inner-link-1", &fixture.parent(), "inner-link", &source),
+        )
+        .await
+        .expect_err("源 .git 内层链接必须拒绝");
+    assert!(matches!(error, RepositoryCreateError::UnsupportedSource(_)));
+    assert!(!fixture.parent().join("inner-link").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn clone_snapshot_isolates_later_source_changes() {
+    let fixture = Fixture::new("snapshot-isolated");
+    let source = source_repository(&fixture, "iso-src");
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let outcome = probe()
+        .create_repository(
+            &coordinator,
+            clone_request("rc-iso-1", &fixture.parent(), "iso-clone", &source),
+        )
+        .await
+        .expect("受控 Clone");
+    let RepositoryCreateOutcome::Verified { observation, .. } = outcome else {
+        panic!("应得到 Verified：{outcome:?}");
+    };
+    let fixed = observation.head_oid.expect("固定 HEAD");
+
+    // 捕获完成后修改源：新增提交并改写其 .git。
+    fs::write(source.join("later.txt"), b"later\n").expect("源新文件");
+    git(&source, &["add", "later.txt"]);
+    git(&source, &["commit", "-m", "后来改动"]);
+    assert_ne!(git_stdout(&source, &["rev-parse", "HEAD"]), fixed);
+
+    let snapshot_git = fixture
+        .state()
+        .join("sandbox")
+        .join("rc-iso-1")
+        .join("work")
+        .join("source");
+    assert!(
+        snapshot_git.join("HEAD").is_file(),
+        "快照必须保留在协调域暂存内"
+    );
+    let cloned = fixture.parent().join("iso-clone");
+    assert_eq!(
+        git_stdout(&cloned, &["rev-parse", "HEAD"]),
+        fixed,
+        "克隆终态必须对照捕获时的固定 HEAD"
+    );
+    assert!(
+        !cloned.join("later.txt").exists(),
+        "后续源改动不得进入已发布目标"
+    );
+}
+#[cfg(not(any(target_os = "linux", windows)))]
+#[tokio::test]
+async fn unsupported_platform_refuses_write_before_touching_state() {
+    let fixture = Fixture::new("other-platform");
+    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
+    let error = probe()
+        .create_repository(
+            &coordinator,
+            init_request("rc-other-1", &fixture.parent(), "blocked"),
+        )
+        .await
+        .expect_err("缺少目录句柄原语的平台必须 fail-closed");
+    assert!(matches!(
+        error,
+        RepositoryCreateError::UnsupportedPlatform(_)
+            | RepositoryCreateError::UnsupportedFilesystem(_)
+    ));
+    assert!(!fixture.parent().join("blocked").exists(), "不得创建目标");
+    let entries = fs::read_dir(fixture.state()).expect("协调域可读").count();
+    assert_eq!(entries, 0, "拒绝必须发生在任何写入之前：{entries} 项残留");
 }

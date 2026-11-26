@@ -28,29 +28,34 @@ pub(super) async fn run(
 }
 
 pub(super) fn outcome(
-    result: Result<std::process::Output, RepositoryCreateError>,
+    result: Result<sandbox::RunOutput, sandbox::RunFailure>,
 ) -> Result<RepositoryCreateResult, RepositoryCreateError> {
     Ok(match result {
         Ok(output) if output.status.success() => RepositoryCreateResult::Succeeded,
-        Ok(output) => RepositoryCreateResult::Failed {
-            exit_code: output.status.code(),
-        },
-        Err(RepositoryCreateError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            RepositoryCreateResult::SpawnFailed
+        Ok(output) => {
+            debug_assert!(output.direct_child_reaped, "正常退出必须已回收直接子进程");
+            RepositoryCreateResult::Failed {
+                exit_code: output.status.code(),
+            }
         }
-        Err(RepositoryCreateError::Io(_)) => RepositoryCreateResult::Unknown {
-            stop_confirmed: false,
-            reason: "Git 进程启动或回收失败".to_owned(),
+        Err(failure) => match failure.error {
+            RepositoryCreateError::Io(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                RepositoryCreateResult::SpawnFailed
+            }
+            RepositoryCreateError::GitTimeout => RepositoryCreateResult::Unknown {
+                stop_confirmed: failure.direct_child_reaped,
+                reason: "Git 命令超时".to_owned(),
+            },
+            RepositoryCreateError::OutputLimit => RepositoryCreateResult::Unknown {
+                stop_confirmed: failure.direct_child_reaped,
+                reason: "Git 输出超过上限".to_owned(),
+            },
+            RepositoryCreateError::Io(_) => RepositoryCreateResult::Unknown {
+                stop_confirmed: failure.direct_child_reaped,
+                reason: "Git 进程启动或回收失败".to_owned(),
+            },
+            other => return Err(other),
         },
-        Err(RepositoryCreateError::GitTimeout) => RepositoryCreateResult::Unknown {
-            stop_confirmed: true,
-            reason: "Git 命令超时".to_owned(),
-        },
-        Err(RepositoryCreateError::OutputLimit) => RepositoryCreateResult::Unknown {
-            stop_confirmed: true,
-            reason: "Git 输出超过上限".to_owned(),
-        },
-        Err(other) => return Err(other),
     })
 }
 
@@ -74,6 +79,7 @@ pub(super) async fn verify(
     sandbox: &Sandbox,
     program: &Path,
     target: &Path,
+    holder: Option<&super::platform::AuthorizedDirectory>,
 ) -> Result<InitObservation, RepositoryCreateError> {
     let mut observation = InitObservation::default();
     let git_dir = target.join(".git");
@@ -85,8 +91,10 @@ pub(super) async fn verify(
                 ));
             }
             observation.git_dir_present = true;
-            observation.git_dir_identity =
-                Some(super::platform::AuthorizedDirectory::open(&git_dir)?.identity());
+            observation.git_dir_identity = Some(match holder {
+                Some(handle) => handle.child(std::ffi::OsStr::new(".git"))?.identity(),
+                None => super::platform::AuthorizedDirectory::open(&git_dir)?.identity(),
+            });
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             observation.notes.push("目标下没有 .git 目录".to_owned());

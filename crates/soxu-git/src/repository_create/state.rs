@@ -67,22 +67,7 @@ pub(crate) fn open_root(state_root: &Path) -> Result<AuthorizedDirectory, Reposi
 
 fn require_private(root: &AuthorizedDirectory) -> Result<(), RepositoryCreateError> {
     root.refresh()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = root
-            .path()
-            .symlink_metadata()
-            .map_err(RepositoryCreateError::Io)?
-            .permissions()
-            .mode();
-        if mode & 0o077 != 0 {
-            return Err(RepositoryCreateError::Unauthorized(
-                "协调域必须是宿主私有目录",
-            ));
-        }
-    }
-    Ok(())
+    super::platform::require_private_owner(root)
 }
 
 pub(crate) async fn acquire(
