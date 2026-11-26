@@ -9,17 +9,23 @@ pub(super) async fn run(command: &mut Command, limit: u64, timeout: Duration) ->
     let Ok(mut child) = command.spawn() else {
         return ExecutionResult::SpawnFailed;
     };
-    let result = tokio::time::timeout(timeout, async {
-        let stdout = child.stdout.take().ok_or("missing_stdout")?;
-        let stderr = child.stderr.take().ok_or("missing_stderr")?;
-        let (_, _, status) = tokio::try_join!(
-            count_output(stdout, limit),
-            count_output(stderr, limit),
-            async { child.wait().await.map_err(|_| "wait_io") },
-        )?;
-        Ok(status)
-    })
-    .await;
+    let result = {
+        // 读取 future 独占管道。超时或读取失败时，离开此作用域先释放管道，再停止子进程。
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let child = &mut child;
+        tokio::time::timeout(timeout, async move {
+            let stdout = stdout.ok_or("missing_stdout")?;
+            let stderr = stderr.ok_or("missing_stderr")?;
+            let (_, _, status) = tokio::try_join!(
+                count_output(stdout, limit),
+                count_output(stderr, limit),
+                async { child.wait().await.map_err(|_| "wait_io") },
+            )?;
+            Ok(status)
+        })
+        .await
+    };
     let reason = match result {
         Ok(Ok(status)) if status.success() => return ExecutionResult::Succeeded,
         Ok(Ok(status)) => {
@@ -34,7 +40,11 @@ pub(super) async fn run(command: &mut Command, limit: u64, timeout: Duration) ->
         Ok(Some(_)) => true,
         _ => {
             let _ = child.start_kill();
-            matches!(tokio::time::timeout(timeout, child.wait()).await, Ok(Ok(_)))
+            let reap_timeout = timeout.max(Duration::from_secs(2));
+            matches!(
+                tokio::time::timeout(reap_timeout, child.wait()).await,
+                Ok(Ok(_))
+            )
         }
     };
     ExecutionResult::Unknown {
@@ -76,7 +86,7 @@ mod native_process_tests {
                 stdout.write_all(&[b'x'; 4096]).expect("输出夹具字节");
                 stdout.flush().expect("刷新夹具输出");
             }
-            "timeout" => std::thread::sleep(Duration::from_secs(30)),
+            "timeout" => std::thread::sleep(Duration::from_secs(5)),
             "success" => {}
             _ => panic!("未知执行夹具模式"),
         }
@@ -118,7 +128,7 @@ mod native_process_tests {
             (
                 "timeout",
                 8192,
-                Duration::from_millis(250),
+                Duration::from_millis(400),
                 ExecutionResult::Unknown {
                     stop_confirmed: true,
                     reason: "timeout".to_owned(),
@@ -133,6 +143,7 @@ mod native_process_tests {
                     "--nocapture",
                 ])
                 .env("SOXU_WORKTREE_EXECUTION_FIXTURE", mode)
+                .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
@@ -187,6 +198,7 @@ mod tests {
             let mut command = Command::new("/bin/sh");
             command
                 .args(["-c", script])
+                .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);

@@ -224,7 +224,7 @@ format.rs[KD7M]: F:解析只读Diff的SHA-1 OID、index stage/debug、树与NUL 
 repository.rs[IS8L]: F:核验Diff工作树布局与Git配置来源，按基准树及index的字节身份授权精确工作树文件 | R:code:crates/soxu-git/src/diff.rs,code:crates/soxu-git/src/diff/format.rs,code:crates/soxu-git/src/project.rs | A:Layout::read,Layout::preflight,authorize,native_file_path | S:linked须核对common/worktrees及反向gitdir。先在非仓库上下文读具名配置，拒绝include、外部过滤器、alternates、promisor及不支持扩展。逐段拒绝链接、reparse、目录前缀与内嵌仓库；保留相关元数据和index字节供观察后比较。
 
 ===F:/workplace/Paseo/work/Soxu/crates/soxu-git/src/worktree_lifecycle/===
-execution.rs[IR7S]: F:有界运行原生Git子进程，区分启动失败、退出状态与超限超时，并确认直接子进程停止 | R:code:crates/soxu-git/src/worktree_lifecycle.rs | A:run | S:收集失败或超时后先杀死并等待直接子进程，停止无法确认则保留Unknown。跨平台测试直接启动当前测试二进制，不证明Windows目录授权可用。
+execution.rs[IR7M]: F:有界运行原生Git子进程，区分启动失败、正常退出、输出超限和超时，并报告直接子进程是否已停止 | R:code:crates/soxu-git/src/worktree_lifecycle.rs | A:run | S:终止前释放两条输出管道；直接子进程回收窗口至少两秒，无法确认停止时保留Unknown。跨平台原生测试夹具显式关闭stdin，Windows目录身份授权另行验证。
 identity.rs[IS8S]: F:验证绝对目录链与规范路径身份，提供原生目录指纹编码、刷新及拒绝链接的状态文件打开 | R:code:crates/soxu-git/src/worktree_lifecycle.rs,code:crates/soxu-git/src/worktree_lifecycle/state.rs | A:DirectoryIdentity,AuthorizedDirectory,checked_directory,open_regular_file | S:Windows稳定标准库后端始终UnsupportedFilesystem，不开放创建。Unix绑定设备、inode和原生创建时间，缺创建时间或根权限过宽即拒绝；路径复验不替代宿主持有持续受控授权。
 state.rs[PR8M]: F:在授权私有协调域取得跨进程文件锁，限量读取意图并以同步临时文件和重命名持久化阶段记录 | R:code:crates/soxu-git/src/worktree_lifecycle/identity.rs,code:crates/soxu-git/src/worktree_lifecycle.rs | A:StateLock,acquire_state_lock,write_intent,rewrite_intent,read_intents_directory | S:锁跨Git执行与回读持有；Unix协调根禁组和其他用户权限。tmp/next用create_new保留失败足迹，禁止自动清理重试；Unix同步父目录，Windows不因此获得断电持久性证明。
 

@@ -2,7 +2,7 @@ use std::fs;
 #[cfg(not(windows))]
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(not(windows))]
@@ -253,6 +253,7 @@ impl Fixture {
         }
         command
             .current_dir(directory)
+            .stdin(Stdio::null())
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env(
                 "GIT_CONFIG_GLOBAL",
