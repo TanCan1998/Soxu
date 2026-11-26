@@ -314,11 +314,13 @@ fn manifest_matches(path: &Path, bytes: &[u8]) -> Result<bool, WorktreeContextEr
         return Err(WorktreeContextError::Conflict);
     }
     #[cfg(unix)]
-    if {
+    {
         use std::os::unix::fs::MetadataExt;
-        open.dev() != metadata.dev() || open.ino() != metadata.ino()
-    } {
-        return Err(WorktreeContextError::Conflict);
+        // 先取出比较结果再判断，避免在条件位置写代码块。
+        let changed = open.dev() != metadata.dev() || open.ino() != metadata.ino();
+        if changed {
+            return Err(WorktreeContextError::Conflict);
+        }
     }
     let mut existing = Vec::new();
     file.take(bytes.len() as u64 + 1)

@@ -387,7 +387,7 @@ async fn rejects_unreadable_input_when_permissions_are_enforced() {
     let directory = fixture.directory("unreadable");
     let permissions = directory.metadata().expect("原始权限").permissions();
     let before = fixture.snapshot();
-    fs::set_permissions(&directory, fs::Permissions::from_mode(0)).expect("限制目录访问");
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o000)).expect("限制目录访问");
     let denied = directory.read_dir().is_err();
     let result = fixture.git.open_local_project(&directory).await;
     fs::set_permissions(directory, permissions).expect("恢复夹具权限");

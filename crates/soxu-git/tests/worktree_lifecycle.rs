@@ -931,7 +931,13 @@ async fn final_preflight_rejects_target_after_intent_persisted() {
         .output()
         .expect("查询分支");
     assert!(!branch.status.success());
-    assert!(String::from_utf8_lossy(&branch.stderr).contains("unknown revision"));
+    // 同一语义在不同平台/版本的 Git 上文案不同，只断言「引用不可解析」这一事实。
+    let branch_stderr = String::from_utf8_lossy(&branch.stderr).to_ascii_lowercase();
+    assert!(
+        branch_stderr.contains("unknown revision")
+            || branch_stderr.contains("needed a single revision"),
+        "{branch_stderr}"
+    );
 
     let observation = fixture
         .git

@@ -76,8 +76,8 @@ async fn coordinator_rejects_relative_path_and_platform_limits_remain_explicit()
 mod linux {
     use super::*;
     use soxu_git::{
-        CheckoutError, CheckoutStage, CheckoutStatus, LocalProject, RegistrationOutcome,
-        VerifiedRegistration, WorktreeRegistrationRequest,
+        CheckoutError, CheckoutStage, CheckoutStatus, LocalProject, RegistrationObservation,
+        RegistrationOutcome, TargetState, VerifiedRegistration, WorktreeRegistrationRequest,
     };
     use std::os::unix::fs::{DirBuilderExt, symlink};
     use std::process::{Command, Stdio};
@@ -210,6 +210,43 @@ mod linux {
                 .checkout_registered_worktree(&self.coordinator, &self.registration)
                 .await
         }
+        fn state(&self) -> PathBuf {
+            self.fixture.path().join("state")
+        }
+        async fn diagnose(&self) -> RegistrationObservation {
+            let intent = &self.registration.intent;
+            self.git
+                .diagnose_registration_with_target(
+                    self.state(),
+                    &intent.request_id,
+                    &intent.source.root,
+                    &intent.target,
+                )
+                .await
+                .expect("复核夹具注册状态")
+                .expect("持久意图仍然存在")
+        }
+        async fn register_again(&self) -> RegistrationOutcome {
+            let intent = &self.registration.intent;
+            self.git
+                .register_new_worktree(
+                    &self.coordinator,
+                    WorktreeRegistrationRequest {
+                        request_id: &intent.request_id,
+                        source: &intent.source,
+                        workspace_root: intent.target.parent().expect("夹具目标父目录"),
+                        target_name: intent
+                            .target
+                            .file_name()
+                            .and_then(std::ffi::OsStr::to_str)
+                            .expect("夹具目标名"),
+                        branch_ref: &intent.branch_ref,
+                        base_oid: &intent.base_oid,
+                    },
+                )
+                .await
+                .expect("复核夹具注册状态")
+        }
     }
 
     #[tokio::test]
@@ -288,5 +325,80 @@ mod linux {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn rejects_dirty_target_before_checkout() {
+        let registered = Registered::new().await;
+        fs::write(registered.target().join("first.txt"), b"user content").expect("写入夹具文件");
+        let observation = registered.diagnose().await;
+        // Git 清单里仍登记着该目标，但未被信任的检出记录不得解析出管理目录。
+        assert!(observation.target_identity.is_none());
+        assert!(!observation.target_matches);
+        assert!(matches!(
+            registered.register_again().await,
+            RegistrationOutcome::PartialFootprint { .. }
+                | RegistrationOutcome::UnknownOutcome { .. }
+        ));
+        assert_eq!(
+            fs::read(registered.target().join("first.txt")).expect("读取夹具文件"),
+            b"user content"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_target_after_failed_checkout() {
+        let registered = Registered::new().await;
+        let user = registered.target().join("first.txt");
+        fs::write(&user, b"user content").expect("写入夹具文件");
+        assert!(registered.checkout().await.is_err());
+        assert!(matches!(
+            registered.status(),
+            CheckoutStatus::Disabled { .. }
+        ));
+        let observation = registered.diagnose().await;
+        assert!(observation.target_identity.is_none());
+        assert!(!observation.target_matches);
+        assert!(!matches!(
+            registered.register_again().await,
+            RegistrationOutcome::Verified(_) | RegistrationOutcome::ExistingIntent(_)
+        ));
+        assert_eq!(fs::read(&user).expect("读取夹具文件"), b"user content");
+    }
+
+    #[tokio::test]
+    async fn accepts_verified_checkout_and_repeat_registration_is_idempotent() {
+        let registered = Registered::new().await;
+        assert_eq!(
+            registered.checkout().await.expect("执行夹具受控检出"),
+            CheckoutStatus::Verified
+        );
+        assert_eq!(
+            fs::read(registered.target().join("first.txt")).expect("读取夹具文件"),
+            b"first\n"
+        );
+        assert!(
+            registered.target().join("nested/second.txt").is_file(),
+            "真实检出内容必须落在目标目录"
+        );
+
+        let observation = registered.diagnose().await;
+        assert_eq!(observation.target_state, TargetState::Directory);
+        assert!(observation.target_registered);
+        assert!(observation.target_matches);
+        assert_eq!(
+            observation.ref_oid.as_deref(),
+            Some(registered.registration.intent.base_oid.as_str())
+        );
+
+        let again = registered.register_again().await;
+        assert!(
+            matches!(again, RegistrationOutcome::ExistingIntent(_)),
+            "{again:?}"
+        );
+        assert_eq!(
+            fs::read(registered.target().join("first.txt")).expect("读取夹具文件"),
+            b"first\n"
+        );
     }
 }
