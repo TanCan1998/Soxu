@@ -8,6 +8,7 @@ use crate::domain::{
     SubagentSummary, TurnMessageSnapshot, WorkspaceSummary,
 };
 use crate::error::ActionableError;
+use crate::git_ops::{CheckpointRecordSummary, GitOperationRecord};
 use crate::pairing::PairedDeviceSummary;
 use crate::preferences::SoxuPreferences;
 use crate::rpc::StateSnapshot;
@@ -85,5 +86,11 @@ pub enum DaemonEvent {
     ErrorRaised {
         session_id: Option<String>,
         error: ActionableError,
+    },
+    CheckpointRecorded(CheckpointRecordSummary),
+    /// 错误负载遵循与操作记录相同的脱敏约束。
+    GitOperationProgressed {
+        operation: GitOperationRecord,
+        error: Option<ActionableError>,
     },
 }

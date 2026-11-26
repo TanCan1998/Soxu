@@ -385,6 +385,18 @@ impl DaemonState {
 
     fn dispatch_command(&self, cmd: RpcCommand) -> Result<RpcResultData, ActionableError> {
         match cmd {
+            RpcCommand::ListCheckpoints(_)
+            | RpcCommand::CompareCheckpoints(_)
+            | RpcCommand::PreviewRewind(_)
+            | RpcCommand::ExecuteRewind(_)
+            | RpcCommand::PreviewStructuredCommit(_)
+            | RpcCommand::ExecuteStructuredCommit(_)
+            | RpcCommand::GetGitOperationStatus(_) => Err(ActionableError::new(
+                ErrorCode::Unsupported,
+                "底层 Git 引擎尚未接入当前协议动作",
+                "当前请求未执行，工作树、暂存区和分支均未修改",
+                "请在守护进程接入相应 Git 能力后重试",
+            )),
             RpcCommand::GetStateSnapshot => Ok(RpcResultData::StateSnapshot(self.snapshot()?)),
             RpcCommand::CatchUpEvents { after_seq, limit } => {
                 let (events, latest_seq) = self.events_after(after_seq, limit.unwrap_or(500))?;
@@ -1098,4 +1110,74 @@ fn internal_err(err: anyhow::Error) -> ActionableError {
         "请检查磁盘权限并查看脱敏诊断日志",
     )
     .with_diagnostic(err.to_string())
+}
+
+#[cfg(test)]
+mod git_operation_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn git_operation_rpc_returns_actionable_unsupported() {
+        let state = DaemonState::open(None, "http://127.0.0.1:0", false).expect("打开测试守护进程");
+        let approval = json!({
+            "operation_id": "op-1",
+            "workspace_id": "ws-1",
+            "session_id": "session-1",
+            "approved_actions": [],
+            "selected_paths": ["src/lib.rs"],
+            "plan_digest": "plan-1",
+            "idempotency_key": "attempt-1",
+            "expires_at": "2026-11-26T12:00:00Z"
+        });
+        let endpoint = json!({"kind": "checkpoint", "checkpoint_id": "cp-1"});
+        let commands = [
+            (
+                "list_checkpoints",
+                json!({"workspace_id": "ws-1", "session_id": "session-1"}),
+            ),
+            (
+                "compare_checkpoints",
+                json!({
+                    "workspace_id": "ws-1", "session_id": "session-1", "from": endpoint, "to": endpoint
+                }),
+            ),
+            (
+                "preview_rewind",
+                json!({"workspace_id": "ws-1", "session_id": "session-1", "actions": []}),
+            ),
+            ("execute_rewind", approval.clone()),
+            (
+                "preview_structured_commit",
+                json!({
+                    "workspace_id": "ws-1", "selected_paths": ["src/lib.rs"], "message": "更新示例"
+                }),
+            ),
+            ("execute_structured_commit", approval),
+            (
+                "get_git_operation_status",
+                json!({
+                    "workspace_id": "ws-1", "kind": "rewind",
+                    "lookup": {"kind": "operation_id", "operation_id": "op-1"}
+                }),
+            ),
+        ];
+
+        for (method, params) in commands {
+            let command = serde_json::from_value(json!({"method": method, "params": params}))
+                .expect("解析 Git 操作命令");
+            let response = state.handle_rpc(RpcRequest {
+                request_id: method.into(),
+                command,
+            });
+            assert_eq!(response.request_id, method);
+            assert!(!response.ok);
+            assert!(response.result.is_none());
+            let error = response.error.expect("返回三要素错误");
+            assert_eq!(error.code, ErrorCode::Unsupported);
+            assert!(error.summary_zh.contains("尚未接入"));
+            assert!(!error.impact_scope_zh.is_empty());
+            assert!(!error.remediation_zh.is_empty());
+        }
+    }
 }

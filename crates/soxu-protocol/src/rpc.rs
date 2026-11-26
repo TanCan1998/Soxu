@@ -11,6 +11,12 @@ use crate::domain::{
 };
 use crate::error::ActionableError;
 use crate::events::{DaemonEvent, EventEnvelope};
+use crate::git_ops::{
+    CheckpointDiffCompareRequest, CheckpointDiffCompareResult, CommitApprovalTicket,
+    CommitPlanPreview, CommitPreviewRequest, GitOperationRecord, GitOperationStatusQuery,
+    ListCheckpointsRequest, ListCheckpointsResult, RewindApprovalTicket, RewindPlanPreview,
+    RewindPreviewRequest,
+};
 use crate::pairing::{
     ClaimPairingRequest, ClaimPairingResponse, PairedDeviceSummary, PairingCodeSnapshot,
     PairingOfferPayload, PairingTransportMode,
@@ -148,6 +154,13 @@ pub enum RpcCommand {
     RevokePairedDevice {
         device_id: String,
     },
+    ListCheckpoints(ListCheckpointsRequest),
+    CompareCheckpoints(CheckpointDiffCompareRequest),
+    PreviewRewind(RewindPreviewRequest),
+    ExecuteRewind(RewindApprovalTicket),
+    PreviewStructuredCommit(CommitPreviewRequest),
+    ExecuteStructuredCommit(CommitApprovalTicket),
+    GetGitOperationStatus(GitOperationStatusQuery),
 }
 
 /// 带请求关联 ID 的 RPC 请求信封。
@@ -186,6 +199,13 @@ pub enum RpcResultData {
         code: PairingCodeSnapshot,
     },
     PairingClaimed(ClaimPairingResponse),
+    CheckpointsListed(ListCheckpointsResult),
+    CheckpointsCompared(CheckpointDiffCompareResult),
+    RewindPreviewed(RewindPlanPreview),
+    RewindExecuted(GitOperationRecord),
+    StructuredCommitPreviewed(CommitPlanPreview),
+    StructuredCommitExecuted(GitOperationRecord),
+    GitOperationStatus(GitOperationRecord),
 }
 
 /// RPC 响应信封。
