@@ -226,22 +226,26 @@ pub(super) fn is_plain_directory(meta: &Metadata) -> bool {
 }
 
 pub(super) fn is_regular(meta: &Metadata) -> bool {
-    if !meta.is_file() || redirected(meta) {
-        return false;
-    }
+    let regular = meta.is_file() && !redirected(meta);
     #[cfg(target_os = "linux")]
-    if meta.nlink() != 1 {
-        return false;
+    {
+        regular && meta.nlink() == 1
     }
-    true
+    #[cfg(not(target_os = "linux"))]
+    {
+        regular
+    }
 }
 
 fn redirected(meta: &Metadata) -> bool {
     #[cfg(windows)]
-    if meta.file_attributes() & 0x400 != 0 {
-        return true;
+    {
+        meta.is_symlink() || (meta.file_attributes() & 0x400 != 0)
     }
-    meta.is_symlink()
+    #[cfg(not(windows))]
+    {
+        meta.is_symlink()
+    }
 }
 
 fn open_directory(path: &Path) -> io::Result<File> {
