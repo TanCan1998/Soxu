@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T19:10:28Z",
+  "updated_at": "2026-11-26T19:39:39Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "932d3c1808e5f457fca27e40506660891a8d281043b15fa4440aa06da11b0e0e",
-      "size": 79409,
-      "normalized_sha256": "932d3c1808e5f457fca27e40506660891a8d281043b15fa4440aa06da11b0e0e"
+      "sha256": "89d66db0efafa0f48dc441ccd0e83601e8c921fca29ae07fd096dce121b1f118",
+      "size": 81639,
+      "normalized_sha256": "89d66db0efafa0f48dc441ccd0e83601e8c921fca29ae07fd096dce121b1f118"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -611,9 +611,9 @@
     },
     "crates/soxu-git/README.md": {
       "role": "index",
-      "sha256": "78098955b0ec7d7a6190105e8f19a908ac9d73dd93097495eb68513c7ace6369",
-      "size": 23844,
-      "normalized_sha256": "78098955b0ec7d7a6190105e8f19a908ac9d73dd93097495eb68513c7ace6369"
+      "sha256": "1c202322b60020dcf225c73786f83641ee6fb681c37d6f913ae340c03a1f8736",
+      "size": 27774,
+      "normalized_sha256": "1c202322b60020dcf225c73786f83641ee6fb681c37d6f913ae340c03a1f8736"
     },
     "crates/soxu-git/src/checkpoint.rs": {
       "role": "index",
@@ -653,9 +653,21 @@
     },
     "crates/soxu-git/src/diff.rs": {
       "role": "index",
-      "sha256": "e6a91198cae2db4120f61d4ee5a4077a751d278bdd6eadec4e5e7d3a8f84cd31",
-      "size": 14636,
-      "normalized_sha256": "e6a91198cae2db4120f61d4ee5a4077a751d278bdd6eadec4e5e7d3a8f84cd31"
+      "sha256": "e311a484b316f7c79ff7103939103c2da2445fe88807407f2bbc181911524331",
+      "size": 14837,
+      "normalized_sha256": "e311a484b316f7c79ff7103939103c2da2445fe88807407f2bbc181911524331"
+    },
+    "crates/soxu-git/src/diff/fixed.rs": {
+      "role": "index",
+      "sha256": "d02f8216ca0c90cfb56f5c0ed2f73d6c95671a1246bbe612430507487bba498f",
+      "size": 25146,
+      "normalized_sha256": "d02f8216ca0c90cfb56f5c0ed2f73d6c95671a1246bbe612430507487bba498f"
+    },
+    "crates/soxu-git/src/diff/fixed/parse.rs": {
+      "role": "index",
+      "sha256": "fa13294df78adf11fd90fcd29850ed41ed3d089623c441ebca1daf94f39449fd",
+      "size": 9122,
+      "normalized_sha256": "fa13294df78adf11fd90fcd29850ed41ed3d089623c441ebca1daf94f39449fd"
     },
     "crates/soxu-git/src/diff/format.rs": {
       "role": "index",
@@ -665,15 +677,15 @@
     },
     "crates/soxu-git/src/diff/repository.rs": {
       "role": "index",
-      "sha256": "143930c0723f3d539db69224e8ffce6f8eeeb8f88099547a0467a73413b6598e",
-      "size": 16074,
-      "normalized_sha256": "143930c0723f3d539db69224e8ffce6f8eeeb8f88099547a0467a73413b6598e"
+      "sha256": "fb4d41719baf7b49aaa8e6d182fe235862895cd0df108fcc85117437c9ebb95f",
+      "size": 16529,
+      "normalized_sha256": "fb4d41719baf7b49aaa8e6d182fe235862895cd0df108fcc85117437c9ebb95f"
     },
     "crates/soxu-git/src/lib.rs": {
       "role": "index",
-      "sha256": "9e36f2e13a723ff50f343872ac6df6e9424c529317fabff381d0e16adcfe2242",
-      "size": 2132,
-      "normalized_sha256": "9e36f2e13a723ff50f343872ac6df6e9424c529317fabff381d0e16adcfe2242"
+      "sha256": "6af2100a17c14ddc84f3e6c2e9ff12fd10d6f1140972822f501daff198048bcf",
+      "size": 2301,
+      "normalized_sha256": "6af2100a17c14ddc84f3e6c2e9ff12fd10d6f1140972822f501daff198048bcf"
     },
     "crates/soxu-git/src/probe.rs": {
       "role": "index",
@@ -770,6 +782,12 @@
       "sha256": "202c2333cea6a4af2fd10435f3b63cf39f80111dc35cdf5a0dcbd6b70bd230f8",
       "size": 26968,
       "normalized_sha256": "202c2333cea6a4af2fd10435f3b63cf39f80111dc35cdf5a0dcbd6b70bd230f8"
+    },
+    "crates/soxu-git/tests/fixed_diff.rs": {
+      "role": "observe",
+      "sha256": "7ca4b4dc3ef01cfd5b93606311c4289a22af85e9f105644cff9b572d286ef37b",
+      "size": 25745,
+      "normalized_sha256": "7ca4b4dc3ef01cfd5b93606311c4289a22af85e9f105644cff9b572d286ef37b"
     },
     "crates/soxu-git/tests/probe.rs": {
       "role": "observe",
