@@ -1,6 +1,6 @@
 {
   "worktree": {
-    "setup": "pwsh -NoProfile -File scripts/setup-hooks.ps1"
+    "setup": "pwsh -NoProfile -File scripts/setup-worktree.ps1"
   },
   "scripts": {
     "daemon-dev": {

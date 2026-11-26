@@ -1,13 +1,13 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-25T15:10:27Z",
+  "updated_at": "2026-11-26T04:35:00Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
-      "sha256": "b37086f4a7c703abfb7aab64f503e1c71294a79a2642adf4e9ac85772bb6b867",
-      "size": 6174,
-      "normalized_sha256": "b37086f4a7c703abfb7aab64f503e1c71294a79a2642adf4e9ac85772bb6b867"
+      "sha256": "aa2a9447aff7c95570c519aa0dd16462c5afb8cc95f6052b7f88ff47b84bf206",
+      "size": 12282,
+      "normalized_sha256": "aa2a9447aff7c95570c519aa0dd16462c5afb8cc95f6052b7f88ff47b84bf206"
     },
     ".editorconfig": {
       "role": "index",
@@ -65,9 +65,9 @@
     },
     "AGENTS.md": {
       "role": "index",
-      "sha256": "e80ec8e7f3912802d81f9e707e34e9273ebb80e80ab177c331d40104d2c83c91",
-      "size": 21656,
-      "normalized_sha256": "e80ec8e7f3912802d81f9e707e34e9273ebb80e80ab177c331d40104d2c83c91"
+      "sha256": "0e1f5d67b4d061d90ef6ccb9e00bcf6346441a4caa5c72c3b4bcba5f105037d2",
+      "size": 24253,
+      "normalized_sha256": "0e1f5d67b4d061d90ef6ccb9e00bcf6346441a4caa5c72c3b4bcba5f105037d2"
     },
     "CLAUDE.md": {
       "role": "index",
@@ -95,9 +95,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "2cdfa4e02edca0b931244484547e8444156d3ab647ea94a8f1b556512acaf868",
-      "size": 60377,
-      "normalized_sha256": "2cdfa4e02edca0b931244484547e8444156d3ab647ea94a8f1b556512acaf868"
+      "sha256": "d84cfb1e461eadbcdaadf47490f6a7a6860076a3b182a1c0fa38fe4ed2ab61ef",
+      "size": 62729,
+      "normalized_sha256": "d84cfb1e461eadbcdaadf47490f6a7a6860076a3b182a1c0fa38fe4ed2ab61ef"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -845,9 +845,9 @@
     },
     "docs/dev/contributing.md": {
       "role": "index",
-      "sha256": "098a52fdba439513a8be67dab8ef4829a30c864b53cf6a9db1f9c6d185295479",
-      "size": 1848,
-      "normalized_sha256": "098a52fdba439513a8be67dab8ef4829a30c864b53cf6a9db1f9c6d185295479"
+      "sha256": "59e9c8604bf09290d8b23c698707bab59a72e7b8e12a0b2b91fd9a6fcb30c7a6",
+      "size": 1980,
+      "normalized_sha256": "59e9c8604bf09290d8b23c698707bab59a72e7b8e12a0b2b91fd9a6fcb30c7a6"
     },
     "docs/dev/git-readonly-diff.md": {
       "role": "index",
@@ -869,9 +869,9 @@
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "97c4bdfb23e44825be7dfabfcabf2d1de5e2b3afb6dbbdbe7987849af7e10dd7",
-      "size": 20236,
-      "normalized_sha256": "97c4bdfb23e44825be7dfabfcabf2d1de5e2b3afb6dbbdbe7987849af7e10dd7"
+      "sha256": "ceec9945d9acae98cf055eb97707f3ff819fe966485f7939b6de58ec03888f93",
+      "size": 20374,
+      "normalized_sha256": "ceec9945d9acae98cf055eb97707f3ff819fe966485f7939b6de58ec03888f93"
     },
     "docs/user/getting-started.md": {
       "role": "index",
@@ -887,27 +887,51 @@
     },
     "mise.toml": {
       "role": "index",
-      "sha256": "2a6fb4d74721cfabb0fa7631caedb9f09de99d2ffe7ea60dca850c18ae3ad78c",
-      "size": 260,
-      "normalized_sha256": "2a6fb4d74721cfabb0fa7631caedb9f09de99d2ffe7ea60dca850c18ae3ad78c"
+      "sha256": "6afb6db6896fb3ce0d86e6488a7e5b561980960f439bd495fab86334fb8c4a64",
+      "size": 1853,
+      "normalized_sha256": "6afb6db6896fb3ce0d86e6488a7e5b561980960f439bd495fab86334fb8c4a64"
     },
     "paseo.json": {
       "role": "index",
-      "sha256": "c9c2a41c8de244be8889d76f22a1e98f2cfa47076255cc9be4fb48f97df28b90",
-      "size": 841,
-      "normalized_sha256": "c9c2a41c8de244be8889d76f22a1e98f2cfa47076255cc9be4fb48f97df28b90"
+      "sha256": "14f7303835d1a86c1bd82a8322c3feb5d392d1d5fdf2dd1b305df3b11c07001e",
+      "size": 844,
+      "normalized_sha256": "14f7303835d1a86c1bd82a8322c3feb5d392d1d5fdf2dd1b305df3b11c07001e"
     },
     "scripts/check-all.ps1": {
       "role": "index",
-      "sha256": "a33bd0516e4b364c78ebdca401a18c8faf765e471b9390b555180c2fc0089fc7",
-      "size": 1378,
-      "normalized_sha256": "a33bd0516e4b364c78ebdca401a18c8faf765e471b9390b555180c2fc0089fc7"
+      "sha256": "611a900277ca7776ac966d76fafee8a763bbd7359d150461b4c4f0b7103596b1",
+      "size": 1489,
+      "normalized_sha256": "611a900277ca7776ac966d76fafee8a763bbd7359d150461b4c4f0b7103596b1"
+    },
+    "scripts/mise-doctor.ps1": {
+      "role": "index",
+      "sha256": "ffe665b2c196b41fe481d5c24492477001e2b249ac06be0d31f742ecfd76d89f",
+      "size": 1252,
+      "normalized_sha256": "ffe665b2c196b41fe481d5c24492477001e2b249ac06be0d31f742ecfd76d89f"
     },
     "scripts/paseo-ctl.ps1": {
       "role": "index",
-      "sha256": "8bef5225613d52c2c094f3165360678aa2592282ee614d31d5c2c46927e444fc",
-      "size": 3223,
-      "normalized_sha256": "8bef5225613d52c2c094f3165360678aa2592282ee614d31d5c2c46927e444fc"
+      "sha256": "2dc1e2e183c9405b6a882ba27a628c7ebe0fd7c0350a7750317f8d8671a49bc7",
+      "size": 3952,
+      "normalized_sha256": "2dc1e2e183c9405b6a882ba27a628c7ebe0fd7c0350a7750317f8d8671a49bc7"
+    },
+    "scripts/paseo-dispatch.ps1": {
+      "role": "index",
+      "sha256": "684875d29902564665ceb7adb59702b52490b9a7186d8bb885fbf0be8e3537a8",
+      "size": 2607,
+      "normalized_sha256": "684875d29902564665ceb7adb59702b52490b9a7186d8bb885fbf0be8e3537a8"
+    },
+    "scripts/paseo-reference-context.ps1": {
+      "role": "index",
+      "sha256": "412b02d157690b5390ccf49179e84a5f36fb81d2873c6d3f774b37e6c6925304",
+      "size": 7501,
+      "normalized_sha256": "412b02d157690b5390ccf49179e84a5f36fb81d2873c6d3f774b37e6c6925304"
+    },
+    "scripts/paseo-run-pi.ps1": {
+      "role": "index",
+      "sha256": "b8394f8934410c82e76f397ea68bf960424e234a3ca2ec7d6714cca5360d9825",
+      "size": 2679,
+      "normalized_sha256": "b8394f8934410c82e76f397ea68bf960424e234a3ca2ec7d6714cca5360d9825"
     },
     "scripts/setup-hooks.ps1": {
       "role": "index",
@@ -915,11 +939,23 @@
       "size": 199,
       "normalized_sha256": "cb7cf7ec701506b07266a7cafa712011bacf991d85aeb215ba121c2a8a3b55f5"
     },
+    "scripts/setup-worktree.ps1": {
+      "role": "index",
+      "sha256": "1c94d308559afd3e473837bffb4b81bd69682d004737be51ecfdbb08d9a4e104",
+      "size": 591,
+      "normalized_sha256": "1c94d308559afd3e473837bffb4b81bd69682d004737be51ecfdbb08d9a4e104"
+    },
     "scripts/sync-design-tokens.mjs": {
       "role": "index",
       "sha256": "d952eed88a0afb450877dddff13119fec5c94431d1f26e3cfda87612bc0d3c56",
       "size": 7908,
       "normalized_sha256": "d952eed88a0afb450877dddff13119fec5c94431d1f26e3cfda87612bc0d3c56"
+    },
+    "scripts/test-paseo-orchestration.ps1": {
+      "role": "index",
+      "sha256": "f907afa8037d4fa3ddaef5721a8147c3adf0d57193f7388f0093f640f5dcd967",
+      "size": 6362,
+      "normalized_sha256": "f907afa8037d4fa3ddaef5721a8147c3adf0d57193f7388f0093f640f5dcd967"
     },
     "scripts/verify-commits-and-privacy.ps1": {
       "role": "index",

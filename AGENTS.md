@@ -46,6 +46,13 @@
    - 每个子任务必须严格遵守 Issue 中声明的 **Owned Paths 写入白名单**。未经主控协调，具体业务 Crate 的开发任务**禁止擅自修改根 `Cargo.toml`、`crates/soxu-protocol` 或其他并行分支负责的 Crate**（跨模块公共契约变更须先走独立契约 PR 合入 `main`）。
 3. **`.gitignore` 实时同步义务**：
    - 任何时候引入新工具、新缓存目录、新构建产物、测试快照临时目录或本地索引文件时，**必须在同一个提交/PR 中同步更新根 `.gitignore`**，保证提交前后 `git status` 干净无脏文件。
+4. **Paseo 任务书、环境绑定与 Pi 唯一派发规范**：
+   - **唯一派发引擎**：后续所有 Paseo 编码、审查与文档子代理派发**仅使用 `pi` agent**（`--provider pi` 配合经 `pi --list-models` 核实的 `magpie/...` 模型与思考强度）；**禁止**新派发或续派 `codex`、`claude`、`antigravity` 等其他驱动。
+   - **强制环境绑定**：派发前须对目标 Worktree 完成 `scripts/setup-worktree.ps1`（或 `mise trust`）；派发启动统一使用 `scripts/paseo-run-pi.ps1`（或等效 `--env` 参数）将项目 `mise.toml` 锁定的环境变量与工具链前置 `PATH`（含 `MISE_DISABLE_TOOLS=python,java,maven`、`PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false`、`RUSTUP_TOOLCHAIN=1.99.1`、`CARGO_TARGET_DIR`）注入子代理进程。任务书必须单列「规定环境」要求：全部 Rust/Node/pnpm/门禁命令均通过 `mise exec -- ...` 或 `mise run ...` 执行，并在开工回执上报 `mise run doctor` 实测版本，禁止修改用户全局 `mise` 配置。
+   - 主控派发时，首条可见消息须指出 Issue、参考项目名称、复用参考项目既有 AOCI 与 CodeGraph、规定使用的 `mise` 环境，并要求等待完整任务书与开工确认。任务书须写明 `Owned Paths`、规定环境与构建缓存路径、可读的参考路径及源码定位、应借鉴的做法和适用边界、每个参考仓库的既有索引身份与实际可用的查询入口及回退、验收和交付要求。参考认知绑定参考仓库根；目标工作树的 Soxu 认知和收尾维护另列，不能替代参考认知。
+   - 子代理直接复用参考仓库的 `aoci.txt` / 已声明 Volumes 与 `.codegraph`，不得复制到目标工作树或为本次派发自动初始化、扫描、重建、同步或维护参考索引。参考 MCP 根不匹配时使用显式绑定参考根的 CLI / stdio MCP；缺失、过期或不可访问时报告，并按任务书回退到源码调查，不把回退称作索引校验成功。
+   - 多行任务书通过 UTF-8 文件投递。主控须把目标 Paseo 代理日志里的 `user_message.text` 与任务书全文核对一致，记录代理 ID 和消息 ID 后才确认开工。缺失或截断时向同一代理补发并复核。命令、模板和验证步骤见 [Paseo 编排技能](.agents/skills/paseo-orchestrator/SKILL.md#3-派发任务并核验全文送达)。
+   - 执行代理须把适用的参考做法落实到实现或回归测试，在 PR 中写明参考来源、实际采用点和验证证据，并说明不适用的做法或工具回退原因。
 
 ---
 

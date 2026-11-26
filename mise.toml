@@ -1,8 +1,54 @@
+[settings]
+# 锁定本仓库实际工具链并屏蔽宿主全局配置中的无关工具（如 python/java/maven），避免全局缺失工具阻断 mise exec 与 shim
+disable_tools = ["python", "java", "maven"]
+idiomatic_version_file_enable_tools = ["node", "rust"]
+
 [tools]
-rust = "1.99.1"
+rust = { version = "1.99.1", components = "rustfmt,clippy" }
 node = "26.13.1"
 pnpm = "12.21.0"
 
 [env]
 # 跨主工作区与多 Agent Worktree 复用同一构建缓存目录（避免硬编码个人盘符路径且节省数十 GB 空间）
 CARGO_TARGET_DIR = "{{ config_root }}/../.cargo-target/soxu"
+# 统一使用 mise 锁定的 pnpm 版本，禁止按 packageManager 字段自动下载旧版
+PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS = "false"
+
+[tasks.doctor]
+description = "检查项目 mise 锁定环境与本机关键工具版本"
+run = "pwsh -NoProfile -File scripts/mise-doctor.ps1"
+
+[tasks.setup-worktree]
+description = "初始化 Git Hooks 并信任当前工作树的 mise 配置"
+run = "pwsh -NoProfile -File scripts/setup-worktree.ps1"
+
+[tasks.check-all]
+description = "运行全工作区 7 项门禁检查"
+run = "pwsh -NoProfile -File scripts/check-all.ps1"
+
+[tasks.fmt]
+description = "检查 Rust 代码格式"
+run = "cargo fmt --all -- --check"
+
+[tasks.clippy]
+description = "运行 Clippy 静态检查（零警告）"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+description = "运行 Rust 全工作区测试"
+run = "cargo test --workspace"
+
+[tasks.mobile-install]
+description = "安装移动端前端依赖（锁定 lockfile）"
+dir = "apps/mobile-web"
+run = "pnpm install --frozen-lockfile"
+
+[tasks.mobile-build]
+description = "构建移动端 Web/PWA"
+dir = "apps/mobile-web"
+run = "pnpm run build"
+
+[tasks.mobile-preview]
+description = "构建单文件桌面交互预览"
+dir = "apps/mobile-web"
+run = "pnpm run build:preview"

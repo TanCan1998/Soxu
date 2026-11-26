@@ -89,5 +89,20 @@ if (($subcmd -in $daemonCommands) -and (-not $hasBypassFlag)) {
   }
 }
 
+if ($paseoCli -match '[\\/]resources[\\/]bin[\\/]paseo\.cmd$') {
+  $resourcesDir = Split-Path -Parent (Split-Path -Parent $paseoCli)
+  $appDir = Split-Path -Parent $resourcesDir
+  $appExe = Join-Path $appDir "Paseo.exe"
+  $runnerJs = Join-Path $resourcesDir "app.asar.unpacked/dist/daemon/node-entrypoint-runner.js"
+  $cliJs = Join-Path $resourcesDir "app.asar/node_modules/@getpaseo/cli/dist/index.js"
+  if ((Test-Path -LiteralPath $appExe -PathType Leaf) -and (Test-Path -LiteralPath $runnerJs -PathType Leaf)) {
+    $env:ELECTRON_RUN_AS_NODE = "1"
+    $env:PASEO_NODE_ENV = "production"
+    $env:PASEO_CLI = $paseoCli
+    & $appExe --disable-warning=DEP0040 $runnerJs node-script $cliJs @rawArgs
+    exit $LASTEXITCODE
+  }
+}
+
 & $paseoCli @rawArgs
 exit $LASTEXITCODE
