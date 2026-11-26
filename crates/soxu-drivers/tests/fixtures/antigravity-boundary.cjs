@@ -243,7 +243,8 @@ async function main() {
     for (const [label, script] of [
       ["nonzero", "process.exit(1);"],
       ["invalid-json", 'console.log("not-json");'],
-      ["timeout", "setInterval(() => {}, 1000);"],
+      // 超过 1 秒钩子超时，并在 CLI 未回收子进程时自行退出。
+      ["timeout", "setTimeout(() => {}, 1500);"],
     ]) {
       const failedHook = path.join(root, `${label}-hook.cjs`);
       fs.writeFileSync(failedHook, script);

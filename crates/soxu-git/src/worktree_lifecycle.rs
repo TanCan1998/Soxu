@@ -4,8 +4,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 mod execution;
-mod identity;
-mod state;
+pub(crate) mod identity;
+pub(crate) mod state;
 
 use identity::{AuthorizedDirectory, DirectoryIdentity, checked_directory};
 
@@ -33,7 +33,7 @@ pub struct WorktreeRegistrationRequest<'a> {
 
 #[derive(Debug)]
 pub struct WorktreeRegistrationCoordinator {
-    state_root: AuthorizedDirectory,
+    pub(crate) state_root: AuthorizedDirectory,
 }
 
 impl WorktreeRegistrationCoordinator {
@@ -736,7 +736,7 @@ fn same_binding(left: &PersistentIntent, right: &PersistentIntent) -> bool {
         && left.base_oid == right.base_oid
 }
 
-fn validate_request_id(request_id: &str) -> Result<(), WorktreeLifecycleError> {
+pub(crate) fn validate_request_id(request_id: &str) -> Result<(), WorktreeLifecycleError> {
     if request_id.is_empty()
         || request_id.len() > MAX_REQUEST_BYTES
         || !request_id
@@ -814,7 +814,7 @@ fn is_full_oid(bytes: &[u8]) -> bool {
         && !bytes.iter().all(|byte| *byte == b'0')
 }
 
-fn native_command_path(path: &Path) -> Result<PathBuf, WorktreeLifecycleError> {
+pub(crate) fn native_command_path(path: &Path) -> Result<PathBuf, WorktreeLifecycleError> {
     let native = native_git_path(path);
     if native.as_os_str().to_str().is_none() {
         return Err(WorktreeLifecycleError::Unauthorized(
@@ -1435,7 +1435,7 @@ async fn ref_presence(
     Ok(RefPresence::Absent)
 }
 
-fn check_config(bytes: &[u8]) -> Result<(), WorktreeLifecycleError> {
+pub(crate) fn check_config(bytes: &[u8]) -> Result<(), WorktreeLifecycleError> {
     if bytes.is_empty() {
         return Ok(());
     }
@@ -1490,6 +1490,87 @@ fn check_config(bytes: &[u8]) -> Result<(), WorktreeLifecycleError> {
         }
     }
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) struct CheckoutRegistration {
+    pub(crate) workspace: AuthorizedDirectory,
+    pub(crate) target: AuthorizedDirectory,
+    pub(crate) git_dir: AuthorizedDirectory,
+    pub(crate) common_dir: AuthorizedDirectory,
+}
+
+#[cfg(target_os = "linux")]
+impl CheckoutRegistration {
+    pub(crate) fn authorize(
+        coordinator: &WorktreeRegistrationCoordinator,
+        supplied: &VerifiedRegistration,
+    ) -> Result<PersistentIntent, WorktreeLifecycleError> {
+        let expected = &supplied.intent;
+        let persisted = read_intents(&coordinator.state_root)?
+            .into_iter()
+            .find(|intent| intent.request_id == expected.request_id)
+            .ok_or(WorktreeLifecycleError::RequestConflict)?;
+        if &persisted != expected
+            || persisted.execution.stage != ExecutionStage::Observed
+            || persisted.execution.result != ExecutionResult::Succeeded
+            || !persisted.execution.target_absent_before
+            || !persisted.execution.ref_absent_before
+            || !supplied.observation.target_matches
+            || supplied.observation.registered_directories != persisted.registered_directories
+        {
+            return Err(WorktreeLifecycleError::RequestConflict);
+        }
+        Ok(persisted)
+    }
+
+    pub(crate) fn open(
+        coordinator: &WorktreeRegistrationCoordinator,
+        persisted: &PersistentIntent,
+    ) -> Result<Self, WorktreeLifecycleError> {
+        let bound = persisted
+            .authorized_directories
+            .ok_or(WorktreeLifecycleError::IdentityChanged)?;
+        let registered = persisted
+            .registered_directories
+            .ok_or(WorktreeLifecycleError::IdentityChanged)?;
+        let source = canonical_source_identity(&persisted.source)?;
+        let workspace = checked_directory(&persisted.workspace_root)?;
+        let target = checked_directory(&persisted.target)?;
+        let git_dir = target_git_directory(persisted, &target, true)?
+            .ok_or(WorktreeLifecycleError::IdentityChanged)?;
+        if bound.state != coordinator.state_root.identity()
+            || bound.workspace != workspace.identity()
+            || bound.source != source.identities()
+            || registered != [target.identity(), git_dir.identity()]
+            || target.path().parent() != Some(workspace.path())
+        {
+            return Err(WorktreeLifecycleError::IdentityChanged);
+        }
+        Ok(Self {
+            workspace,
+            target,
+            git_dir,
+            common_dir: source.common_dir,
+        })
+    }
+
+    pub(crate) fn recheck(
+        &self,
+        intent: &PersistentIntent,
+        pending: bool,
+    ) -> Result<(), WorktreeLifecycleError> {
+        self.workspace.refresh()?;
+        self.target.refresh()?;
+        self.git_dir.refresh()?;
+        self.common_dir.refresh()?;
+        if target_git_directory(intent, &self.target, pending)?.map(|admin| admin.identity())
+            != Some(self.git_dir.identity())
+        {
+            return Err(WorktreeLifecycleError::IdentityChanged);
+        }
+        Ok(())
+    }
 }
 
 async fn verify_intent(
@@ -1555,7 +1636,7 @@ async fn verify_intent(
         Some((identity, target, git_dir)) => {
             target.refresh()?;
             git_dir.refresh()?;
-            if target_git_directory(intent, &target)?.map(|directory| directory.identity())
+            if target_git_directory(intent, &target, true)?.map(|directory| directory.identity())
                 != Some(git_dir.identity())
             {
                 return Err(WorktreeLifecycleError::IdentityChanged);
@@ -1679,7 +1760,7 @@ async fn open_registered_target(
     {
         return Ok(None);
     }
-    let Some(git_dir) = target_git_directory(intent, &target)? else {
+    let Some(git_dir) = target_git_directory(intent, &target, true)? else {
         return Ok(None);
     };
     target.refresh()?;
@@ -1699,8 +1780,9 @@ async fn open_registered_target(
 fn target_git_directory(
     intent: &PersistentIntent,
     target: &AuthorizedDirectory,
+    pending: bool,
 ) -> Result<Option<AuthorizedDirectory>, WorktreeLifecycleError> {
-    if !target_contains_only_git_marker(target.path())? {
+    if pending && !target_contains_only_git_marker(target.path())? {
         return Ok(None);
     }
     let marker = target.path().join(".git");

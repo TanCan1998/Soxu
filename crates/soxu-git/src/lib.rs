@@ -6,6 +6,7 @@ mod diff;
 mod probe;
 mod project;
 mod status;
+mod worktree_checkout;
 mod worktree_lifecycle;
 mod worktrees;
 
@@ -20,6 +21,7 @@ pub use status::{
     StatusSnapshot, SubmoduleStatus, UnmergedChange, parse_status,
 };
 
+pub use worktree_checkout::{CheckoutError, CheckoutStage, CheckoutStatus};
 pub use worktree_lifecycle::{
     ExecutionRecord, ExecutionResult, ExecutionStage, PersistentIntent, RegistrationObservation,
     RegistrationOutcome, TargetState, VerifiedRegistration, WorktreeLifecycleError,
