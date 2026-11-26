@@ -146,7 +146,7 @@ git-init-clone-and-recovery.md[SR7S]: F:审定显式仓库 Init、Clone 与 Work
 
 ===F:/workplace/Paseo/work/Soxu/docs/ops/===
 DECISIONS.md[SW7T]: F:记录Soxu架构与工程决策，新增主控只编排审查、AGY延期及Pi/Git正交并行的ADR-007 | R:code:AGENTS.md,code:docs/ops/PROGRESS.md,code:design-system/soxu/MASTER.md | A:ADR-001..007,Owned Paths,Queue/Steer/Stop | S:#26开放但路由关闭，延期不等于M2七代理验收；PiDeck仅参考原生Pi，不引入ACP。Issue#34的PR#35先合流，再串行合入Issue#32/#33业务PR；后续分支吸收main并保留前序AOCI认知，执行代理不得合并或回收。
-PROGRESS.md[SW6S]: F:记录各里程碑、在途工作区、已交付 PR、验证边界及待执行队列 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:docs/dev/git-worktree-lifecycle.md | A:- | S:保留 M3e 注册和受控检出记录。PR #55 仅开放 Daemon 托管的本机隔离只读 QuickChat，项目目录继续关闭。
+PROGRESS.md[SW6S]: F:记录里程碑、在途工作区、已交付范围、验证边界与后续行动 | R:code:AGENTS.md,code:docs/ops/DECISIONS.md,code:docs/dev/git-worktree-lifecycle.md,code:docs/dev/git-init-clone-and-recovery.md,code:docs/dev/git-checkpoint-rewind-commit.md | A:- | S:区分 M3e 已合入的注册与检出、在途宿主接入、后续 Agent 启动及 Linux 补测。PR #55 的隔离只读快聊继续关闭项目目录入口。
 
 ===F:/workplace/Paseo/work/Soxu/docs/user/===
 getting-started.md[DU5T]: F:说明 Soxu 的本地 CLI 使用前提、Magpie 自动协同与独立模式，以及开发预览期的诊断和启动方法 | R:- | A:soxu-cli doctor,soxu-daemon,soxu-desktop | S:守护进程默认监听 127.0.0.1:7698；未安装 Magpie 时自动扫描本地 CLI 默认配置与历史会话，桌面编排和移动端遥控仍可完整使用
