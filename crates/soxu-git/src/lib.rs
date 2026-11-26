@@ -6,6 +6,7 @@ mod diff;
 mod probe;
 mod project;
 mod status;
+mod worktree_lifecycle;
 mod worktrees;
 
 pub use diff::{
@@ -17,6 +18,12 @@ pub use project::{LocalProject, ProjectOpenError, WorktreeIdentity};
 pub use status::{
     ChangeStatus, GitPath, OrdinaryChange, ParseError, RenameChange, StatusEntry, StatusHeader,
     StatusSnapshot, SubmoduleStatus, UnmergedChange, parse_status,
+};
+
+pub use worktree_lifecycle::{
+    ExecutionRecord, ExecutionResult, ExecutionStage, PersistentIntent, RegistrationObservation,
+    RegistrationOutcome, TargetState, VerifiedRegistration, WorktreeLifecycleError,
+    WorktreeRegistrationCoordinator, WorktreeRegistrationRequest,
 };
 
 pub use worktrees::{

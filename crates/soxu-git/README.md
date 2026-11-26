@@ -1,6 +1,6 @@
 # soxu-git：本地项目身份与 Git 只读探测
 
-M3d 提供已跟踪文件的四种只读 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
+M3e 提供显式 Worktree 新分支注册与只读诊断。M3d 提供已跟踪文件的四种只读 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
 
 ## 消费接口
 
@@ -24,6 +24,22 @@ M3d 提供已跟踪文件的四种只读 Diff。M3c 提供 Git Worktree 只读�
 - 清单是注册事实，不是健康报告；Git 自身可能检查注册路径以生成 prunable，Soxu 不额外遍历或打开注册路径，只报告 locked/prunable，不创建/删除/repair/prune，不声称路径存在或可安全删除。`WorktreeInventoryError` 分别保留原有 Git 错误与清单解析错误；Display 不泄露原始路径、原因或 stderr。
 
 格式依据：[官方 git-worktree](https://git-scm.com/docs/git-worktree#_porcelain_format)、[官方 git-check-ref-format](https://git-scm.com/docs/git-check-ref-format)，以及 Git `builtin/worktree.c` 的 `show_worktree_porcelain`。真实临时夹具覆盖主/linked、unborn、detached、bare、locked（有/无原因）、移动目录形成的 prunable、空格/Unicode；探测前后逐字节及修改时间快照相同。纯解析器覆盖 NUL、换行、非 UTF-8、截断、非法 ref/路径和未来字段；Unix 专属真实换行及非 UTF-8 路径测试不等同于本次 Windows 已执行验证。
+
+## Worktree 受控注册与只读诊断
+
+- `GitProbe::register_new_worktree(&coordinator, WorktreeRegistrationRequest)` 执行宿主显式授权的新分支 linked Worktree 注册，终态是「已注册，待检出」。请求绑定持久请求 ID、源 `WorktreeIdentity`、专用工作区根、直接目标名、完整 `refs/heads/soxu/…` 分支和固定完整基准 OID。请求中没有状态目录字段。协议、Daemon、项目脚本和 MCP 接入属于后续阶段。
+- 预检逐段拒绝链接和 reparse point，绑定规范路径与平台原生目录身份。源、共享 Git 目录、状态根和授权工作区在启动前复验。专用工作区可包含多个直接子目录中的 linked Worktree，当前目标必须独立且缺失。工作区、目标和注册条目存在真实重叠时拒绝。
+- 可信宿主以 `WorktreeRegistrationCoordinator::open(state_root, legacy_state_roots)` 打开全域协调能力。所有可能触达同仓或同目标的进程及其重启实例共用同一个预先建立的私有持久目录。目录必须和仓库、Git 管理目录、工作区互相隔离。宿主负责同域配置、旧写者停用及旧状态根清点，确保状态根、锁文件、目录项、授权路径及其祖先持续受控。请求参数无法选择协调域。Unix 要求协调根只允许所有者访问，并要求本地文件系统提供有效的跨进程文件锁、原生目录身份、原子重命名及目录同步。域外写入者、可替换的路径或存在交叠的文件系统别名需要宿主排除。
+- 域内固定的 `registration.lock` 串行化预检、意图写入、Git 执行与回读。仓库和 ref 预约使用共享 `common_dir` 原生身份，ref 覆盖目录前缀冲突。目标预约使用工作区根原生身份与等价目标名，跨仓检查，并保留原路径占用保护。执行者持锁至直接子进程回收、复核和记录完成。若重启时仍无法确认原进程已停止，留痕继续保留目标和 ref 预约，并阻止该仓库的新注册。
+- 预检与启动由私有写执行任务串接：先持久化 `Prepared`，任务内最后刷新全部授权目录、配置/对象边界并复验目标缺失，再切换 `Started` 并启动 Git。Unix 夹具覆盖“意图已落盘后出现目标”的竞态；Windows 当前在授权入口即 fail-closed，不会到达该屏障。
+- `SOXUWT3` 持久化状态根、工作区、源目录和 Git 目录的设备号、inode 与原生创建时间。初次复核成功时再记录新目标及其管理目录身份。无法取得原生创建时间时拒绝注册。身份和参数一致的重放返回原执行记录与时间戳。独立写执行者记录启动失败、退出码、超时、输出限额和直接子进程回收结果。调用者取消后执行者继续持锁。
+- 启用统一域前，宿主须停用旧写者并把所有旧状态根交给 `open`。发现其它根有意图或临时留痕时拒绝启用，原路径仍可对身份完整的记录做只读诊断。原根就是统一域时，状态根身份一致的 `SOXUWT3` 可继续读取和预约。域内缺少身份的 `SOXUWT2` 对相同绑定返回原记录和待复核状态，并阻止新注册。带有异域身份的记录同样阻止新注册。旧记录保留原位及原字节，迁移或解除预约需要宿主另行裁决。
+- 写入命令固定为受信任 Git 上的 `worktree add --no-checkout --no-track -b <分支> -- <目标> <OID>`，禁用钩子、替换对象、延迟获取和自动维护。回读要求前后两次观察的目标注册和 ref 一致，并再次核对源和已授权目标身份。目录单独存在也作为足迹报告，归属取决于独立的注册和身份复核。分段读取期间发生漂移时保留原执行结果，整体返回待复核。
+- `GitProbe::diagnose_registration(state_root, request_id, source_root)` 默认只读源身份、完整注册清单、ref/locked/prunable 和意图留痕，`TargetState::NotExamined` 表示未触碰目标。`diagnose_registration_with_target(..., target_authorization)` 只在目标与持久意图和授权工作区精确绑定后才读取单个目标。未知请求返回 `None`；源根不匹配、状态域漂移、意图损坏、Git 失败或身份漂移失败关闭。诊断不写意图、不扫描未授权外部路径、不执行修复。
+- 状态文件读取上限 64 KiB，意图文件与累计字节另有上限。Windows 注册仍返回 `UnsupportedFilesystem`。启用前需要从持有的 NTFS 目录句柄取得卷及文件 ID，核验 DACL、祖先及子项写权限，并由宿主持有可撤销的持续授权。平台封装的依赖及宿主接入范围由主控另行协调。临时夹具留在测试临时根。
+- 本轮 Windows 在 Rust/Cargo 1.99.1、Node 26.13.1、pnpm 12.21.0 的 `mise exec` 环境执行专项与七项门禁，缓存隔离为 `target/soxu-49-pi`。生命周期集成仅运行 Windows fail-closed 用例；执行器另用原生测试二进制实测成功、spawn 失败、退出码、输出超限和超时回收，不证明 Windows 目录授权、合法创建或 DACL 可用。Unix 注册、崩溃和重放用例本轮未执行：本机 WSL 启动报 `ERROR_BAD_EXE_FORMAT`，须由可用 Unix 环境补验。
+- 参考固定 HEAD：paseo `7bcd598f` 的 `validateWorktreePath` 与创建后注册回读、codeg `028d30ed` 的 `check_name` 和占用拒绝、padu `fbe97a38` 的 `create_in` 专用根及平铺目标。Soxu 保留严格新目标、固定 OID、失败留痕与待检出语义，不采用自动清理或宽松已有路径。参考 AOCI 仅执行 `aoci status` 与读取参考索引文件 + 源码核实，未做参考仓完整认知校验；CodeGraph 精确 `node --path` 查询用于导航，paseo 图仍有已知漂移/解析缺口。
+- 注册入口先检查请求 ID、目标目录名和分支引用的格式。Windows 在打开协调能力时即拒绝，且不会创建锁、意图或目标。Unix 专项可运行 `cargo test --locked -p soxu-git --test worktree_lifecycle`，其中独立测试进程覆盖同仓跨父目录串行、跨仓目标冲突、注册所有者终止后的持久预约及只读重放。宿主接入须在启用前验证部署所用文件系统与统一域边界。
 
 ## 已跟踪文件只读 Diff
 
