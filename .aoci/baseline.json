@@ -1,13 +1,13 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T16:40:23Z",
+  "updated_at": "2026-11-26T17:33:15Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
-      "sha256": "461899dd224aced05181c222e6df28ab6f5325d213fb12e5ff11991bbcdf6122",
-      "size": 18440,
-      "normalized_sha256": "461899dd224aced05181c222e6df28ab6f5325d213fb12e5ff11991bbcdf6122"
+      "sha256": "000952023a5b46ba4725914a17494d4d2388e2cb83c37030e4f435ae485e8bf4",
+      "size": 18978,
+      "normalized_sha256": "000952023a5b46ba4725914a17494d4d2388e2cb83c37030e4f435ae485e8bf4"
     },
     ".editorconfig": {
       "role": "index",
@@ -47,9 +47,15 @@
     },
     ".github/workflows/ci.yml": {
       "role": "index",
-      "sha256": "4eef2248a52275c936590475acaa3068541a897fc58b27ce822d1f488829a655",
-      "size": 2355,
-      "normalized_sha256": "4eef2248a52275c936590475acaa3068541a897fc58b27ce822d1f488829a655"
+      "sha256": "d870bd31a4b4a2e16918bee58e694df8fcfd77de09990c56283db04c77a33761",
+      "size": 7642,
+      "normalized_sha256": "d870bd31a4b4a2e16918bee58e694df8fcfd77de09990c56283db04c77a33761"
+    },
+    ".github/workflows/release.yml": {
+      "role": "index",
+      "sha256": "6f3a3e06fc1a1ee0e9f84361c2301b168f5f55280651bd59fb99ecd1e64ea01b",
+      "size": 8365,
+      "normalized_sha256": "6f3a3e06fc1a1ee0e9f84361c2301b168f5f55280651bd59fb99ecd1e64ea01b"
     },
     ".gitignore": {
       "role": "index",
@@ -65,9 +71,9 @@
     },
     "AGENTS.md": {
       "role": "index",
-      "sha256": "533f1e72e8e3e09d6f6e5abebb50f0358efcfc72a29ba433052894ba405386fe",
-      "size": 26809,
-      "normalized_sha256": "533f1e72e8e3e09d6f6e5abebb50f0358efcfc72a29ba433052894ba405386fe"
+      "sha256": "d4e61d55c627ae6b3e304a45f0bcb631e184f839120c21c954e6852da09f1cdf",
+      "size": 27096,
+      "normalized_sha256": "d4e61d55c627ae6b3e304a45f0bcb631e184f839120c21c954e6852da09f1cdf"
     },
     "CLAUDE.md": {
       "role": "index",
@@ -95,9 +101,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "d75c4cb6d62d536e4ced86c6e235a0e6af815ec85901b8b522db4aa16439bddc",
-      "size": 75070,
-      "normalized_sha256": "d75c4cb6d62d536e4ced86c6e235a0e6af815ec85901b8b522db4aa16439bddc"
+      "sha256": "2a23e81a4ddb7cd385b3fc03398b7630a16d4c1c46ac21703c8dfc3a95b3c2b6",
+      "size": 77066,
+      "normalized_sha256": "2a23e81a4ddb7cd385b3fc03398b7630a16d4c1c46ac21703c8dfc3a95b3c2b6"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1023,17 +1029,23 @@
       "size": 16066,
       "normalized_sha256": "cedb87964cb0cae9dc50f6f34f0049a062c4f60a2bf6e9c4591327a9558effee"
     },
+    "docs/ops/CODE_STANDARDS.md": {
+      "role": "index",
+      "sha256": "dd9ab563e03f4298e04c57807f9b2396d4be076a340a323c6901c36b02f2c181",
+      "size": 4079,
+      "normalized_sha256": "dd9ab563e03f4298e04c57807f9b2396d4be076a340a323c6901c36b02f2c181"
+    },
     "docs/ops/DECISIONS.md": {
       "role": "index",
-      "sha256": "eb4a4fb8374c1ff593d6c914c494927cc309d34b5e8e0dc803e5cc1c8d677ccc",
-      "size": 7745,
-      "normalized_sha256": "eb4a4fb8374c1ff593d6c914c494927cc309d34b5e8e0dc803e5cc1c8d677ccc"
+      "sha256": "78de338e3eb604c9d1286b20c672957011eebdd6cf39d6dfc5ca95cf48b0d4a1",
+      "size": 9098,
+      "normalized_sha256": "78de338e3eb604c9d1286b20c672957011eebdd6cf39d6dfc5ca95cf48b0d4a1"
     },
     "docs/ops/LESSONS.md": {
       "role": "index",
-      "sha256": "f6f465967c7959e22bf968c140e2255fb9b976d4144cf783c97ebcb1c27e3648",
-      "size": 9726,
-      "normalized_sha256": "f6f465967c7959e22bf968c140e2255fb9b976d4144cf783c97ebcb1c27e3648"
+      "sha256": "a2385aa9a4ac4a1a560fe3aa965b7e76817415f3026b0408ca88f58c12419ffe",
+      "size": 10966,
+      "normalized_sha256": "a2385aa9a4ac4a1a560fe3aa965b7e76817415f3026b0408ca88f58c12419ffe"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
@@ -1067,9 +1079,15 @@
     },
     "scripts/check-all.ps1": {
       "role": "index",
-      "sha256": "611a900277ca7776ac966d76fafee8a763bbd7359d150461b4c4f0b7103596b1",
-      "size": 1489,
-      "normalized_sha256": "611a900277ca7776ac966d76fafee8a763bbd7359d150461b4c4f0b7103596b1"
+      "sha256": "50818a109e8adc9376525f6db48d20efbf4484926b6b0659474a20d3de1c4558",
+      "size": 3892,
+      "normalized_sha256": "50818a109e8adc9376525f6db48d20efbf4484926b6b0659474a20d3de1c4558"
+    },
+    "scripts/detect-check-scope.ps1": {
+      "role": "index",
+      "sha256": "6b743003816afc8bf1384b6ce83a4794e2a073edddfc73d8f2b935bc9c66e595",
+      "size": 11606,
+      "normalized_sha256": "6b743003816afc8bf1384b6ce83a4794e2a073edddfc73d8f2b935bc9c66e595"
     },
     "scripts/mise-doctor.ps1": {
       "role": "index",
@@ -1119,17 +1137,23 @@
       "size": 7908,
       "normalized_sha256": "d952eed88a0afb450877dddff13119fec5c94431d1f26e3cfda87612bc0d3c56"
     },
+    "scripts/test-check-scope.ps1": {
+      "role": "index",
+      "sha256": "dd088d91d140296bbfd87a6c04c97af2910f06e89b5e13a4db031edb4bbc2b3c",
+      "size": 5014,
+      "normalized_sha256": "dd088d91d140296bbfd87a6c04c97af2910f06e89b5e13a4db031edb4bbc2b3c"
+    },
     "scripts/test-paseo-orchestration.ps1": {
       "role": "index",
-      "sha256": "f907afa8037d4fa3ddaef5721a8147c3adf0d57193f7388f0093f640f5dcd967",
-      "size": 6362,
-      "normalized_sha256": "f907afa8037d4fa3ddaef5721a8147c3adf0d57193f7388f0093f640f5dcd967"
+      "sha256": "9777bfa3b10802bcdbf5a7683ed5a5403fd7ae3c57c8e6f73ab086a9182e0f4c",
+      "size": 6372,
+      "normalized_sha256": "9777bfa3b10802bcdbf5a7683ed5a5403fd7ae3c57c8e6f73ab086a9182e0f4c"
     },
     "scripts/verify-commits-and-privacy.ps1": {
       "role": "index",
-      "sha256": "0b532ef0ce6a232a0efc097580319d1b3d81824d1ba96df3f5b5ed535eb25122",
-      "size": 5384,
-      "normalized_sha256": "0b532ef0ce6a232a0efc097580319d1b3d81824d1ba96df3f5b5ed535eb25122"
+      "sha256": "156df7a84378501522498b20b285bc6e9a7d2ce11e9bc39e662459cdc48511db",
+      "size": 5544,
+      "normalized_sha256": "156df7a84378501522498b20b285bc6e9a7d2ce11e9bc39e662459cdc48511db"
     },
     "scripts/verify-design-system.mjs": {
       "role": "index",
