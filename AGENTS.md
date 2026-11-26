@@ -55,6 +55,10 @@
    - 子代理直接复用参考仓库的 `aoci.txt` / 已声明 Volumes 与 `.codegraph`，不得复制到目标工作树或为本次派发自动初始化、扫描、重建、同步或维护参考索引。参考 MCP 根不匹配时使用显式绑定参考根的 CLI / stdio MCP；缺失、过期或不可访问时报告，并按任务书回退到源码调查，不把回退称作索引校验成功。
    - 多行任务书通过 UTF-8 文件投递。主控须把目标 Paseo 代理日志里的 `user_message.text` 与任务书全文核对一致，记录代理 ID 和消息 ID 后才确认开工。缺失或截断时向同一代理补发并复核。命令、模板和验证步骤见 [Paseo 编排技能](.agents/skills/paseo-orchestrator/SKILL.md#3-派发任务并核验全文送达)。
    - 执行代理须把适用的参考做法落实到实现或回归测试，在 PR 中写明参考来源、实际采用点和验证证据，并说明不适用的做法或工具回退原因。
+5. **自主经验收集与流程自优化闭环（Continuous Self-Improvement）**：
+   - **自动触发采集**：主控每次完成 `[BLOCKED / NEED-DECISION]` 阻塞裁决、捕获跨平台（Windows / Linux）或远端 CI 真实缺陷、发现同一工程环节连续排查 >= 2 轮仍存在可复现工具/脚本摩擦，或在每波（Wave）串行合入收口做微复盘时，必须自动提炼可复现避坑经验，严格脱敏后登记至 [`docs/ops/LESSONS.md`](docs/ops/LESSONS.md)。
+   - **分级沉淀与自主晋升**：偶发一次性现象仅留在 PR 摘要，不膨胀主规范；对高危阻断、跨平台陷阱或同类命中 >= 2 次的规则，主控应自主发起治理更新，将其晋升固化进派发任务书默认条款、[Paseo 编排技能](.agents/skills/paseo-orchestrator/SKILL.md)、`AGENTS.md` 工程规范或后续防呆脚本/测试 PR（均须走独立 Worktree、`scripts/check-all.ps1` 与 AOCI 收尾闭环）。
+   - **演化安全红线**：任何自主流程优化均不得削弱第一章安全红线、不得篡改本机用户全局配置、也不得改写本文件下方 `<!-- aoci:begin -->` 至 `<!-- aoci:end -->` 的 AOCI 托管区块；`docs/ops/LESSONS.md` 活跃速查表上限 25 条，已被脚本或测试机器防呆的条目应定期移入归档区。
 
 ---
 
@@ -90,12 +94,12 @@
 
 1. **新对话接手标准启动顺序（30 秒恢复）**：
    1. 阅读本文件 `AGENTS.md` 及共享编排技能 [`.agents/skills/paseo-orchestrator/SKILL.md`](.agents/skills/paseo-orchestrator/SKILL.md)；
-   2. 阅读 [`docs/ops/PROGRESS.md`](docs/ops/PROGRESS.md) 与 [`docs/ops/DECISIONS.md`](docs/ops/DECISIONS.md)；
+   2. 阅读 [`docs/ops/PROGRESS.md`](docs/ops/PROGRESS.md) 与 [`docs/ops/DECISIONS.md`](docs/ops/DECISIONS.md)，并快速扫读 [`docs/ops/LESSONS.md`](docs/ops/LESSONS.md) 的「活跃规则速查表」；
    3. 执行只读状态盘点：`git status -sb`、`gh issue list --limit 20 --json number,title,milestone,assignees`、`gh pr list --json number,title,headRefName` 以及统一 Paseo 状态盘点（`pwsh -NoProfile -File scripts/paseo-ctl.ps1 project ls --json`、`pwsh -NoProfile -File scripts/paseo-ctl.ps1 workspace ls --json`、`pwsh -NoProfile -File scripts/paseo-ctl.ps1 ls --json`）。
 2. **离开/收口写入义务**：
-   - 每完成一个 Issue、合入一个 PR 或切换里程碑时，主控或负责合入的 Agent 必须同步更新 `docs/ops/PROGRESS.md` 中的「当前阶段」、「进行中工作区/PR」与「下一步待执行队列」。
+   - 每完成一个 Issue、合入一个 PR 或切换里程碑时，主控或负责合入的 Agent 必须同步更新 `docs/ops/PROGRESS.md` 中的「当前阶段」、「进行中工作区/PR」与「下一步待执行队列」；若本波捕获到可复用闭环经验或规则晋升，同步在收口/微复盘时更新 `docs/ops/LESSONS.md`。
 3. **AGY 桌面端与 Codex 桌面端双主控切换与隔离约定**：
-   - **共享层**：双方共用仓库内 `AGENTS.md`、`docs/ops/PROGRESS.md`、`docs/ops/DECISIONS.md`、`aoci.txt` + `.aoci/` 认知索引、`.agents/skills/` 共享技能、Cargo 共享缓存（`../.cargo-target/soxu`）及本机 Paseo 守护进程下的项目与 Worktree 池（统一通过 `pwsh -NoProfile -File scripts/paseo-ctl.ps1` 自动探测并唤醒控制）。
+   - **共享层**：双方共用仓库内 `AGENTS.md`、`docs/ops/PROGRESS.md`、`docs/ops/DECISIONS.md`、`docs/ops/LESSONS.md`、`aoci.txt` + `.aoci/` 认知索引、`.agents/skills/` 共享技能、Cargo 共享缓存（`../.cargo-target/soxu`）及本机 Paseo 守护进程下的项目与 Worktree 池（统一通过 `pwsh -NoProfile -File scripts/paseo-ctl.ps1` 自动探测并唤醒控制）。
    - **隔离层**：双方宿主元数据与全局配置完全隔离（AGY 使用 `~/.gemini/config/projects/`，Codex 使用 `~/.codex/state_5.sqlite` 及受 `.gitignore` 保护的 `.codex/config.toml`），互不篡改；仓库主检出目录仅作为**主控编排与审查台（Control Plane）**，严禁双端同时在主检出并发修改业务代码，功能开发一律通过 Paseo `--isolation worktree` 下沉至独立分支并遵守 Issue `Owned Paths`。
 
 <!-- aoci:begin -->

@@ -1,13 +1,13 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T12:07:11Z",
+  "updated_at": "2026-11-26T16:40:23Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
-      "sha256": "b58f7a02947eb2d0ae6fb2e4054ef325a193a4865fe498cc06d319a4d2d1d733",
-      "size": 14422,
-      "normalized_sha256": "b58f7a02947eb2d0ae6fb2e4054ef325a193a4865fe498cc06d319a4d2d1d733"
+      "sha256": "461899dd224aced05181c222e6df28ab6f5325d213fb12e5ff11991bbcdf6122",
+      "size": 18440,
+      "normalized_sha256": "461899dd224aced05181c222e6df28ab6f5325d213fb12e5ff11991bbcdf6122"
     },
     ".editorconfig": {
       "role": "index",
@@ -65,9 +65,9 @@
     },
     "AGENTS.md": {
       "role": "index",
-      "sha256": "397eae9c4543fac2cbb83e4e249fdf1a98758d550a7da127a2489d3b9318ba56",
-      "size": 25256,
-      "normalized_sha256": "397eae9c4543fac2cbb83e4e249fdf1a98758d550a7da127a2489d3b9318ba56"
+      "sha256": "533f1e72e8e3e09d6f6e5abebb50f0358efcfc72a29ba433052894ba405386fe",
+      "size": 26809,
+      "normalized_sha256": "533f1e72e8e3e09d6f6e5abebb50f0358efcfc72a29ba433052894ba405386fe"
     },
     "CLAUDE.md": {
       "role": "index",
@@ -95,9 +95,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "fd085f714a6ef4a97810a71c854be3d243116886a4c472c0d5b4a482c02da7c1",
-      "size": 74570,
-      "normalized_sha256": "fd085f714a6ef4a97810a71c854be3d243116886a4c472c0d5b4a482c02da7c1"
+      "sha256": "d75c4cb6d62d536e4ced86c6e235a0e6af815ec85901b8b522db4aa16439bddc",
+      "size": 75070,
+      "normalized_sha256": "d75c4cb6d62d536e4ced86c6e235a0e6af815ec85901b8b522db4aa16439bddc"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1025,9 +1025,15 @@
     },
     "docs/ops/DECISIONS.md": {
       "role": "index",
-      "sha256": "52be7c268c0f3f9915a06e059376f432aeb878ced9be9f999f6fc31c664fa2b7",
-      "size": 6538,
-      "normalized_sha256": "52be7c268c0f3f9915a06e059376f432aeb878ced9be9f999f6fc31c664fa2b7"
+      "sha256": "eb4a4fb8374c1ff593d6c914c494927cc309d34b5e8e0dc803e5cc1c8d677ccc",
+      "size": 7745,
+      "normalized_sha256": "eb4a4fb8374c1ff593d6c914c494927cc309d34b5e8e0dc803e5cc1c8d677ccc"
+    },
+    "docs/ops/LESSONS.md": {
+      "role": "index",
+      "sha256": "f6f465967c7959e22bf968c140e2255fb9b976d4144cf783c97ebcb1c27e3648",
+      "size": 9726,
+      "normalized_sha256": "f6f465967c7959e22bf968c140e2255fb9b976d4144cf783c97ebcb1c27e3648"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
