@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T09:43:08Z",
+  "updated_at": "2026-11-26T09:45:40Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -95,9 +95,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "ae0f0bf188641555a6b3fb9ef8ff13b587d1a75621e60d434003818839bd8898",
-      "size": 69435,
-      "normalized_sha256": "ae0f0bf188641555a6b3fb9ef8ff13b587d1a75621e60d434003818839bd8898"
+      "sha256": "c9729e7552f177adcba612dc17a15e321edc9473421fe0cb1e3bf73b757f44f1",
+      "size": 70183,
+      "normalized_sha256": "c9729e7552f177adcba612dc17a15e321edc9473421fe0cb1e3bf73b757f44f1"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -950,6 +950,12 @@
       "sha256": "4869e461f24d27fb75d4dfa85b102adb7b92bea7e4504490bc27655fbfbb64cb",
       "size": 29214,
       "normalized_sha256": "4869e461f24d27fb75d4dfa85b102adb7b92bea7e4504490bc27655fbfbb64cb"
+    },
+    "docs/dev/git-init-clone-and-recovery.md": {
+      "role": "index",
+      "sha256": "6f59b4972534489e626b2003788e355d5233271d625452f2f8ca1d3366ca7c1b",
+      "size": 21194,
+      "normalized_sha256": "6f59b4972534489e626b2003788e355d5233271d625452f2f8ca1d3366ca7c1b"
     },
     "docs/dev/git-readonly-diff.md": {
       "role": "index",
