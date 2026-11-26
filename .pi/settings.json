@@ -1,4 +1,7 @@
 {
+  "codemode": {
+    "mode": "on"
+  },
   "packages": [
     {
       "source": "npm:context-mode",
