@@ -36,7 +36,7 @@ $proto = Invoke-Detect @("crates/soxu-protocol/src/lib.rs")
 Assert-Condition ($proto.rust -and $proto.rustScope -eq "workspace" -and $proto.rustPackages.Count -eq 8 -and ($proto.rustPackages -contains "soxu-git")) "soxu-protocol 变更传递展开并自动升级为整工作区 8 crates"
 
 $magpie = Invoke-Detect @("crates/soxu-magpie/src/lib.rs")
-Assert-Condition ($magpie.rust -and $magpie.rustScope -eq "crates" -and ($magpie.rustPackages -contains "soxu-magpie") -and ($magpie.rustPackages -contains "soxu") -and ($magpie.rustPackages -contains "soxu-daemon") -and (-not ($magpie.rustPackages -contains "soxu-git")) -and (-not ($magpie.rustPackages -contains "soxu-core"))) "soxu-magpie 变更精确展开至 soxu 与 soxu-daemon 而不波及 git/core"
+Assert-Condition ($magpie.rust -and $magpie.rustScope -eq "crates" -and ($magpie.rustPackages -contains "soxu-magpie") -and ($magpie.rustPackages -contains "soxu-cli") -and ($magpie.rustPackages -contains "soxu-daemon") -and (-not ($magpie.rustPackages -contains "soxu-git")) -and (-not ($magpie.rustPackages -contains "soxu-core"))) "soxu-magpie 变更精确展开至 soxu-cli 与 soxu-daemon 而不波及 git/core"
 
 # 5. 前端与设计令牌变更仅触发 mobileWeb，不触发 Rust
 $web = Invoke-Detect @("design-system/soxu/tokens.json", "apps/mobile-web/src/App.tsx")
@@ -65,6 +65,18 @@ Assert-Condition ($cliObj.changedFiles.Count -eq 2 -and (-not $cliObj.rust) -and
 # 9. 发版编排与编码标准变更仅跑治理隐私门禁，不拖累 Rust 与 PWA
 $releaseDocs = Invoke-Detect @(".github/workflows/release.yml", "docs/ops/CODE_STANDARDS.md")
 Assert-Condition ($releaseDocs.governance -and (-not $releaseDocs.rust) -and (-not $releaseDocs.mobileWeb)) "release.yml 与 CODE_STANDARDS.md 变更跳过无关 Rust 与 PWA 构建"
+
+# 10. 验证 rustPackages 全部与 cargo metadata 中的真实工作区包名一致（防止 [[bin]] 覆盖）
+if (Get-Command cargo -ErrorAction SilentlyContinue) {
+  $repoRoot = Split-Path -Parent $PSScriptRoot
+  $metaRaw = (& cargo metadata --manifest-path (Join-Path $repoRoot "Cargo.toml") --no-deps --format-version 1 2>$null | Out-String)
+  if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($metaRaw)) {
+    $meta = $metaRaw | ConvertFrom-Json -ErrorAction Stop
+    $realPkgs = (@($meta.packages | ForEach-Object { $_.name } | Sort-Object -Unique) -join ",")
+    $detectedPkgs = (@($cargoRoot.rustPackages | Sort-Object -Unique) -join ",")
+    Assert-Condition ($detectedPkgs -eq $realPkgs) "rustPackages 与 cargo metadata 真实工作区包名完全一致 ($realPkgs)"
+  }
+}
 
 Write-Host "✓ 共 $passed 项作用域检测回归全部通过！" -ForegroundColor Green
 exit 0

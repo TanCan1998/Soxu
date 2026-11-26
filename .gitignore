@@ -59,3 +59,6 @@ Desktop.ini
 .agents/*.local.*
 .gemini/
 .antigravity/
+
+# Pi 本地扩展/包缓存目录（项目级 .pi/settings.json 随仓库版本化保留）
+/.pi/npm/
