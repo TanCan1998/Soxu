@@ -53,3 +53,7 @@ unsafe_code = "forbid"
 dbg_macro = "warn"
 todo = "warn"
 unwrap_used = "warn"
+
+# 发布二进制剥离符号，减少调试信息泄露与包体积（审计项 CI-A）
+[profile.release]
+strip = "symbols"

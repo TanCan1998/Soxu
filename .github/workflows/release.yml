@@ -131,27 +131,73 @@ jobs:
       MIRROR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASES_REPO: TanCan1998/soxu-releases
       REF: ${{ needs.trigger-release.outputs.ref }}
-      EXPECTED_ASSETS: 5
+      # 四平台资产精确文件名（与联动仓固定 SHA 的 allowlist 一致），
+      # 门禁只认此集合 + SHA256SUMS，不再用文件数量放行。
+      EXPECTED_RELEASE_ASSETS: soxu-linux-amd64.tar.gz soxu-windows-amd64.zip soxu-darwin-arm64.tar.gz soxu-darwin-amd64.tar.gz
     steps:
-      - name: Wait for soxu-releases to publish all verified assets
+      - name: Wait for soxu-releases to publish the exact verified asset manifest
         run: |
+          set -euo pipefail
+          expected_manifest=$(printf '%s\n' $EXPECTED_RELEASE_ASSETS SHA256SUMS | sort | tr '\n' ' ')
           for i in $(seq 1 320); do
-            n=$(gh release view "$REF" -R "$RELEASES_REPO" --json assets -q '.assets | length' 2>/dev/null || echo 0)
-            has_sums=$(gh release view "$REF" -R "$RELEASES_REPO" --json assets -q '[.assets[].name] | index("SHA256SUMS") != null' 2>/dev/null || echo false)
-            echo "轮询第 $i 次：$n / $EXPECTED_ASSETS 产物 (SHA256SUMS=$has_sums)"
-            if [ "$n" -ge "$EXPECTED_ASSETS" ] && [ "$has_sums" = "true" ]; then
+            actual=$(gh release view "$REF" -R "$RELEASES_REPO" --json assets -q '[.assets[].name] | sort | .[]' 2>/dev/null | tr '\n' ' ' || true)
+            echo "轮询第 $i 次：资产清单 [$actual]"
+            if [ "$actual" = "$expected_manifest" ]; then
+              echo "✓ $RELEASES_REPO 已齐备 $REF 的四平台资产与 SHA256SUMS"
               exit 0
             fi
             sleep 30
           done
-          echo "::error::$RELEASES_REPO 在等待窗口内未齐备 $REF 的 $EXPECTED_ASSETS 项产物" >&2
+          echo "::error::$RELEASES_REPO 在等待窗口内未给出 $REF 的精确资产清单（期望：$expected_manifest）" >&2
           exit 1
 
       - name: Mirror release assets & enforce monotonic Latest tag
         run: |
           set -euo pipefail
+          expected_manifest=$(printf '%s\n' $EXPECTED_RELEASE_ASSETS SHA256SUMS | sort | tr '\n' ' ')
+
+          # 只接受四平台资产加 SHA256SUMS 的精确集合：
+          # 缺项、额外文件、重名、嵌套路径与散列不符一律拒绝镜像。
+          assert_release_assets() {
+            local dir="$1"
+            local actual members members_manifest duplicates asset
+            if [ ! -f "$dir/SHA256SUMS" ]; then
+              echo "::error::$dir 缺少 SHA256SUMS" >&2
+              exit 1
+            fi
+            if [ -n "$(find "$dir" -mindepth 2 -print -quit)" ]; then
+              echo "::error::$dir 存在嵌套路径，拒绝镜像" >&2
+              exit 1
+            fi
+            actual=$(find "$dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')
+            if [ "$actual" != "$expected_manifest" ]; then
+              echo "::error::资产集合不符：期望 [$expected_manifest] 实际 [$actual]" >&2
+              exit 1
+            fi
+            members=$(awk '{ sub(/^\*/, "", $2); print $2 }' "$dir/SHA256SUMS" | sort)
+            duplicates=$(printf '%s\n' "$members" | uniq -d)
+            if [ -n "$duplicates" ]; then
+              echo "::error::SHA256SUMS 存在重复成员：$duplicates" >&2
+              exit 1
+            fi
+            members_manifest=$(printf '%s\n' "$members" | tr '\n' ' ')
+            if [ "$members_manifest" != "$(printf '%s\n' $EXPECTED_RELEASE_ASSETS | sort | tr '\n' ' ')" ]; then
+              echo "::error::SHA256SUMS 成员不符：[$members_manifest]" >&2
+              exit 1
+            fi
+            for asset in $EXPECTED_RELEASE_ASSETS; do
+              if [ ! -s "$dir/$asset" ]; then
+                echo "::error::资产 $asset 缺失或为空" >&2
+                exit 1
+              fi
+            done
+            ( cd "$dir" && sha256sum -c SHA256SUMS )
+            echo "✓ 资产清单与 SHA-256 校验全部通过（4 平台 + SHA256SUMS）"
+          }
+
           mkdir -p dist
           GH_TOKEN="$GH_TOKEN" gh release download "$REF" -R "$RELEASES_REPO" -D dist
+          assert_release_assets dist
           GH_TOKEN="$GH_TOKEN" gh release view "$REF" -R "$RELEASES_REPO" --json body -q .body > notes.md
           printf '\n\n---\n联动发版与包管理器清单仓库：https://github.com/%s/releases/tag/%s\n' "$RELEASES_REPO" "$REF" >> notes.md
 
