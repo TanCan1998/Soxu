@@ -17,6 +17,12 @@ pub enum ErrorCode {
     DriverUnavailable,
     WorkspaceDamaged,
     InternalError,
+    Unsupported,
+    IdentityChanged,
+    PolicyDenied,
+    SafetyIncomplete,
+    PartialNeedsRecovery,
+    RefPublishedIndexPending,
 }
 
 /// 面向客户端渲染的三要素可执行错误负载。

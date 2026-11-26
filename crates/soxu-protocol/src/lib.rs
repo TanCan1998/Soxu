@@ -4,6 +4,7 @@ pub mod capabilities;
 pub mod domain;
 pub mod error;
 pub mod events;
+pub mod git_ops;
 pub mod pairing;
 pub mod preferences;
 pub mod rpc;
@@ -28,6 +29,21 @@ pub use domain::{
 };
 pub use error::{ActionableError, ErrorCode};
 pub use events::{DaemonEvent, EventEnvelope};
+pub use git_ops::{
+    CheckpointBaseline, CheckpointCoverageSummary, CheckpointDiffCompareRequest,
+    CheckpointDiffCompareResult, CheckpointDiffFileSummary, CheckpointDiffHunkSummary,
+    CheckpointDiffIncompleteReason, CheckpointId, CheckpointOmissionReason,
+    CheckpointOmissionRecord, CheckpointRecordSummary, CheckpointState, CommitApprovalTicket,
+    CommitContentSource, CommitHook, CommitIndexSyncPlan, CommitPathPreview, CommitPathRisk,
+    CommitPlanPreview, CommitPreviewRequest, CommitStage, CommitVerificationRequirements,
+    FixedDiffEndpoint, GitObjectId, GitOperationId, GitOperationKind, GitOperationLookup,
+    GitOperationPathScope, GitOperationRecord, GitOperationStage, GitOperationStatusQuery,
+    GitPathChange, GitPathChangeKind, GitPlanBlocker, GitPublishedCommit, ListCheckpointsRequest,
+    ListCheckpointsResult, RewindActionScope, RewindApprovalTicket, RewindPathPreview,
+    RewindPlanPreview, RewindPreviewRequest, RewindStage, RewindTargetAction, RewindWorktreeTarget,
+    SafetyId, SafetyProtectionState, SafetyRetentionPolicy, SafetySnapshotHandle,
+    SafetyVerificationState,
+};
 pub use pairing::{
     ClaimPairingRequest, ClaimPairingResponse, PairedDeviceSummary, PairingCodeSnapshot,
     PairingCredentialInput, PairingOfferPayload, PairingTransportMode,
