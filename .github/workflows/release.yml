@@ -191,12 +191,20 @@ jobs:
                 exit 1
               fi
             done
-            ( cd "$dir" && sha256sum -c SHA256SUMS )
+            if ! ( cd "$dir" && sha256sum --strict -c SHA256SUMS ); then
+              echo "::error::SHA256SUMS 严格校验失败：清单成员缺失、行格式非法或散列不匹配" >&2
+              exit 1
+            fi
             echo "✓ 资产清单与 SHA-256 校验全部通过（4 平台 + SHA256SUMS）"
           }
 
           mkdir -p dist
-          GH_TOKEN="$GH_TOKEN" gh release download "$REF" -R "$RELEASES_REPO" -D dist
+          # 下载本身也固定到四平台资产与 SHA256SUMS，避免把同一发布中的其他内容一并拉入
+          download_patterns=()
+          for asset in $EXPECTED_RELEASE_ASSETS SHA256SUMS; do
+            download_patterns+=(--pattern "$asset")
+          done
+          GH_TOKEN="$GH_TOKEN" gh release download "$REF" -R "$RELEASES_REPO" -D dist "${download_patterns[@]}"
           assert_release_assets dist
           GH_TOKEN="$GH_TOKEN" gh release view "$REF" -R "$RELEASES_REPO" --json body -q .body > notes.md
           printf '\n\n---\n联动发版与包管理器清单仓库：https://github.com/%s/releases/tag/%s\n' "$RELEASES_REPO" "$REF" >> notes.md

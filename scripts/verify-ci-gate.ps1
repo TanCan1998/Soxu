@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("Plan", "Verify", "Contract", "ReleaseContract")]
+  [ValidateSet("Plan", "Verify", "Contract", "ReleaseContract", "ExtractRuns")]
   [string]$Mode = "Verify",
   [string]$ScopePath = "",
   [string]$ScopeJson = "",
@@ -438,6 +438,80 @@ function Invoke-VerifyMode {
   return $errors
 }
 
+function Find-BashExecutable {
+  $candidates = [System.Collections.Generic.List[string]]::new()
+  $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+  if ($gitCommand -and $gitCommand.Source) {
+    # <Git>/cmd/git.exe 或 <Git>/bin/git.exe -> <Git>
+    $gitDir = Split-Path (Split-Path $gitCommand.Source -Parent) -Parent
+    $candidates.Add((Join-Path $gitDir "bin/bash.exe"))
+    $candidates.Add((Join-Path $gitDir "usr/bin/bash.exe"))
+  }
+  $candidates.Add("C:\Program Files\Git\bin\bash.exe")
+  $candidates.Add("C:\Program Files\Git\usr\bin\bash.exe")
+  foreach ($candidate in $candidates) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+  }
+  $bashCommand = Get-Command bash -ErrorAction SilentlyContinue
+  if ($bashCommand -and $bashCommand.Source -and $bashCommand.Source -notmatch 'WindowsApps') {
+    return $bashCommand.Source
+  }
+  return $null
+}
+
+function Get-WorkflowLines([string]$Text) {
+  return @($Text -split "`n" | ForEach-Object { $_.TrimEnd("`r") })
+}
+
+function Get-InlineRunBlocks([string]$Text) {
+  # 工作流内联 Bash 提取的唯一实现：ReleaseContract 专项与 test-ci-gate 回归均复用此函数。
+  # 支持 YAML 块标量的 chomping/缩进标记（|、|-、|+、|2、|-2 等），避免合法写法被静默漏检。
+  $lines = Get-WorkflowLines $Text
+  $blocks = [System.Collections.Generic.List[object]]::new()
+  $currentName = ""
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match '^\s*- name:\s*(.+?)\s*$') { $currentName = $Matches[1]; continue }
+    if ($lines[$i] -notmatch '^(\s*)run:\s*\|[0-9+\-]*\s*$') { continue }
+    $runIndent = $Matches[1].Length
+    $body = [System.Collections.Generic.List[string]]::new()
+    $bodyIndent = -1
+    for ($j = $i + 1; $j -lt $lines.Count; $j++) {
+      $line = $lines[$j]
+      if ([string]::IsNullOrWhiteSpace($line)) { $body.Add(""); continue }
+      $indent = $line.Length - $line.TrimStart().Length
+      if ($indent -le $runIndent) { break }
+      if ($bodyIndent -lt 0) { $bodyIndent = $indent }
+      $body.Add($line.Substring([Math]::Min($bodyIndent, $line.Length)))
+    }
+    while ($body.Count -gt 0 -and [string]::IsNullOrWhiteSpace($body[$body.Count - 1])) {
+      $body.RemoveAt($body.Count - 1)
+    }
+    $blocks.Add([pscustomobject]@{ name = $currentName; startLine = $i + 1; body = ($body -join "`n") })
+    $i = $j - 1
+  }
+  return $blocks
+}
+
+function Get-UnsupportedRunForms([string]$Text) {
+  # 非块标量的 run 形式（行内命令、折叠标量 >、未识别的 chomping 组合）
+  # 无法在此处可靠提取与校验，必须显式报告而不是静默漏检。
+  $lines = Get-WorkflowLines $Text
+  $unsupported = [System.Collections.Generic.List[object]]::new()
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -notmatch '^(\s*)run:\s*(.*)$') { continue }
+    if ($lines[$i] -match '^(\s*)run:\s*\|[0-9+\-]*\s*$') { continue }
+    $unsupported.Add([pscustomobject]@{ line = $i + 1; header = $lines[$i].Trim() })
+  }
+  return $unsupported
+}
+
+function Invoke-ExtractRunsMode([string]$PathValue) {
+  $resolved = Resolve-RepoFile $PathValue ".github/workflows/release.yml"
+  $text = Read-WorkflowText $resolved "工作流"
+  $blocks = Get-InlineRunBlocks $text
+  return ($blocks | ConvertTo-Json -Depth 5 -AsArray)
+}
+
 function Read-WorkflowText([string]$ResolvedPath, [string]$Label) {
   if (-not (Test-Path -LiteralPath $ResolvedPath -PathType Leaf)) {
     throw "$Label 不存在：$ResolvedPath"
@@ -587,13 +661,44 @@ function Invoke-ReleaseContractMode([string]$PathValue) {
   if ($text -match 'EXPECTED_ASSETS:') { $errors.Add("release_count_only_gate") }
 
   # 校验和回算、集合声明与结构防护必须同时存在。
-  if ($text -notmatch 'sha256sum -c SHA256SUMS') { $errors.Add("release_checksum_verify_missing") }
+  if ($text -notmatch 'sha256sum[^\n]*\s-c\s') { $errors.Add("release_checksum_verify_missing") }
+  # 必须使用 --strict：非严格模式下格式非法的清单行只会告警，不会让 sha256sum -c 失败。
+  if ($text -notmatch 'sha256sum\s+(?:--strict\s+-c|-c\s+--strict)') { $errors.Add("release_checksum_strict_missing") }
   if ($text -notmatch 'assert_release_assets') { $errors.Add("release_asset_assertion_missing") }
   if ($text -notmatch 'uniq -d') { $errors.Add("release_duplicate_member_check_missing") }
   if ($text -notmatch '\-mindepth 2') { $errors.Add("release_nested_path_check_missing") }
   if ($text -notmatch 'gh release download') { $errors.Add("release_download_missing") }
+  if ($text -notmatch '--pattern') { $errors.Add("release_download_pattern_missing") }
   if ($text -notmatch 'sort -V') { $errors.Add("release_monotonic_latest_missing") }
   if ($text -notmatch '--latest=') { $errors.Add("release_latest_flag_missing") }
+
+  # 发布专项自身必须校验实际工作流的内联 Bash 语法（全部分块），
+  # 不得依赖 test-ci-gate.ps1 的完整回归分支，也不得在 Bash 缺失时静默通过。
+  foreach ($form in @(Get-UnsupportedRunForms $text)) {
+    $errors.Add("release_run_form_unsupported:$($form.line):$($form.header)")
+  }
+  $bashPath = Find-BashExecutable
+  if ($null -eq $bashPath) {
+    $errors.Add("release_bash_unavailable")
+    return $errors
+  }
+  $runBlocks = @(Get-InlineRunBlocks $text)
+  if ($runBlocks.Count -eq 0) { $errors.Add("release_bash_blocks_missing"); return $errors }
+  $blockIndex = 0
+  foreach ($block in $runBlocks) {
+    $blockIndex++
+    $scriptPath = Join-Path ([IO.Path]::GetTempPath()) ("soxu-release-bash-" + [Guid]::NewGuid().ToString("N") + ".sh")
+    try {
+      Set-Content -LiteralPath $scriptPath -Value $block.body -Encoding utf8 -NoNewline
+      $syntaxOutput = (& $bashPath --noprofile --norc -n $scriptPath 2>&1 | Out-String)
+      if ($LASTEXITCODE -ne 0) {
+        $firstLine = @($syntaxOutput -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })[0]
+        $errors.Add("release_bash_syntax_invalid:${blockIndex}:$firstLine")
+      }
+    } finally {
+      Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
+    }
+  }
 
   return $errors
 }
@@ -628,6 +733,11 @@ try {
     "ReleaseContract" {
       $errors = Invoke-ReleaseContractMode $ReleaseWorkflowPath
       exit (Write-CheckResult $errors "ReleaseContract")
+    }
+    "ExtractRuns" {
+      $blocksJson = Invoke-ExtractRunsMode $WorkflowPath
+      Write-Output $blocksJson
+      exit 0
     }
     default {
       throw "未知模式：$Mode"

@@ -120,63 +120,17 @@ function New-WorkflowVariant([string]$SourceRelPath, [string]$Name, [scriptblock
   return $dest
 }
 
-function Get-WorkflowLines([string]$Text) {
-  return @($Text -split "`n" | ForEach-Object { $_.TrimEnd("`r") })
+function Get-RunBlocks([string]$WorkflowPath) {
+  # 复用 verify-ci-gate.ps1 的 ExtractRuns 模式：工作流内联脚本提取只有一份实现
+  $result = Invoke-Verifier @("-Mode", "ExtractRuns", "-WorkflowPath", $WorkflowPath)
+  if ($result.Code -ne 0) { throw "提取工作流内联脚本失败：$($result.Output.Trim())" }
+  return @(($result.Output.Trim() | ConvertFrom-Json) | ForEach-Object { $_ })
 }
 
-function Get-InlineRunBlocks([string]$Text) {
-  $lines = Get-WorkflowLines $Text
-  $blocks = [System.Collections.Generic.List[object]]::new()
-  for ($i = 0; $i -lt $lines.Count; $i++) {
-    if ($lines[$i] -notmatch '^(\s*)run:\s*\|\s*$') { continue }
-    $runIndent = $Matches[1].Length
-    $body = [System.Collections.Generic.List[string]]::new()
-    $bodyIndent = -1
-    for ($j = $i + 1; $j -lt $lines.Count; $j++) {
-      $line = $lines[$j]
-      if ([string]::IsNullOrWhiteSpace($line)) { $body.Add(""); continue }
-      $indent = $line.Length - $line.TrimStart().Length
-      if ($indent -le $runIndent) { break }
-      if ($bodyIndent -lt 0) { $bodyIndent = $indent }
-      $body.Add($line.Substring([Math]::Min($bodyIndent, $line.Length)))
-    }
-    while ($body.Count -gt 0 -and [string]::IsNullOrWhiteSpace($body[$body.Count - 1])) {
-      $body.RemoveAt($body.Count - 1)
-    }
-    $blocks.Add([pscustomobject]@{ StartLine = $i + 1; Body = ($body -join "`n") })
-    $i = $j - 1
-  }
-  return $blocks
-}
-
-function Get-RunBlockByStepName([string]$Text, [string]$StepName) {
-  $lines = Get-WorkflowLines $Text
-  $nameIndex = -1
-  for ($i = 0; $i -lt $lines.Count; $i++) {
-    if ($lines[$i].Trim() -eq "- name: $StepName") { $nameIndex = $i; break }
-  }
-  if ($nameIndex -lt 0) { throw "未找到步骤：$StepName" }
-  for ($i = $nameIndex + 1; $i -lt $lines.Count; $i++) {
-    if ($lines[$i] -match '^(\s*)run:\s*\|\s*$') {
-      $runIndent = $Matches[1].Length
-      $body = [System.Collections.Generic.List[string]]::new()
-      $bodyIndent = -1
-      for ($j = $i + 1; $j -lt $lines.Count; $j++) {
-        $line = $lines[$j]
-        if ([string]::IsNullOrWhiteSpace($line)) { $body.Add(""); continue }
-        $indent = $line.Length - $line.TrimStart().Length
-        if ($indent -le $runIndent) { break }
-        if ($bodyIndent -lt 0) { $bodyIndent = $indent }
-        $body.Add($line.Substring([Math]::Min($bodyIndent, $line.Length)))
-      }
-      while ($body.Count -gt 0 -and [string]::IsNullOrWhiteSpace($body[$body.Count - 1])) {
-        $body.RemoveAt($body.Count - 1)
-      }
-      return ($body -join "`n")
-    }
-    if ($lines[$i] -match '^    - ') { break }
-  }
-  throw "步骤 $StepName 未找到内联 run 脚本。"
+function Get-StubPatternList([string]$StubLog) {
+  $line = @($StubLog -split "`n" | Where-Object { $_ -like 'PATTERNS:*' }) | Select-Object -First 1
+  if (-not $line) { return $null }
+  return (($line.Substring('PATTERNS:'.Length)).Trim())
 }
 
 function Find-BashExecutable {
@@ -301,7 +255,8 @@ function New-DistFixture {
     [switch]$Nested,
     [switch]$OmitSums,
     [switch]$DuplicateMember,
-    [switch]$WrongHash
+    [switch]$WrongHash,
+    [switch]$InvalidDigest
   )
   if ($null -eq $Assets) { $Assets = $releaseAssetNames }
   $dir = Join-Path $tempRoot ("fixture-" + $Name)
@@ -325,8 +280,13 @@ function New-DistFixture {
       if (-not (Test-Path -LiteralPath $memberPath -PathType Leaf)) { continue }
       $hash = (Get-FileHash -LiteralPath $memberPath -Algorithm SHA256).Hash.ToLowerInvariant()
       if ($WrongHash -and $sumLines.Count -eq 0) { $hash = ("0" * 64) }
-      $sumLines.Add("$hash  $member")
-      if ($DuplicateMember -and $sumLines.Count -eq 1) { $sumLines.Add("$hash  $member") }
+      if ($InvalidDigest -and $sumLines.Count -eq 0) {
+        # 非法摘要：不是 64 位十六进制。非严格 sha256sum -c 只告警且 exit 0，--strict 才失败。
+        $sumLines.Add("invalid  $member")
+      } else {
+        $sumLines.Add("$hash  $member")
+        if ($DuplicateMember -and $sumLines.Count -eq 1) { $sumLines.Add("$hash  $member") }
+      }
     }
     Set-Content -LiteralPath (Join-Path $dir "SHA256SUMS") -Value (($sumLines -join "`n") + "`n") -Encoding utf8 -NoNewline
   }
@@ -337,18 +297,46 @@ function New-BashHarness {
   param(
     [string]$MirrorBody,
     [string]$FixtureDir,
-    [string]$StubLog
+    [string]$StubLog,
+    [string[]]$StubExtraFiles = @(),
+    [switch]$StubNested
   )
   # 单引号 here-string：内部保留字面 $ 与反引号，避免 PowerShell 提前展开 Bash 变量
   $prelude = @'
 # --- 离线 gh 桩：只记录调用并按固定应答返回，绝不触网，不使用真实 secrets ---
+# 下载行为模拟 --pattern：只把显式选中的资产放进 dist，其余远端内容不会进入。
 gh() {
-  printf '%s\n' "$*" >> "$STUB_LOG"
+  printf '%s
+' "$*" >> "$STUB_LOG"
   case "$1" in
     release)
       case "$2" in
         download)
-          cp -R "$FIXTURE_DIR"/. dist/
+          shift 2
+          patterns=""
+          while [ "$#" -gt 0 ]; do
+            case "$1" in
+              --pattern|-p)
+                patterns="$patterns $2"
+                shift 2
+                ;;
+              --pattern=*)
+                patterns="$patterns ${1#--pattern=}"
+                shift
+                ;;
+              *)
+                shift
+                ;;
+            esac
+          done
+          printf 'PATTERNS:%s\n' "$(printf '%s\n' $patterns | sed '/^$/d' | sort | tr '\n' ' ')" >> "$STUB_LOG"
+          for pattern in $patterns; do
+            if [ -e "$FIXTURE_DIR/$pattern" ]; then cp -R "$FIXTURE_DIR/$pattern" dist/; fi
+          done
+          for extra in ${STUB_EXTRA_FILES:-}; do
+            if [ -e "$FIXTURE_DIR/$extra" ]; then cp -R "$FIXTURE_DIR/$extra" dist/; fi
+          done
+          if [ "${STUB_NESTED:-0}" = "1" ] && [ -d "$FIXTURE_DIR/nested" ]; then cp -R "$FIXTURE_DIR/nested" dist/; fi
           ;;
         view)
           case "$*" in
@@ -377,6 +365,7 @@ gh() {
   esac
 }
 '@
+  $nestedFlag = if ($StubNested) { "1" } else { "0" }
   $headerLines = @(
     "export REF='v1.1.0'"
     "export RELEASES_REPO='stub/upstream'"
@@ -387,18 +376,26 @@ gh() {
     "export FIXTURE_DIR='$(Get-PosixPath $FixtureDir)'"
     "export STUB_LOG='$(Get-PosixPath $StubLog)'"
     "export STUB_TAGS='v1.1.0 v0.9.0'"
+    "export STUB_EXTRA_FILES='$($StubExtraFiles -join ' ')'"
+    "export STUB_NESTED='$nestedFlag'"
   )
   return (($headerLines -join "`n") + "`n" + $prelude + "`n" + $MirrorBody + "`n")
 }
 
 function Invoke-ReleaseMirrorCase {
-  param([string]$Name, [string]$FixtureDir, [string]$MirrorBody)
+  param(
+    [string]$Name,
+    [string]$FixtureDir,
+    [string]$MirrorBody,
+    [string[]]$StubExtraFiles = @(),
+    [switch]$StubNested
+  )
   $workDir = Join-Path $tempRoot ("mirror-" + $Name)
   New-Item -ItemType Directory -Path $workDir -Force | Out-Null
   $stubLog = Join-Path $workDir "stub.log"
   Set-Content -LiteralPath $stubLog -Value "" -Encoding utf8 -NoNewline
   $harnessPath = Join-Path $workDir "harness.sh"
-  $harness = New-BashHarness -MirrorBody $MirrorBody -FixtureDir $FixtureDir -StubLog $stubLog
+  $harness = New-BashHarness -MirrorBody $MirrorBody -FixtureDir $FixtureDir -StubLog $stubLog -StubExtraFiles $StubExtraFiles -StubNested:$StubNested
   Set-Content -LiteralPath $harnessPath -Value $harness -Encoding utf8 -NoNewline
 
   $result = Invoke-Bash @((Get-PosixPath $harnessPath)) $workDir
@@ -878,9 +875,15 @@ try {
 
   $variantNoChecksum = New-WorkflowVariant ".github/workflows/release.yml" "release-no-checksum" {
     param($text)
-    $text.Replace("sha256sum -c SHA256SUMS", "sha256sum SHA256SUMS")
+    $text.Replace("sha256sum --strict -c SHA256SUMS", "sha256sum SHA256SUMS")
   }
   Assert-Fail "失败：发布流水线丢失校验和回算" (Invoke-ReleaseContract $variantNoChecksum) 'release_checksum_verify_missing'
+
+  $variantNonStrict = New-WorkflowVariant ".github/workflows/release.yml" "release-non-strict" {
+    param($text)
+    $text.Replace("sha256sum --strict -c SHA256SUMS", "sha256sum -c SHA256SUMS")
+  }
+  Assert-Fail "失败：发布清单未使用严格校验模式" (Invoke-ReleaseContract $variantNonStrict) 'release_checksum_strict_missing'
 
   $variantCountOnly = New-WorkflowVariant ".github/workflows/release.yml" "release-count-only" {
     param($text)
@@ -900,6 +903,45 @@ try {
   }
   Assert-Fail "失败：发布清单丢失重复成员检测" (Invoke-ReleaseContract $variantNoDupCheck) 'release_duplicate_member_check_missing'
 
+  $variantNoPattern = New-WorkflowVariant ".github/workflows/release.yml" "release-no-pattern" {
+    param($text)
+    $text.Replace('download_patterns+=(--pattern "$asset")', 'download_patterns+=("$asset")')
+  }
+  Assert-Fail "失败：发布下载未固定 --pattern" (Invoke-ReleaseContract $variantNoPattern) 'release_download_pattern_missing'
+
+  # 静态标记齐全但内联 Bash 语法非法：真实发布专项入口必须非零，证明专项不靠纯文本匹配
+  $variantBashBroken = New-WorkflowVariant ".github/workflows/release.yml" "release-bash-broken" {
+    param($text)
+    $anchor = '          set -euo pipefail' + "`n" + '          expected_manifest='
+    $broken = '          set -euo pipefail' + "`n" + '          if [ -n "$MISSING"' + "`n" + '          expected_manifest='
+    $text.Replace($anchor, $broken)
+  }
+  $brokenText = Get-Content -LiteralPath $variantBashBroken -Raw -Encoding utf8
+  Assert-Check ($brokenText.Contains("sha256sum --strict -c SHA256SUMS")) "语法非法变体必须保留静态契约标记，否则负例不成立"
+  Assert-Check ($brokenText.Contains($releaseAssetManifest)) "语法非法变体必须保留四平台资产标记"
+  Assert-Fail "失败：静态标记齐全但 Bash 语法非法" (Invoke-ReleaseContract $variantBashBroken) 'release_bash_syntax_invalid'
+
+  # run 结构失败闭合：|、|-、|+ 必须同样被提取；未支持的 run 形式必须显式拒绝
+  $mirrorStepHeader = "      - name: Mirror release assets & enforce monotonic Latest tag`n        run: |"
+  $variantChompBroken = New-WorkflowVariant ".github/workflows/release.yml" "release-chomp-broken" {
+    param($text)
+    $out = $text.Replace($mirrorStepHeader, "      - name: Mirror release assets & enforce monotonic Latest tag`n        run: |-")
+    $anchor = '          set -euo pipefail' + "`n" + '          expected_manifest='
+    $broken = '          set -euo pipefail' + "`n" + '          if [ -n "$MISSING"' + "`n" + '          expected_manifest='
+    $out.Replace($anchor, $broken)
+  }
+  Assert-Check (((Get-Content -LiteralPath $variantChompBroken -Raw -Encoding utf8)).Contains("run: |-")) "chomping 变体必须真实写成 |-"
+  $realBlockCount = @(Get-RunBlocks $releaseWorkflow).Count
+  $chompBlockCount = @(Get-RunBlocks $variantChompBroken).Count
+  Assert-Check ($chompBlockCount -eq $realBlockCount) "|- 块标量必须与 | 同样被提取（真实 $realBlockCount 段，chomping 变体 $chompBlockCount 段）"
+  Assert-Fail "失败：|- 块标量内的非法 Bash 仍被检出" (Invoke-ReleaseContract $variantChompBroken) 'release_bash_syntax_invalid'
+
+  $variantFoldedRun = New-WorkflowVariant ".github/workflows/release.yml" "release-folded-run" {
+    param($text)
+    $text.Replace($mirrorStepHeader, "      - name: Mirror release assets & enforce monotonic Latest tag`n        run: >")
+  }
+  Assert-Fail "失败：折叠标量 run 形式必须显式拒绝" (Invoke-ReleaseContract $variantFoldedRun) 'release_run_form_unsupported'
+
   # ============ 六、发布契约动态验证（bash -n + 离线桩执行） ============
   if ($null -eq $script:bashPath) {
     if ($RequireBash) {
@@ -909,43 +951,73 @@ try {
     }
   } else {
     Write-Host "发布契约动态验证使用 bash：$script:bashPath" -ForegroundColor DarkCyan
-    $releaseText = (Get-Content -LiteralPath $releaseWorkflow -Raw -Encoding utf8).Replace("`r`n", "`n")
-    $runBlocks = Get-InlineRunBlocks $releaseText
+    $runBlocks = Get-RunBlocks $releaseWorkflow
     Assert-Check ($runBlocks.Count -ge 4) "release.yml 应包含至少 4 段内联 Bash 脚本，实际 $($runBlocks.Count)"
 
     $blockIndex = 0
     foreach ($block in $runBlocks) {
       $blockIndex++
       $blockPath = Join-Path $tempRoot ("release-run-" + $blockIndex + ".sh")
-      Set-Content -LiteralPath $blockPath -Value $block.Body -Encoding utf8 -NoNewline
+      Set-Content -LiteralPath $blockPath -Value $block.body -Encoding utf8 -NoNewline
       $syntax = Invoke-Bash @("-n", (Get-PosixPath $blockPath))
-      Assert-Check ($syntax.Code -eq 0) "release.yml 第 $blockIndex 段内联 Bash（约第 $($block.StartLine) 行）语法检查失败：$($syntax.Output.Trim())"
+      Assert-Check ($syntax.Code -eq 0) "release.yml 第 $blockIndex 段内联 Bash（约第 $($block.startLine) 行）语法检查失败：$($syntax.Output.Trim())"
     }
 
-    $mirrorBody = Get-RunBlockByStepName $releaseText "Mirror release assets & enforce monotonic Latest tag"
+    $mirrorBlocks = @($runBlocks | Where-Object { $_.name -eq "Mirror release assets & enforce monotonic Latest tag" })
+    Assert-Check ($mirrorBlocks.Count -eq 1) "应当且仅当存在一个镜像发布步骤，实际 $($mirrorBlocks.Count)"
+    $mirrorBody = if ($mirrorBlocks.Count -gt 0) { $mirrorBlocks[0].body } else { "" }
     Assert-Check ($mirrorBody.Contains("assert_release_assets dist")) "镜像脚本必须调用资产清单校验函数"
+    Assert-Check ($mirrorBody.Contains("--pattern")) "镜像脚本必须用 --pattern 固定下载范围"
 
+    $expectedPatterns = ((@($releaseAssetNames) + "SHA256SUMS") | Sort-Object) -join " "
+
+    # 正例：资产齐备、散列可回算、下载范围精确到五个名字
     $goodFixture = New-DistFixture -Name "good"
     $goodResult = Invoke-ReleaseMirrorCase -Name "good" -FixtureDir $goodFixture -MirrorBody $mirrorBody
     Assert-Check ($goodResult.Code -eq 0) "正例：齐备且校验通过的资产应放行，实际 exit $($goodResult.Code)：$($goodResult.Output.Trim())"
     Assert-Check ($goodResult.Output.Contains("资产清单与 SHA-256 校验全部通过")) "正例：应输出校验通过结论：$($goodResult.Output.Trim())"
     Assert-Check ($goodResult.StubLog -match '(?m)^release (create|upload)') "正例：校验通过后应继续发布动作（桩日志：$($goodResult.StubLog.Trim())）"
     Assert-Check ($goodResult.DistFiles.Count -eq 5) "正例：镜像目录应恰含 4 平台资产与 SHA256SUMS，实际 $($goodResult.DistFiles -join ',')"
+    Assert-Check ((Get-StubPatternList $goodResult.StubLog) -eq $expectedPatterns) "正例：下载必须固定为五个精确名字，实际 [$(Get-StubPatternList $goodResult.StubLog)]"
+
+    # 远端存在额外资产：下载只看五个精确名字，额外内容不得被选入
+    $upstreamExtraFixture = New-DistFixture -Name "upstream-extra" -ExtraFiles @("soxu-freebsd-amd64.tar.gz")
+    $upstreamExtraResult = Invoke-ReleaseMirrorCase -Name "upstream-extra" -FixtureDir $upstreamExtraFixture -MirrorBody $mirrorBody
+    Assert-Check ($upstreamExtraResult.Code -eq 0) "额外远端资产：不得影响镜像，实际 exit $($upstreamExtraResult.Code)：$($upstreamExtraResult.Output.Trim())"
+    Assert-Check ($upstreamExtraResult.DistFiles.Count -eq 5) "额外远端资产：下载结果必须仍为五个允许资产，实际 $($upstreamExtraResult.DistFiles -join ',')"
+    Assert-Check ($upstreamExtraResult.DistFiles -notcontains "soxu-freebsd-amd64.tar.gz") "额外远端资产：不得被选入下载"
+    Assert-Check ((Get-StubPatternList $upstreamExtraResult.StubLog) -eq $expectedPatterns) "额外远端资产：下载范围仍须为五个精确名字"
 
     $missingFixture = New-DistFixture -Name "missing" -Assets @($releaseAssetNames[0..2]) -SumMembers @($releaseAssetNames[0..2])
     Assert-ReleaseRejection "负例：资产缺项" (Invoke-ReleaseMirrorCase -Name "missing" -FixtureDir $missingFixture -MirrorBody $mirrorBody) '资产集合不符'
 
-    $extraFixture = New-DistFixture -Name "extra" -ExtraFiles @("soxu-freebsd-amd64.tar.gz")
-    Assert-ReleaseRejection "负例：资产存在额外文件" (Invoke-ReleaseMirrorCase -Name "extra" -FixtureDir $extraFixture -MirrorBody $mirrorBody) '资产集合不符'
+    # 强制注入一个未被选中的额外文件，验证下载后的复核仍会拒绝泄漏
+    $leakedFixture = New-DistFixture -Name "leaked-extra" -ExtraFiles @("soxu-freebsd-amd64.tar.gz")
+    Assert-ReleaseRejection "负例：下载结果泄漏额外文件" `
+      (Invoke-ReleaseMirrorCase -Name "leaked-extra" -FixtureDir $leakedFixture -MirrorBody $mirrorBody -StubExtraFiles @("soxu-freebsd-amd64.tar.gz")) '资产集合不符'
 
     $duplicateFixture = New-DistFixture -Name "duplicate" -DuplicateMember
     Assert-ReleaseRejection "负例：SHA256SUMS 成员重复" (Invoke-ReleaseMirrorCase -Name "duplicate" -FixtureDir $duplicateFixture -MirrorBody $mirrorBody) 'SHA256SUMS 存在重复成员'
 
     $nestedFixture = New-DistFixture -Name "nested" -Nested
-    Assert-ReleaseRejection "负例：资产目录存在嵌套路径" (Invoke-ReleaseMirrorCase -Name "nested" -FixtureDir $nestedFixture -MirrorBody $mirrorBody) '存在嵌套路径'
+    Assert-ReleaseRejection "负例：资产目录存在嵌套路径" `
+      (Invoke-ReleaseMirrorCase -Name "nested" -FixtureDir $nestedFixture -MirrorBody $mirrorBody -StubNested) '存在嵌套路径'
 
     $wrongHashFixture = New-DistFixture -Name "wrong-hash" -WrongHash
     Assert-ReleaseRejection "负例：内容哈希与清单不符" (Invoke-ReleaseMirrorCase -Name "wrong-hash" -FixtureDir $wrongHashFixture -MirrorBody $mirrorBody) 'FAILED'
+
+    # 清单行摘要格式非法：非严格 sha256sum -c 只告警且 exit 0，--strict 才失败
+    $invalidDigestFixture = New-DistFixture -Name "invalid-digest" -InvalidDigest
+    Assert-ReleaseRejection "负例：清单行摘要格式非法" `
+      (Invoke-ReleaseMirrorCase -Name "invalid-digest" -FixtureDir $invalidDigestFixture -MirrorBody $mirrorBody) 'SHA256SUMS 严格校验失败'
+
+    # 严格模式敏感度：把同一镜像脚本降为非严格后，同一非法清单必须重新通过
+    $nonStrictBlocks = @(Get-RunBlocks $variantNonStrict | Where-Object { $_.name -eq "Mirror release assets & enforce monotonic Latest tag" })
+    Assert-Check ($nonStrictBlocks.Count -eq 1) "非严格变体应仍能提取镜像步骤，实际 $($nonStrictBlocks.Count)"
+    if ($nonStrictBlocks.Count -eq 1) {
+      $nonStrictResult = Invoke-ReleaseMirrorCase -Name "invalid-digest-non-strict" -FixtureDir $invalidDigestFixture -MirrorBody $nonStrictBlocks[0].body
+      Assert-Check ($nonStrictResult.Code -eq 0) "严格模式敏感度：去掉 --strict 后同一非法清单必须重新通过（证明防守来自 --strict），实际 exit $($nonStrictResult.Code)：$($nonStrictResult.Output.Trim())"
+    }
 
     $noSumsFixture = New-DistFixture -Name "no-sums" -OmitSums
     Assert-ReleaseRejection "负例：缺少 SHA256SUMS" (Invoke-ReleaseMirrorCase -Name "no-sums" -FixtureDir $noSumsFixture -MirrorBody $mirrorBody) '缺少 SHA256SUMS'
