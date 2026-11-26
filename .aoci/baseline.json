@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T22:12:53Z",
+  "updated_at": "2026-11-26T22:22:28Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "358312077571b7122de5bdc734d489c5fbce07783e8f0cef674131a4357e25c7",
-      "size": 90049,
-      "normalized_sha256": "358312077571b7122de5bdc734d489c5fbce07783e8f0cef674131a4357e25c7"
+      "sha256": "d56be8b8ab34f535868d0071e77774559b7712de54a530d69366df6a160fa746",
+      "size": 90301,
+      "normalized_sha256": "d56be8b8ab34f535868d0071e77774559b7712de54a530d69366df6a160fa746"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1235,9 +1235,9 @@
     },
     "scripts/test-ci-gate.ps1": {
       "role": "index",
-      "sha256": "0b6b28cd997abca82895f3e1635b4d5df12e3f7186bcffe9cb284a84f3ddea12",
-      "size": 34122,
-      "normalized_sha256": "0b6b28cd997abca82895f3e1635b4d5df12e3f7186bcffe9cb284a84f3ddea12"
+      "sha256": "37bbee557b568332d1e11ff7a90d0b909aa7553780e8713060aaf3782c3f23b5",
+      "size": 43970,
+      "normalized_sha256": "37bbee557b568332d1e11ff7a90d0b909aa7553780e8713060aaf3782c3f23b5"
     },
     "scripts/test-paseo-orchestration.ps1": {
       "role": "index",
@@ -1247,9 +1247,9 @@
     },
     "scripts/verify-ci-gate.ps1": {
       "role": "index",
-      "sha256": "36968aca62c5f988dce80243fdee09329e4cd8582a42fa0760caf8c531cff5a8",
-      "size": 20537,
-      "normalized_sha256": "36968aca62c5f988dce80243fdee09329e4cd8582a42fa0760caf8c531cff5a8"
+      "sha256": "f3aea9ca24e0ef458db3bc54626f77d7e791e513cb3061b09c02597c851f1667",
+      "size": 26368,
+      "normalized_sha256": "f3aea9ca24e0ef458db3bc54626f77d7e791e513cb3061b09c02597c851f1667"
     },
     "scripts/verify-commits-and-privacy.ps1": {
       "role": "index",

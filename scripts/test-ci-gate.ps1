@@ -8,11 +8,13 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # CI Gate 与发布契约回归矩阵：
-#   1. Plan 模式从检测器输出构建确定性计划
-#   2. Verify 模式逐项对账计划与 needs 证据（多实例、缺失、冲突、非法输入）
-#   3. Contract / ReleaseContract 静态契约校验（真实工作流 + 负向变体）
-#   4. 发布契约动态验证：抽取 release.yml 内联 Bash 做 bash -n，并用离线 gh 桩
-#      与临时 dist 夹具真正执行镜像校验路径，断言坏例在任何 create/edit/upload 之前失败
+#   1. Verify：必跑/计划内跳过/取消/失败、多实例证据、证据集合异常、计划缺失或非法
+#   2. 计划契约：删 job、换 job、翻转 required、篡改 depends_on/触发标志/scope 一律拒绝
+#   3. Plan：检测器输出与 scope 自身矛盾（rust/rustScope/full/changedFiles）必须失败关闭
+#   4. 突变敏感度：移除契约校验后上述绕过用例重新通过，证明确实是该校验在防守
+#   5. 工作流静态契约（真实文件 + 负向变体）
+#   6. 发布契约动态验证：抽取 release.yml 内联 Bash 做 bash -n，并用离线 gh 桩
+#      与临时 dist 夹具真正执行镜像校验路径，坏例必须在任何 create/edit/upload 之前失败
 # 所有夹具只写入系统临时目录，结束即清理；成功必须显式 exit 0。
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $verifierPath = if ([string]::IsNullOrWhiteSpace($Verifier)) {
@@ -55,13 +57,24 @@ function Invoke-Verifier([string[]]$Arguments) {
   return [pscustomobject]@{ Code = $LASTEXITCODE; Output = $output }
 }
 
+function Invoke-Script([string]$ScriptPath, [string[]]$Arguments) {
+  $output = (& pwsh -NoProfile -File $ScriptPath @Arguments 2>&1 | Out-String)
+  return [pscustomobject]@{ Code = $LASTEXITCODE; Output = $output }
+}
+
 function Save-Fixture([string]$Name, [string]$Content) {
   $path = Join-Path $tempRoot ($Name + ".json")
   Set-Content -LiteralPath $path -Value $Content -Encoding utf8 -NoNewline
   return $path
 }
 
-function Invoke-GateVerify([string]$PlanJson, [string]$EvidenceJson) {
+function Invoke-GateVerify {
+  param(
+    [string]$PlanJson,
+    [string]$EvidenceJson,
+    [string]$ScriptPath = ""
+  )
+  $target = if ([string]::IsNullOrWhiteSpace($ScriptPath)) { $verifierPath } else { $ScriptPath }
   $arguments = @("-Mode", "Verify")
   if ($null -ne $PlanJson) {
     $arguments += @("-PlanPath", (Save-Fixture ("plan-" + [Guid]::NewGuid().ToString("N")) $PlanJson))
@@ -69,7 +82,7 @@ function Invoke-GateVerify([string]$PlanJson, [string]$EvidenceJson) {
   if ($null -ne $EvidenceJson) {
     $arguments += @("-EvidencePath", (Save-Fixture ("evidence-" + [Guid]::NewGuid().ToString("N")) $EvidenceJson))
   }
-  return Invoke-Verifier $arguments
+  return Invoke-Script $target $arguments
 }
 
 function Invoke-PlanMode([string]$ScopeJson) {
@@ -170,7 +183,6 @@ function Find-BashExecutable {
   $candidates = [System.Collections.Generic.List[string]]::new()
   $gitCommand = Get-Command git -ErrorAction SilentlyContinue
   if ($gitCommand -and $gitCommand.Source) {
-    # <Git>/cmd/git.exe 或 <Git>/bin/git.exe -> <Git>
     $gitDir = Split-Path (Split-Path $gitCommand.Source -Parent) -Parent
     $candidates.Add((Join-Path $gitDir "bin/bash.exe"))
     $candidates.Add((Join-Path $gitDir "usr/bin/bash.exe"))
@@ -202,6 +214,82 @@ function Invoke-Bash([string[]]$Arguments, [string]$WorkingDirectory = "") {
     Pop-Location
   }
   return [pscustomobject]@{ Code = $code; Output = $output }
+}
+
+# 计划夹具构造器：默认产出与 Plan 模式一致的合法计划，可选篡改单个字段以构造绕过用例
+function New-PlanJson {
+  param(
+    [bool]$GovernanceRequired = $true,
+    [bool]$RustRequired = $true,
+    [bool]$MobileRequired = $false,
+    [bool]$Rust = $true,
+    [string]$RustScope = "crates",
+    [bool]$MobileWeb = $false,
+    [bool]$Paseo = $false,
+    [bool]$ScopeSelfTest = $false,
+    [bool]$Full = $false,
+    [object[]]$ChangedFiles = @("crates/soxu-git/src/probe.rs"),
+    [bool]$SelfTest = $false,
+    [bool]$ReleaseContract = $false,
+    [object[]]$RustInstances = $null,
+    [string]$DependsOnRust = "rust",
+    [string]$Version = "ci-gate-plan/v1",
+    [switch]$OmitSelfTest,
+    [switch]$OmitScope,
+    [switch]$OmitGate,
+    [switch]$OmitChangedFiles
+  )
+  $plan = [ordered]@{ version = $Version; detector = "detect-changes" }
+  if (-not $OmitGate) { $plan["gate"] = "ci-gate" }
+
+  $rustJob = [ordered]@{ id = "rust-check"; required = $RustRequired }
+  if ($DependsOnRust -ne "omit") { $rustJob["depends_on"] = $DependsOnRust }
+  if ($null -ne $RustInstances) { $rustJob["instances"] = @($RustInstances) }
+
+  $plan["jobs"] = @(
+    [ordered]@{ id = "governance-and-privacy"; required = $GovernanceRequired }
+    $rustJob
+    [ordered]@{ id = "mobile-web-check"; required = $MobileRequired; depends_on = "mobile_web" }
+  )
+  if (-not $OmitSelfTest) { $plan["selfTest"] = $SelfTest }
+  $plan["releaseContract"] = $ReleaseContract
+  if (-not $OmitScope) {
+    $scope = [ordered]@{
+      full               = $Full
+      rust               = $Rust
+      rustScope          = $RustScope
+      mobileWeb          = $MobileWeb
+      paseoOrchestration = $Paseo
+      checkScopeSelfTest = $ScopeSelfTest
+    }
+    if (-not $OmitChangedFiles) { $scope["changedFiles"] = @($ChangedFiles) }
+    $plan["scope"] = $scope
+  }
+  return ($plan | ConvertTo-Json -Depth 10)
+}
+
+function New-ScopeJson {
+  param(
+    [bool]$Full = $false,
+    [bool]$Rust = $true,
+    [string]$RustScope = "crates",
+    [bool]$MobileWeb = $false,
+    [bool]$Paseo = $false,
+    [bool]$ScopeSelfTest = $false,
+    [object[]]$ChangedFiles = @("crates/soxu-git/src/probe.rs"),
+    [switch]$OmitChangedFiles
+  )
+  $scope = [ordered]@{
+    full               = $Full
+    rust               = $Rust
+    rustScope          = $RustScope
+    mobileWeb          = $MobileWeb
+    paseoOrchestration = $Paseo
+    checkScopeSelfTest = $ScopeSelfTest
+  }
+  if (-not $OmitChangedFiles) { $scope["changedFiles"] = @($ChangedFiles) }
+  $scope["governance"] = $true
+  return ($scope | ConvertTo-Json -Depth 5)
 }
 
 function New-DistFixture {
@@ -338,68 +426,7 @@ function Assert-ReleaseRejection([string]$Name, $Result, [string]$Marker) {
     "$Name → 校验失败前已触发 create/edit/upload（桩日志：$($Result.StubLog.Trim())）"
 }
 
-# 门禁作业与证据基线夹具
-$planGovernanceRequired = @'
-{
-  "version": "ci-gate-plan/v1",
-  "detector": "detect-changes",
-  "gate": "ci-gate",
-  "jobs": [
-    { "id": "governance-and-privacy", "required": true },
-    { "id": "rust-check", "required": true, "depends_on": "rust" },
-    { "id": "mobile-web-check", "required": false, "depends_on": "mobile_web" }
-  ],
-  "selfTest": false,
-  "releaseContract": false,
-  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false }
-}
-'@
-
-$planRustSkipped = @'
-{
-  "version": "ci-gate-plan/v1",
-  "detector": "detect-changes",
-  "gate": "ci-gate",
-  "jobs": [
-    { "id": "governance-and-privacy", "required": true },
-    { "id": "rust-check", "required": false, "depends_on": "rust" },
-    { "id": "mobile-web-check", "required": false, "depends_on": "mobile_web" }
-  ],
-  "selfTest": false,
-  "releaseContract": false
-}
-'@
-
-$planMobileRequired = @'
-{
-  "version": "ci-gate-plan/v1",
-  "detector": "detect-changes",
-  "gate": "ci-gate",
-  "jobs": [
-    { "id": "governance-and-privacy", "required": true },
-    { "id": "rust-check", "required": false, "depends_on": "rust" },
-    { "id": "mobile-web-check", "required": true, "depends_on": "mobile_web" }
-  ],
-  "selfTest": false,
-  "releaseContract": false
-}
-'@
-
-$planMultiInstance = @'
-{
-  "version": "ci-gate-plan/v1",
-  "detector": "detect-changes",
-  "gate": "ci-gate",
-  "jobs": [
-    { "id": "governance-and-privacy", "required": true },
-    { "id": "rust-check", "required": true, "depends_on": "rust", "instances": ["ubuntu-latest", "windows-latest"] },
-    { "id": "mobile-web-check", "required": false, "depends_on": "mobile_web" }
-  ],
-  "selfTest": false,
-  "releaseContract": false
-}
-'@
-
+# 证据夹具
 $evidenceBaseline = @'
 {
   "detect-changes": "success",
@@ -409,11 +436,7 @@ $evidenceBaseline = @'
 }
 '@
 
-try {
-  # ============ 一、门禁计划与证据对账 ============
-  Assert-Pass "通过：必跑 success + 计划内 skipped" (Invoke-GateVerify $planGovernanceRequired $evidenceBaseline)
-
-  $evidenceRustSkipped = @'
+$evidenceRustSkipped = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
@@ -421,9 +444,8 @@ try {
   "mobile-web-check": "skipped"
 }
 '@
-  Assert-Pass "通过：rust 与 mobile 均按计划跳过" (Invoke-GateVerify $planRustSkipped $evidenceRustSkipped)
 
-  $evidenceGovSkipped = @'
+$evidenceGovSkipped = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "skipped",
@@ -431,50 +453,8 @@ try {
   "mobile-web-check": "skipped"
 }
 '@
-  Assert-Fail "失败：必跑治理任务异常 skipped" (Invoke-GateVerify $planGovernanceRequired $evidenceGovSkipped) 'required_not_success:governance-and-privacy=skipped'
 
-  $evidenceDetectFailed = @'
-{
-  "detect-changes": "failure",
-  "governance-and-privacy": "skipped",
-  "rust-check": "skipped",
-  "mobile-web-check": "skipped"
-}
-'@
-  Assert-Fail "失败：检测器失败" (Invoke-GateVerify $planGovernanceRequired $evidenceDetectFailed) 'detector_not_success:detect-changes=failure'
-
-  $evidenceCancelled = @'
-{
-  "detect-changes": "success",
-  "governance-and-privacy": "success",
-  "rust-check": "cancelled",
-  "mobile-web-check": "skipped"
-}
-'@
-  Assert-Fail "失败：必跑任务取消" (Invoke-GateVerify $planGovernanceRequired $evidenceCancelled) 'required_not_success:rust-check=cancelled'
-
-  $evidenceMobileFailed = @'
-{
-  "detect-changes": "success",
-  "governance-and-privacy": "success",
-  "rust-check": "skipped",
-  "mobile-web-check": "failure"
-}
-'@
-  Assert-Fail "失败：mobile 计划必跑但 failure" (Invoke-GateVerify $planMobileRequired $evidenceMobileFailed) 'required_not_success:mobile-web-check=failure'
-
-  $evidenceInvalidStatus = @'
-{
-  "detect-changes": "success",
-  "governance-and-privacy": "success",
-  "rust-check": "ok",
-  "mobile-web-check": "skipped"
-}
-'@
-  Assert-Fail "失败：非法状态串" (Invoke-GateVerify $planGovernanceRequired $evidenceInvalidStatus) 'status_invalid:rust-check=ok'
-
-  # 多实例证据：缺项、部分失败、重复证据都必须拒绝
-  $evidenceMultiPartial = @'
+$evidenceMultiPartial = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
@@ -485,9 +465,8 @@ try {
   "mobile-web-check": "skipped"
 }
 '@
-  Assert-Fail "失败：多实例部分失败" (Invoke-GateVerify $planMultiInstance $evidenceMultiPartial) 'required_not_success:rust-check/windows-latest=failure'
 
-  $evidenceMultiMissing = @'
+$evidenceMultiMissing = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
@@ -497,9 +476,8 @@ try {
   "mobile-web-check": "skipped"
 }
 '@
-  Assert-Fail "失败：多实例证据缺项" (Invoke-GateVerify $planMultiInstance $evidenceMultiMissing) 'instance_missing:rust-check/windows-latest'
 
-  $evidenceMultiDuplicate = @'
+$evidenceMultiDuplicate = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
@@ -510,10 +488,68 @@ try {
   "mobile-web-check": "skipped"
 }
 '@
-  Assert-Fail "失败：多实例重复证据" (Invoke-GateVerify $planMultiInstance $evidenceMultiDuplicate) 'instance_duplicate:rust-check/ubuntu-latest'
 
-  Assert-Fail "失败：多实例被折叠为单一状态" (Invoke-GateVerify $planMultiInstance $evidenceBaseline) 'multi_instance_evidence_missing:rust-check'
-  Assert-Fail "失败：单实例计划收到多实例证据" (Invoke-GateVerify $planGovernanceRequired $evidenceMultiPartial) 'evidence_shape_invalid:rust-check'
+$evidenceMultiStatusInvalid = @'
+{
+  "detect-changes": "success",
+  "governance-and-privacy": "success",
+  "rust-check": { "instances": [
+    { "id": "ubuntu-latest", "status": 200 },
+    { "id": "windows-latest", "status": "success" }
+  ] },
+  "mobile-web-check": "skipped"
+}
+'@
+
+$planBaseline = New-PlanJson
+$planRustSkipped = New-PlanJson -Rust $false -RustScope "none" -RustRequired $false -ChangedFiles @("docs/ops/PROGRESS.md")
+$planMobileRequired = New-PlanJson -Rust $false -RustScope "none" -RustRequired $false -MobileWeb $true -MobileRequired $true -ChangedFiles @("apps/mobile-web/src/main.tsx")
+$planMultiInstance = New-PlanJson -RustInstances @("ubuntu-latest", "windows-latest")
+
+try {
+  # ============ 一、证据与状态对账 ============
+  Assert-Pass "通过：必跑 success + 计划内 skipped" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceBaseline)
+  Assert-Pass "通过：rust 与 mobile 均按计划跳过" (Invoke-GateVerify -PlanJson $planRustSkipped -EvidenceJson $evidenceRustSkipped)
+
+  $evidenceDetectFailed = @'
+{
+  "detect-changes": "failure",
+  "governance-and-privacy": "skipped",
+  "rust-check": "skipped",
+  "mobile-web-check": "skipped"
+}
+'@
+  Assert-Fail "失败：检测器失败" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceDetectFailed) 'detector_not_success:detect-changes=failure'
+
+  $evidenceCancelled = @'
+{
+  "detect-changes": "success",
+  "governance-and-privacy": "success",
+  "rust-check": "cancelled",
+  "mobile-web-check": "skipped"
+}
+'@
+  Assert-Fail "失败：必跑任务取消" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceCancelled) 'required_not_success:rust-check=cancelled'
+
+  $evidenceMobileFailed = @'
+{
+  "detect-changes": "success",
+  "governance-and-privacy": "success",
+  "rust-check": "skipped",
+  "mobile-web-check": "failure"
+}
+'@
+  Assert-Fail "失败：mobile 计划必跑但 failure" (Invoke-GateVerify -PlanJson $planMobileRequired -EvidenceJson $evidenceMobileFailed) 'required_not_success:mobile-web-check=failure'
+
+  $evidenceInvalidStatus = @'
+{
+  "detect-changes": "success",
+  "governance-and-privacy": "success",
+  "rust-check": "ok",
+  "mobile-web-check": "skipped"
+}
+'@
+  Assert-Fail "失败：非法状态串" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceInvalidStatus) 'status_invalid:rust-check=ok'
 
   $evidenceMissingJob = @'
 {
@@ -522,7 +558,7 @@ try {
   "mobile-web-check": "skipped"
 }
 '@
-  Assert-Fail "失败：证据缺少作业" (Invoke-GateVerify $planGovernanceRequired $evidenceMissingJob) 'evidence_missing:rust-check'
+  Assert-Fail "失败：证据缺少作业" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceMissingJob) 'evidence_missing:rust-check'
 
   $evidenceUnknownJob = @'
 {
@@ -533,7 +569,7 @@ try {
   "lint-check": "success"
 }
 '@
-  Assert-Fail "失败：证据含未知作业" (Invoke-GateVerify $planGovernanceRequired $evidenceUnknownJob) 'evidence_unknown_job:lint-check'
+  Assert-Fail "失败：证据含未知作业" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceUnknownJob) 'evidence_unknown_job:lint-check'
 
   $evidenceMobileSuccessConflict = @'
 {
@@ -543,10 +579,126 @@ try {
   "mobile-web-check": "success"
 }
 '@
-  Assert-Fail "失败：计划未要求却运行成功（计划与证据冲突）" (Invoke-GateVerify $planGovernanceRequired $evidenceMobileSuccessConflict) 'plan_evidence_conflict:mobile-web-check'
+  Assert-Fail "失败：计划未要求却运行成功（计划与证据冲突）" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceMobileSuccessConflict) 'plan_evidence_conflict:mobile-web-check'
 
-  Assert-Fail "失败：计划缺失" (Invoke-GateVerify $null $evidenceBaseline) 'CI-GATE-ERROR' 2
-  Assert-Fail "失败：计划不是合法 JSON" (Invoke-GateVerify '{ "version": "ci-gate-plan/v1", ' $evidenceBaseline) 'CI-GATE-ERROR' 2
+  # 多实例证据：缺项、部分失败、重复证据、非字符串状态都必须拒绝
+  Assert-Fail "失败：多实例部分失败" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiPartial) 'required_not_success:rust-check/windows-latest=failure'
+  Assert-Fail "失败：多实例证据缺项" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiMissing) 'instance_missing:rust-check/windows-latest'
+  Assert-Fail "失败：多实例重复证据" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiDuplicate) 'instance_duplicate:rust-check/ubuntu-latest'
+  Assert-Fail "失败：多实例被折叠为单一状态" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceBaseline) 'multi_instance_evidence_missing:rust-check'
+  Assert-Fail "失败：单实例计划收到多实例证据" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceMultiPartial) 'evidence_shape_invalid:rust-check'
+  Assert-Fail "失败：实例状态非字符串" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiStatusInvalid) 'instance_status_invalid:rust-check/ubuntu-latest'
+
+  # ============ 二、计划契约：不得靠改写计划削弱门禁 ============
+  # 绕过 1：把无条件必跑的治理任务改成非必跑
+  $planGovernanceDowngraded = New-PlanJson -GovernanceRequired $false
+  Assert-Fail "绕过 1：治理任务 required 被翻转" (Invoke-GateVerify -PlanJson $planGovernanceDowngraded -EvidenceJson $evidenceGovSkipped) 'plan_job_required_conflict:governance-and-privacy'
+
+  # 绕过 2：整体替换 jobs 集合为虚构作业
+  $planInventedJobs = @'
+{
+  "version": "ci-gate-plan/v1",
+  "detector": "detect-changes",
+  "gate": "ci-gate",
+  "jobs": [ { "id": "invented-job", "required": false } ],
+  "selfTest": false,
+  "releaseContract": false,
+  "scope": {
+    "full": false,
+    "rust": false,
+    "rustScope": "none",
+    "mobileWeb": false,
+    "paseoOrchestration": false,
+    "checkScopeSelfTest": false,
+    "changedFiles": ["docs/ops/PROGRESS.md"]
+  }
+}
+'@
+  $evidenceInventedJobs = @'
+{
+  "detect-changes": "success",
+  "invented-job": "skipped"
+}
+'@
+  Assert-Fail "绕过 2：jobs 被替换为虚构作业" (Invoke-GateVerify -PlanJson $planInventedJobs -EvidenceJson $evidenceInventedJobs) 'plan_job_unknown:invented-job'
+
+  # 绕过 3：条件作业的 required 与 scope 不一致
+  $planMobileRequiredButScopeFalse = New-PlanJson -MobileRequired $true -MobileWeb $false
+  Assert-Fail "绕过 3：mobile required 与 scope 矛盾" (Invoke-GateVerify -PlanJson $planMobileRequiredButScopeFalse -EvidenceJson $evidenceBaseline) 'plan_job_required_conflict:mobile-web-check'
+
+  # 绕过 4：篡改 depends_on
+  $planDependsTampered = New-PlanJson -DependsOnRust "mobile_web"
+  Assert-Fail "绕过 4：depends_on 被篡改" (Invoke-GateVerify -PlanJson $planDependsTampered -EvidenceJson $evidenceBaseline) 'plan_job_depends_conflict:rust-check'
+
+  # 绕过 5：触发标志与 changedFiles 冲突（触及 ci.yml 却声明 selfTest=false）
+  $planSelfTestSuppressed = New-PlanJson -ChangedFiles @(".github/workflows/ci.yml")
+  Assert-Fail "绕过 5：selfTest 触发标志被压制" (Invoke-GateVerify -PlanJson $planSelfTestSuppressed -EvidenceJson $evidenceBaseline) 'plan_flag_conflict:selfTest'
+
+  # 绕过 6：scope 自身矛盾（rust=false 但 rustScope=workspace）
+  $planScopeContradiction = New-PlanJson -Rust $false -RustRequired $false -RustScope "workspace"
+  Assert-Fail "绕过 6：计划 scope 内部矛盾" (Invoke-GateVerify -PlanJson $planScopeContradiction -EvidenceJson $evidenceRustSkipped) 'plan_scope_invalid'
+
+  # 绕过 7：当前版必需字段缺失
+  Assert-Fail "失败：计划缺少 gate 字段" (Invoke-GateVerify -PlanJson (New-PlanJson -OmitGate) -EvidenceJson $evidenceBaseline) 'plan_gate_missing'
+  Assert-Fail "失败：计划缺少 scope" (Invoke-GateVerify -PlanJson (New-PlanJson -OmitScope) -EvidenceJson $evidenceBaseline) 'plan_scope_missing'
+  Assert-Fail "失败：计划缺少 selfTest" (Invoke-GateVerify -PlanJson (New-PlanJson -OmitSelfTest) -EvidenceJson $evidenceBaseline) 'plan_flag_missing:selfTest'
+  Assert-Fail "失败：scope 缺少 changedFiles" (Invoke-GateVerify -PlanJson (New-PlanJson -OmitChangedFiles) -EvidenceJson $evidenceBaseline) 'plan_scope_invalid'
+
+  # 绕过 8：畸形实例声明不得被强制字符串化后接受
+  $planInstancesWithEmpty = @'
+{
+  "version": "ci-gate-plan/v1",
+  "detector": "detect-changes",
+  "gate": "ci-gate",
+  "jobs": [
+    { "id": "governance-and-privacy", "required": true },
+    { "id": "rust-check", "required": true, "depends_on": "rust", "instances": ["ubuntu-latest", ""] },
+    { "id": "mobile-web-check", "required": false, "depends_on": "mobile_web" }
+  ],
+  "selfTest": false,
+  "releaseContract": false,
+  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["crates/soxu-git/src/probe.rs"] }
+}
+'@
+  Assert-Fail "失败：实例声明含空串" (Invoke-GateVerify -PlanJson $planInstancesWithEmpty -EvidenceJson $evidenceMultiMissing) 'plan_instances_invalid:rust-check'
+
+  $planInstancesWithNumber = @'
+{
+  "version": "ci-gate-plan/v1",
+  "detector": "detect-changes",
+  "gate": "ci-gate",
+  "jobs": [
+    { "id": "governance-and-privacy", "required": true },
+    { "id": "rust-check", "required": true, "depends_on": "rust", "instances": [1] },
+    { "id": "mobile-web-check", "required": false, "depends_on": "mobile_web" }
+  ],
+  "selfTest": false,
+  "releaseContract": false,
+  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["crates/soxu-git/src/probe.rs"] }
+}
+'@
+  Assert-Fail "失败：实例声明为数字" (Invoke-GateVerify -PlanJson $planInstancesWithNumber -EvidenceJson $evidenceMultiMissing) 'plan_instances_invalid:rust-check'
+
+  $planInstancesNull = @'
+{
+  "version": "ci-gate-plan/v1",
+  "detector": "detect-changes",
+  "gate": "ci-gate",
+  "jobs": [
+    { "id": "governance-and-privacy", "required": true },
+    { "id": "rust-check", "required": true, "depends_on": "rust", "instances": null },
+    { "id": "mobile-web-check", "required": false, "depends_on": "mobile_web" }
+  ],
+  "selfTest": false,
+  "releaseContract": false,
+  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["crates/soxu-git/src/probe.rs"] }
+}
+'@
+  Assert-Fail "失败：实例声明为 null" (Invoke-GateVerify -PlanJson $planInstancesNull -EvidenceJson $evidenceMultiMissing) 'plan_instances_null:rust-check'
+
+  # 其余计划结构负例
+  Assert-Fail "失败：计划缺失" (Invoke-GateVerify -PlanJson $null -EvidenceJson $evidenceBaseline) 'CI-GATE-ERROR' 2
+  Assert-Fail "失败：计划不是合法 JSON" (Invoke-GateVerify -PlanJson '{ "version": "ci-gate-plan/v1", ' -EvidenceJson $evidenceBaseline) 'CI-GATE-ERROR' 2
 
   $planEmptyJobs = @'
 {
@@ -555,10 +707,11 @@ try {
   "gate": "ci-gate",
   "jobs": [],
   "selfTest": false,
-  "releaseContract": false
+  "releaseContract": false,
+  "scope": { "full": false, "rust": false, "rustScope": "none", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["docs/ops/PROGRESS.md"] }
 }
 '@
-  Assert-Fail "失败：计划作业为空" (Invoke-GateVerify $planEmptyJobs $evidenceBaseline) 'plan_jobs_empty'
+  Assert-Fail "失败：计划作业为空" (Invoke-GateVerify -PlanJson $planEmptyJobs -EvidenceJson $evidenceBaseline) 'plan_jobs_empty'
 
   $planDuplicateJob = @'
 {
@@ -567,31 +720,18 @@ try {
   "gate": "ci-gate",
   "jobs": [
     { "id": "governance-and-privacy", "required": true },
-    { "id": "rust-check", "required": true },
-    { "id": "rust-check", "required": false },
-    { "id": "mobile-web-check", "required": false }
+    { "id": "rust-check", "required": true, "depends_on": "rust" },
+    { "id": "rust-check", "required": false, "depends_on": "rust" },
+    { "id": "mobile-web-check", "required": false, "depends_on": "mobile_web" }
   ],
   "selfTest": false,
-  "releaseContract": false
+  "releaseContract": false,
+  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["crates/soxu-git/src/probe.rs"] }
 }
 '@
-  Assert-Fail "失败：计划重复作业" (Invoke-GateVerify $planDuplicateJob $evidenceBaseline) 'plan_job_duplicate:rust-check'
+  Assert-Fail "失败：计划重复作业" (Invoke-GateVerify -PlanJson $planDuplicateJob -EvidenceJson $evidenceBaseline) 'plan_job_duplicate:rust-check'
 
-  $planBadVersion = @'
-{
-  "version": "ci-gate-plan/v2",
-  "detector": "detect-changes",
-  "gate": "ci-gate",
-  "jobs": [
-    { "id": "governance-and-privacy", "required": true },
-    { "id": "rust-check", "required": true },
-    { "id": "mobile-web-check", "required": false }
-  ],
-  "selfTest": false,
-  "releaseContract": false
-}
-'@
-  Assert-Fail "失败：计划版本非法" (Invoke-GateVerify $planBadVersion $evidenceBaseline) 'plan_version_invalid'
+  Assert-Fail "失败：计划版本非法" (Invoke-GateVerify -PlanJson (New-PlanJson -Version "ci-gate-plan/v2") -EvidenceJson $evidenceBaseline) 'plan_version_invalid'
 
   $planRequiredNotBoolean = @'
 {
@@ -602,29 +742,14 @@ try {
     { "id": "governance-and-privacy", "required": "true" }
   ],
   "selfTest": false,
-  "releaseContract": false
+  "releaseContract": false,
+  "scope": { "full": false, "rust": false, "rustScope": "none", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["docs/ops/PROGRESS.md"] }
 }
 '@
-  Assert-Fail "失败：计划必跑标记不是布尔" (Invoke-GateVerify $planRequiredNotBoolean $evidenceBaseline) 'plan_job_required_invalid:governance-and-privacy'
+  Assert-Fail "失败：计划必跑标记不是布尔" (Invoke-GateVerify -PlanJson $planRequiredNotBoolean -EvidenceJson $evidenceBaseline) 'plan_job_required_invalid:governance-and-privacy'
 
-  # ============ 二、Plan 模式与检测器输出契约 ============
-  $scopeRustOnly = @'
-{
-  "full": false,
-  "baseRef": "origin/main",
-  "changedFiles": ["crates/soxu-git/src/probe.rs"],
-  "governance": true,
-  "rust": true,
-  "rustScope": "crates",
-  "rustPackages": ["soxu-git"],
-  "rustPackageArgs": "-p soxu-git",
-  "mobileWeb": false,
-  "paseoOrchestration": false,
-  "checkScopeSelfTest": false,
-  "reasons": ["crate:soxu-git"]
-}
-'@
-  $planResult = Invoke-PlanMode $scopeRustOnly
+  # ============ 三、Plan 模式的检测器输出一致性 ============
+  $planResult = Invoke-PlanMode (New-ScopeJson -Rust $true -RustScope "crates")
   Assert-Pass "通过：Plan 模式构建计划" $planResult
   $planObject = $null
   if ($planResult.Code -eq 0) {
@@ -638,29 +763,14 @@ try {
     $govJob = @($planObject.jobs | Where-Object { $_.id -eq "governance-and-privacy" })[0]
     Assert-Check ($null -ne $rustJob -and $rustJob.required -eq $true) "rust 命中时 rust-check 必须必跑"
     Assert-Check ($null -ne $mobileJob -and $mobileJob.required -eq $false) "mobileWeb 未命中时 mobile-web-check 不得必跑"
-    Assert-Check ($null -ne $govJob -and $govJob.required -eq $true) "治理隐私任务必须必跑"
+    Assert-Check ($null -ne $govJob -and $govJob.required -eq $true) "治理隐私任务必须无条件必跑"
     Assert-Check ($planObject.selfTest -eq $false) "未触及门禁脚本时 selfTest 应为 false"
     Assert-Check ($planObject.releaseContract -eq $false) "未触及 release.yml 时 releaseContract 应为 false"
-    Assert-Pass "通过：Plan 产物可直接供 Verify 消费" (Invoke-GateVerify ($planObject | ConvertTo-Json -Depth 10 -Compress) $evidenceBaseline)
+    Assert-Check ($null -ne $planObject.scope.changedFiles) "计划 scope 必须回写 changedFiles 以便 Verify 重算"
+    Assert-Pass "通过：Plan 产物可直接供 Verify 消费" (Invoke-GateVerify -PlanJson ($planObject | ConvertTo-Json -Depth 10 -Compress) -EvidenceJson $evidenceBaseline)
   }
 
-  $scopeReleaseTouched = @'
-{
-  "full": false,
-  "baseRef": "origin/main",
-  "changedFiles": [".github/workflows/release.yml"],
-  "governance": true,
-  "rust": false,
-  "rustScope": "none",
-  "rustPackages": [],
-  "rustPackageArgs": "",
-  "mobileWeb": false,
-  "paseoOrchestration": false,
-  "checkScopeSelfTest": false,
-  "reasons": ["docs_or_governance:.github/workflows/release.yml"]
-}
-'@
-  $releasePlan = Invoke-PlanMode $scopeReleaseTouched
+  $releasePlan = Invoke-PlanMode (New-ScopeJson -Rust $false -RustScope "none" -ChangedFiles @(".github/workflows/release.yml"))
   Assert-Pass "通过：触及 release.yml 时构建计划" $releasePlan
   if ($releasePlan.Code -eq 0) {
     $releasePlanObject = ($releasePlan.Output.Trim() | ConvertFrom-Json -Depth 10)
@@ -668,28 +778,20 @@ try {
     Assert-Check ($releasePlanObject.selfTest -eq $false) "仅触及 release.yml 时 selfTest 应为 false"
   }
 
-  $scopeCiTouched = @'
-{
-  "full": false,
-  "baseRef": "origin/main",
-  "changedFiles": [".github/workflows/ci.yml", "scripts/verify-ci-gate.ps1"],
-  "governance": true,
-  "rust": false,
-  "rustScope": "none",
-  "rustPackages": [],
-  "rustPackageArgs": "",
-  "mobileWeb": false,
-  "paseoOrchestration": false,
-  "checkScopeSelfTest": false,
-  "reasons": ["infra_full:.github/workflows/ci.yml"]
-}
-'@
-  $ciPlan = Invoke-PlanMode $scopeCiTouched
+  $ciPlan = Invoke-PlanMode (New-ScopeJson -Rust $false -RustScope "none" -ChangedFiles @(".github/workflows/ci.yml", "scripts/verify-ci-gate.ps1"))
   Assert-Pass "通过：触及门禁脚本时构建计划" $ciPlan
   if ($ciPlan.Code -eq 0) {
     $ciPlanObject = ($ciPlan.Output.Trim() | ConvertFrom-Json -Depth 10)
     Assert-Check ($ciPlanObject.selfTest -eq $true) "触及 ci.yml 或门禁脚本时 selfTest 必须为 true"
   }
+
+  # 检测器输出自身矛盾必须失败关闭，不能生成跳过 Rust/PWA 的计划
+  Assert-Fail "失败：rust=false 但 rustScope=workspace" (Invoke-PlanMode (New-ScopeJson -Rust $false -RustScope "workspace")) 'CI-GATE-ERROR' 2
+  Assert-Fail "失败：rust=true 但 rustScope=none" (Invoke-PlanMode (New-ScopeJson -Rust $true -RustScope "none")) 'CI-GATE-ERROR' 2
+  Assert-Fail "失败：rustScope 非法取值" (Invoke-PlanMode (New-ScopeJson -Rust $true -RustScope "everything")) 'CI-GATE-ERROR' 2
+  Assert-Fail "失败：full=true 却跳过 Rust" (Invoke-PlanMode (New-ScopeJson -Full $true -Rust $false -RustScope "none" -MobileWeb $true -Paseo $true -ScopeSelfTest $true)) 'CI-GATE-ERROR' 2
+  Assert-Fail "失败：full=true 却跳过 PWA/Paseo" (Invoke-PlanMode (New-ScopeJson -Full $true -Rust $true -RustScope "workspace" -MobileWeb $false -Paseo $false -ScopeSelfTest $false)) 'CI-GATE-ERROR' 2
+  Assert-Fail "失败：changedFiles 缺失" (Invoke-PlanMode (New-ScopeJson -OmitChangedFiles)) 'CI-GATE-ERROR' 2
 
   $scopeInvalidType = @'
 {
@@ -699,25 +801,53 @@ try {
   "mobileWeb": false,
   "paseoOrchestration": false,
   "checkScopeSelfTest": false,
-  "changedFiles": []
-}
-'@
-  Assert-Fail "失败：检测器输出字段类型非法" (Invoke-PlanMode $scopeInvalidType) 'CI-GATE-ERROR' 2
-
-  $scopeInvalidRustScope = @'
-{
-  "full": false,
-  "rust": true,
-  "rustScope": "everything",
-  "mobileWeb": false,
-  "paseoOrchestration": false,
-  "checkScopeSelfTest": false,
   "changedFiles": ["crates/soxu-git/src/probe.rs"]
 }
 '@
-  Assert-Fail "失败：检测器 rustScope 非法" (Invoke-PlanMode $scopeInvalidRustScope) 'CI-GATE-ERROR' 2
+  Assert-Fail "失败：检测器字段类型非法" (Invoke-PlanMode $scopeInvalidType) 'CI-GATE-ERROR' 2
 
-  # ============ 三、工作流静态契约 ============
+  $scopeNullChangedFile = @'
+{
+  "full": false,
+  "rust": true,
+  "rustScope": "crates",
+  "mobileWeb": false,
+  "paseoOrchestration": false,
+  "checkScopeSelfTest": false,
+  "changedFiles": ["crates/soxu-git/src/probe.rs", null]
+}
+'@
+  Assert-Fail "失败：changedFiles 含 null" (Invoke-PlanMode $scopeNullChangedFile) 'CI-GATE-ERROR' 2
+
+  $scopeEmptyChangedFile = @'
+{
+  "full": false,
+  "rust": true,
+  "rustScope": "crates",
+  "mobileWeb": false,
+  "paseoOrchestration": false,
+  "checkScopeSelfTest": false,
+  "changedFiles": [""]
+}
+'@
+  Assert-Fail "失败：changedFiles 含空路径" (Invoke-PlanMode $scopeEmptyChangedFile) 'CI-GATE-ERROR' 2
+
+  # ============ 四、突变敏感度：移除契约校验后绕过用例必须重新通过 ============
+  $verifierText = Get-Content -LiteralPath $verifierPath -Raw -Encoding utf8
+  $contractMarker = '  Test-PlanContract $plan $errors'
+  $hasMarker = $verifierText.Contains($contractMarker)
+  Assert-Check $hasMarker "突变测试锚点缺失：verify-ci-gate.ps1 应调用计划契约校验"
+  if ($hasMarker) {
+    $mutantPath = Join-Path $tempRoot "verify-ci-gate-mutant.ps1"
+    $mutantText = $verifierText.Replace($contractMarker, '  # 突变：临时移除计划契约校验')
+    Set-Content -LiteralPath $mutantPath -Value $mutantText -Encoding utf8 -NoNewline
+    Assert-Pass "突变敏感度：移除契约校验后治理降级绕过重新通过" `
+      (Invoke-GateVerify -ScriptPath $mutantPath -PlanJson $planGovernanceDowngraded -EvidenceJson $evidenceGovSkipped)
+    Assert-Pass "突变敏感度：移除契约校验后 scope 矛盾计划重新通过" `
+      (Invoke-GateVerify -ScriptPath $mutantPath -PlanJson $planScopeContradiction -EvidenceJson $evidenceRustSkipped)
+  }
+
+  # ============ 五、工作流静态契约 ============
   Assert-Pass "通过：真实 ci.yml 门禁契约" (Invoke-WorkflowContract $ciWorkflow)
 
   $variantContinueOnError = New-WorkflowVariant ".github/workflows/ci.yml" "ci-continue-on-error" {
@@ -770,7 +900,7 @@ try {
   }
   Assert-Fail "失败：发布清单丢失重复成员检测" (Invoke-ReleaseContract $variantNoDupCheck) 'release_duplicate_member_check_missing'
 
-  # ============ 四、发布契约动态验证（bash -n + 离线桩执行） ============
+  # ============ 六、发布契约动态验证（bash -n + 离线桩执行） ============
   if ($null -eq $script:bashPath) {
     if ($RequireBash) {
       Assert-Check $false "发布契约动态验证要求 bash 可用，但当前环境未找到可用的 bash。"
@@ -795,7 +925,6 @@ try {
     $mirrorBody = Get-RunBlockByStepName $releaseText "Mirror release assets & enforce monotonic Latest tag"
     Assert-Check ($mirrorBody.Contains("assert_release_assets dist")) "镜像脚本必须调用资产清单校验函数"
 
-    # 正例：四平台资产 + SHA256SUMS 齐备，校验和可回算，允许继续发布
     $goodFixture = New-DistFixture -Name "good"
     $goodResult = Invoke-ReleaseMirrorCase -Name "good" -FixtureDir $goodFixture -MirrorBody $mirrorBody
     Assert-Check ($goodResult.Code -eq 0) "正例：齐备且校验通过的资产应放行，实际 exit $($goodResult.Code)：$($goodResult.Output.Trim())"
@@ -803,27 +932,21 @@ try {
     Assert-Check ($goodResult.StubLog -match '(?m)^release (create|upload)') "正例：校验通过后应继续发布动作（桩日志：$($goodResult.StubLog.Trim())）"
     Assert-Check ($goodResult.DistFiles.Count -eq 5) "正例：镜像目录应恰含 4 平台资产与 SHA256SUMS，实际 $($goodResult.DistFiles -join ',')"
 
-    # 负例 1：缺项
     $missingFixture = New-DistFixture -Name "missing" -Assets @($releaseAssetNames[0..2]) -SumMembers @($releaseAssetNames[0..2])
     Assert-ReleaseRejection "负例：资产缺项" (Invoke-ReleaseMirrorCase -Name "missing" -FixtureDir $missingFixture -MirrorBody $mirrorBody) '资产集合不符'
 
-    # 负例 2：额外文件
     $extraFixture = New-DistFixture -Name "extra" -ExtraFiles @("soxu-freebsd-amd64.tar.gz")
     Assert-ReleaseRejection "负例：资产存在额外文件" (Invoke-ReleaseMirrorCase -Name "extra" -FixtureDir $extraFixture -MirrorBody $mirrorBody) '资产集合不符'
 
-    # 负例 3：清单成员重复
     $duplicateFixture = New-DistFixture -Name "duplicate" -DuplicateMember
     Assert-ReleaseRejection "负例：SHA256SUMS 成员重复" (Invoke-ReleaseMirrorCase -Name "duplicate" -FixtureDir $duplicateFixture -MirrorBody $mirrorBody) 'SHA256SUMS 存在重复成员'
 
-    # 负例 4：路径异常（嵌套目录）
     $nestedFixture = New-DistFixture -Name "nested" -Nested
     Assert-ReleaseRejection "负例：资产目录存在嵌套路径" (Invoke-ReleaseMirrorCase -Name "nested" -FixtureDir $nestedFixture -MirrorBody $mirrorBody) '存在嵌套路径'
 
-    # 负例 5：内容哈希不匹配
     $wrongHashFixture = New-DistFixture -Name "wrong-hash" -WrongHash
     Assert-ReleaseRejection "负例：内容哈希与清单不符" (Invoke-ReleaseMirrorCase -Name "wrong-hash" -FixtureDir $wrongHashFixture -MirrorBody $mirrorBody) 'FAILED'
 
-    # 负例 6：缺少 SHA256SUMS
     $noSumsFixture = New-DistFixture -Name "no-sums" -OmitSums
     Assert-ReleaseRejection "负例：缺少 SHA256SUMS" (Invoke-ReleaseMirrorCase -Name "no-sums" -FixtureDir $noSumsFixture -MirrorBody $mirrorBody) '缺少 SHA256SUMS'
   }

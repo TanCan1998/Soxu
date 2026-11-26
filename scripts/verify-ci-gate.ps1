@@ -17,32 +17,39 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # 本脚本是 CI Gate 的唯一判定入口，四种模式职责互不重叠：
 #   Plan            依检测器输出构建带版本号的确定性门禁计划（工作流中的计划真相源）
-#   Verify          逐项对账“计划”与“needs 实际证据”，仅 success 放行必跑任务
+#   Verify          以“固定 job 契约 + scope 重新推导”对账计划与 needs 实际证据
 #   Contract        静态校验 ci.yml 的门禁契约（稳定名称、静态 needs、无 continue-on-error）
 #   ReleaseContract 静态校验 release.yml 的四平台资产清单与校验和契约
+#
+# 设计红线：计划是数据，不能凭删 job、换 job、翻转 required 或篡改触发标志削弱门禁。
+# Verify 会用与 Plan 完全相同的推导函数，从计划自带的 scope 重新算出期望计划再逐项比对。
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 $PlanVersion = "ci-gate-plan/v1"
 $DetectorJobId = "detect-changes"
 $GateJobId = "ci-gate"
 $ValidStatuses = @("success", "failure", "cancelled", "skipped")
+$ValidRustScopes = @("workspace", "crates", "none")
 
 # 发布仓 TanCan1998/soxu-releases 固定 SHA 33a21eb 的四平台资产精确文件名。
 $ReleaseAssetNames = @(
-  "soxu-linux-amd64.tar.gz",
-  "soxu-windows-amd64.zip",
-  "soxu-darwin-arm64.tar.gz",
+  "soxu-linux-amd64.tar.gz"
+  "soxu-windows-amd64.zip"
+  "soxu-darwin-arm64.tar.gz"
   "soxu-darwin-amd64.tar.gz"
 )
 $ReleaseAssetManifest = ($ReleaseAssetNames -join " ")
 
+# 当前 CI-A 固定 job 契约：governance-and-privacy 无条件必跑，其余由检测器同源输出决定。
+# CI-C 的三平台动态矩阵只扩展实例证据，不改变这里的 job 集合。
+$GatedJobSpecs = @(
+  [pscustomobject]@{ Id = "governance-and-privacy"; Output = ""; Unconditional = $true }
+  [pscustomobject]@{ Id = "rust-check"; Output = "rust"; Unconditional = $false }
+  [pscustomobject]@{ Id = "mobile-web-check"; Output = "mobile_web"; Unconditional = $false }
+)
+
 function Get-GatedJobSpec {
-  # 空 Output 代表无条件必跑；其余代表由检测器对应输出决定是否运行。
-  return @(
-    [pscustomobject]@{ Id = "governance-and-privacy"; Output = "" }
-    [pscustomobject]@{ Id = "rust-check"; Output = "rust" }
-    [pscustomobject]@{ Id = "mobile-web-check"; Output = "mobile_web" }
-  )
+  return $GatedJobSpecs
 }
 
 function Get-GateNeedsIds {
@@ -90,9 +97,39 @@ function Get-ScopeBoolean($Scope, [string]$Name) {
 }
 
 function Get-ChangedFileList($Scope) {
+  # changedFiles 是门禁专项触发（selfTest / releaseContract）的唯一输入来源，
+  # 缺失、null 或含非字符串条目都必须失败关闭，不能静默退化为“未触及工作流”。
   $prop = $Scope.PSObject.Properties["changedFiles"]
-  if ($null -eq $prop -or $null -eq $prop.Value) { return @() }
-  return @($prop.Value | ForEach-Object { ([string]$_).Replace('\', '/') })
+  if ($null -eq $prop) { throw "变更范围 JSON 缺少字段 changedFiles。" }
+  if ($null -eq $prop.Value) { throw "变更范围字段 changedFiles 不能为 null。" }
+
+  $files = [System.Collections.Generic.List[string]]::new()
+  foreach ($item in @($prop.Value)) {
+    if ($item -isnot [string]) { throw "变更范围字段 changedFiles 含非字符串条目。" }
+    if ([string]::IsNullOrWhiteSpace($item)) { throw "变更范围字段 changedFiles 含空路径。" }
+    $files.Add($item.Replace('\', '/'))
+  }
+  return @($files)
+}
+
+function Assert-ScopeConsistency($Scope, [bool]$Full, [bool]$Rust, [string]$RustScope, [bool]$MobileWeb, [bool]$Paseo, [bool]$ScopeSelfTest) {
+  if (-not $ValidRustScopes.Contains($RustScope)) {
+    throw "检测器字段 rustScope 非法：$RustScope（允许 workspace/crates/none）。"
+  }
+  if ($Rust -and $RustScope -eq "none") {
+    throw "rust=true 与 rustScope=none 矛盾，拒绝生成跳过 Rust 的计划。"
+  }
+  if (-not $Rust -and $RustScope -ne "none") {
+    throw "rust=false 时 rustScope 必须为 none，实际：$RustScope。"
+  }
+  if ($Full) {
+    if (-not ($Rust -and $RustScope -eq "workspace")) {
+      throw "full=true 与 Rust 跳过冲突：全量回退必须按 workspace 跑 Rust。"
+    }
+    if (-not ($MobileWeb -and $Paseo -and $ScopeSelfTest)) {
+      throw "full=true 与分级跳过冲突：全量回退必须覆盖 PWA、Paseo 编排与作用域自测。"
+    }
+  }
 }
 
 function New-GatePlan($Scope) {
@@ -105,10 +142,10 @@ function New-GatePlan($Scope) {
   $checkScopeSelfTest = Get-ScopeBoolean $Scope "checkScopeSelfTest"
 
   $rustScopeValue = Get-ScopeField $Scope "rustScope"
+  if ($rustScopeValue -isnot [string]) { throw "变更范围字段 rustScope 必须是字符串。" }
   $rustScope = [string]$rustScopeValue
-  if ($rust -and $rustScope -notin @("workspace", "crates", "none")) {
-    throw "检测器字段 rustScope 非法：$rustScope"
-  }
+
+  Assert-ScopeConsistency $Scope $full $rust $rustScope $mobileWeb $paseoOrchestration $checkScopeSelfTest
 
   $changed = Get-ChangedFileList $Scope
   # 门禁自身与其依赖脚本变更时必须跑回归矩阵；发布工作流变更时必须跑发布契约校验。
@@ -124,7 +161,7 @@ function New-GatePlan($Scope) {
 
   $jobs = [System.Collections.Generic.List[object]]::new()
   foreach ($spec in Get-GatedJobSpec) {
-    $required = if ([string]::IsNullOrEmpty($spec.Output)) {
+    $required = if ($spec.Unconditional) {
       $true
     } elseif ($spec.Output -eq "rust") {
       $rust
@@ -137,12 +174,14 @@ function New-GatePlan($Scope) {
   }
 
   $scopeSummary = [pscustomobject][ordered]@{
-    full                = $full
-    rust                = $rust
-    rustScope           = $rustScope
-    mobileWeb           = $mobileWeb
-    paseoOrchestration  = $paseoOrchestration
-    checkScopeSelfTest  = $checkScopeSelfTest
+    full               = $full
+    rust               = $rust
+    rustScope          = $rustScope
+    mobileWeb          = $mobileWeb
+    paseoOrchestration = $paseoOrchestration
+    checkScopeSelfTest = $checkScopeSelfTest
+    # 随计划回写变更文件，使 Verify 能用同一推导函数重算 selfTest / releaseContract。
+    changedFiles       = @($changed)
   }
 
   return [pscustomobject][ordered]@{
@@ -163,8 +202,135 @@ function Invoke-PlanMode {
   return ($plan | ConvertTo-Json -Depth 10 -Compress)
 }
 
-function Get-EvidenceStatusValue($Evidence, [string]$JobId) {
-  return $Evidence.$JobId
+# 计划契约校验：计划结构本身不得削弱门禁，必须与 Plan 的推导结果逐项一致。
+function Test-PlanContract($Plan, [System.Collections.Generic.List[string]]$Errors) {
+  $versionProp = $Plan.PSObject.Properties["version"]
+  if ($null -eq $versionProp -or $versionProp.Value -isnot [string] -or $versionProp.Value -ne $PlanVersion) {
+    $Errors.Add("plan_version_invalid")
+  }
+  $detectorProp = $Plan.PSObject.Properties["detector"]
+  if ($null -eq $detectorProp -or $detectorProp.Value -isnot [string] -or $detectorProp.Value -ne $DetectorJobId) {
+    $Errors.Add("plan_detector_invalid")
+  }
+  $gateProp = $Plan.PSObject.Properties["gate"]
+  if ($null -eq $gateProp) {
+    $Errors.Add("plan_gate_missing")
+  } elseif ($gateProp.Value -isnot [string] -or $gateProp.Value -ne $GateJobId) {
+    $Errors.Add("plan_gate_invalid")
+  }
+
+  foreach ($flag in @("selfTest", "releaseContract")) {
+    $flagProp = $Plan.PSObject.Properties[$flag]
+    if ($null -eq $flagProp) {
+      $Errors.Add("plan_flag_missing:$flag")
+    } elseif ($flagProp.Value -isnot [bool]) {
+      $Errors.Add("plan_flag_invalid:$flag")
+    }
+  }
+
+  $scopeProp = $Plan.PSObject.Properties["scope"]
+  if ($null -eq $scopeProp -or $null -eq $scopeProp.Value) {
+    $Errors.Add("plan_scope_missing")
+    return
+  }
+
+  # 用与 Plan 相同的推导函数重算期望计划；scope 自身矛盾在这里直接暴露。
+  try {
+    $expected = New-GatePlan $scopeProp.Value
+  } catch {
+    $Errors.Add("plan_scope_invalid:$($_.Exception.Message)")
+    return
+  }
+
+  foreach ($flag in @("selfTest", "releaseContract")) {
+    $flagProp = $Plan.PSObject.Properties[$flag]
+    if ($null -ne $flagProp -and $flagProp.Value -is [bool] -and [bool]$flagProp.Value -ne [bool]$expected.$flag) {
+      $Errors.Add("plan_flag_conflict:$flag")
+    }
+  }
+
+  $jobsProp = $Plan.PSObject.Properties["jobs"]
+  if ($null -eq $jobsProp) { $Errors.Add("plan_jobs_missing"); return }
+  $declaredJobs = @($jobsProp.Value)
+  if ($declaredJobs.Count -eq 0) { $Errors.Add("plan_jobs_empty"); return }
+
+  $declared = @{}
+  foreach ($job in $declaredJobs) {
+    if ($null -eq $job -or $job -isnot [pscustomobject]) { $Errors.Add("plan_job_invalid"); continue }
+    $idProp = $job.PSObject.Properties["id"]
+    if ($null -eq $idProp -or $idProp.Value -isnot [string] -or [string]::IsNullOrWhiteSpace($idProp.Value)) {
+      $Errors.Add("plan_job_id_invalid")
+      continue
+    }
+    $id = [string]$idProp.Value
+    if ($declared.ContainsKey($id)) { $Errors.Add("plan_job_duplicate:$id"); continue }
+
+    $requiredProp = $job.PSObject.Properties["required"]
+    if ($null -eq $requiredProp -or $requiredProp.Value -isnot [bool]) {
+      $Errors.Add("plan_job_required_invalid:$id")
+      continue
+    }
+
+    $dependsOn = $null
+    $dependsProp = $job.PSObject.Properties["depends_on"]
+    if ($null -ne $dependsProp) {
+      if ($dependsProp.Value -isnot [string] -or [string]::IsNullOrWhiteSpace($dependsProp.Value)) {
+        $Errors.Add("plan_job_depends_invalid:$id")
+        continue
+      }
+      $dependsOn = [string]$dependsProp.Value
+    }
+
+    $instances = [System.Collections.Generic.List[string]]::new()
+    $instancesProp = $job.PSObject.Properties["instances"]
+    if ($null -ne $instancesProp) {
+      if ($null -eq $instancesProp.Value) { $Errors.Add("plan_instances_null:$id"); continue }
+      $rawInstances = @($instancesProp.Value)
+      if ($rawInstances.Count -eq 0) { $Errors.Add("plan_instances_empty:$id"); continue }
+      $seenInstance = @{}
+      foreach ($instance in $rawInstances) {
+        if ($instance -isnot [string] -or [string]::IsNullOrWhiteSpace($instance)) {
+          $Errors.Add("plan_instances_invalid:$id")
+          continue
+        }
+        if ($seenInstance.ContainsKey([string]$instance)) { $Errors.Add("plan_instances_duplicate:$id"); continue }
+        $seenInstance[[string]$instance] = $true
+        $instances.Add([string]$instance)
+      }
+    }
+
+    $declared[$id] = [pscustomobject]@{
+      Id        = $id
+      Required  = [bool]$requiredProp.Value
+      DependsOn = $dependsOn
+      Instances = @($instances)
+    }
+  }
+
+  foreach ($spec in Get-GatedJobSpec) {
+    if (-not $declared.ContainsKey($spec.Id)) { $Errors.Add("plan_job_missing:$($spec.Id)"); continue }
+    $entry = $declared[$spec.Id]
+    # 期望的 required 直接从推导出的计划读取，避免与规格重复实现
+    $expectedJob = @($expected.jobs | Where-Object { $_.id -eq $spec.Id })[0]
+    if ($null -ne $expectedJob -and $entry.Required -ne [bool]$expectedJob.required) {
+      $Errors.Add("plan_job_required_conflict:$($spec.Id)")
+    }
+    if ($spec.Unconditional) {
+      if (-not [string]::IsNullOrEmpty($entry.DependsOn)) { $Errors.Add("plan_job_depends_conflict:$($spec.Id)") }
+    } else {
+      if ($entry.DependsOn -ne $spec.Output) { $Errors.Add("plan_job_depends_conflict:$($spec.Id)") }
+    }
+  }
+
+  foreach ($id in $declared.Keys) {
+    if (-not (@(Get-GatedJobSpec | ForEach-Object { $_.Id }) -contains $id)) {
+      $Errors.Add("plan_job_unknown:$id")
+    }
+  }
+
+  if ($declared.Count -ne @(Get-GatedJobSpec).Count) {
+    $Errors.Add("plan_job_set_mismatch")
+  }
 }
 
 function Invoke-VerifyMode {
@@ -174,66 +340,16 @@ function Invoke-VerifyMode {
 
   if ($null -eq $plan) { $errors.Add("plan_missing"); return $errors }
 
-  $versionProp = $plan.PSObject.Properties["version"]
-  if ($null -eq $versionProp -or [string]$versionProp.Value -ne $PlanVersion) {
-    $errors.Add("plan_version_invalid")
-  }
-  $detectorProp = $plan.PSObject.Properties["detector"]
-  if ($null -eq $detectorProp -or [string]$detectorProp.Value -ne $DetectorJobId) {
-    $errors.Add("plan_detector_invalid")
-  }
-  $gateProp = $plan.PSObject.Properties["gate"]
-  if ($null -ne $gateProp -and [string]$gateProp.Value -ne $GateJobId) {
-    $errors.Add("plan_gate_invalid")
-  }
-  foreach ($flag in @("selfTest", "releaseContract")) {
-    $flagProp = $plan.PSObject.Properties[$flag]
-    if ($null -ne $flagProp -and $flagProp.Value -isnot [bool]) {
-      $errors.Add("plan_flag_invalid:$flag")
-    }
-  }
+  Test-PlanContract $plan $errors
+  if ($errors.Count -gt 0) { return $errors }
 
-  $jobsProp = $plan.PSObject.Properties["jobs"]
-  if ($null -eq $jobsProp) { $errors.Add("plan_jobs_missing"); return $errors }
-  $planJobs = @($jobsProp.Value)
-  if ($planJobs.Count -eq 0) { $errors.Add("plan_jobs_empty"); return $errors }
-
-  $expectedIds = [System.Collections.Generic.List[string]]::new()
-  $expectedIds.Add($DetectorJobId)
+  $planJobs = @($plan.jobs)
   $specMap = @{}
-  foreach ($job in $planJobs) {
-    if ($null -eq $job) { $errors.Add("plan_job_null"); continue }
-    $idProp = $job.PSObject.Properties["id"]
-    $id = if ($null -ne $idProp) { [string]$idProp.Value } else { "" }
-    if ([string]::IsNullOrWhiteSpace($id)) { $errors.Add("plan_job_id_missing"); continue }
-    if ($expectedIds -contains $id) { $errors.Add("plan_job_duplicate:$id"); continue }
-
-    $requiredProp = $job.PSObject.Properties["required"]
-    if ($null -eq $requiredProp -or $requiredProp.Value -isnot [bool]) {
-      $errors.Add("plan_job_required_invalid:$id")
-      continue
-    }
-
-    $instances = @()
-    $instancesProp = $job.PSObject.Properties["instances"]
-    if ($null -ne $instancesProp -and $null -ne $instancesProp.Value) {
-      $instances = @($instancesProp.Value | ForEach-Object { [string]$_ })
-      if ($instances.Count -eq 0) { $errors.Add("plan_instances_empty:$id") }
-      if (@($instances | Sort-Object -Unique).Count -ne $instances.Count) {
-        $errors.Add("plan_instances_duplicate:$id")
-      }
-    }
-
-    $expectedIds.Add($id)
-    $specMap[$id] = [pscustomobject]@{
-      Id        = $id
-      Required  = [bool]$requiredProp.Value
-      Instances = $instances
-    }
-  }
+  foreach ($job in $planJobs) { $specMap[[string]$job.id] = $job }
 
   if ($null -eq $evidence) { $errors.Add("evidence_missing"); return $errors }
 
+  $expectedIds = Get-GateNeedsIds
   $actualIds = @($evidence.PSObject.Properties | ForEach-Object { $_.Name })
   foreach ($id in $expectedIds) {
     if ($actualIds -notcontains $id) { $errors.Add("evidence_missing:$id") }
@@ -244,18 +360,24 @@ function Invoke-VerifyMode {
 
   foreach ($id in $expectedIds) {
     if ($actualIds -notcontains $id) { continue }
-    $value = Get-EvidenceStatusValue $evidence $id
-    $spec = $specMap[$id]
+    $value = $evidence.$id
 
-    if ($null -eq $spec) {
+    if ($id -eq $DetectorJobId) {
       # 检测器作业：必须显式给出 success，任何其他状态都让门禁失败。
       if ($value -isnot [string]) { $errors.Add("evidence_shape_invalid:$id"); continue }
       if ($value -ne "success") { $errors.Add("detector_not_success:$id=$value") }
       continue
     }
 
-    if (-not $spec.Required) {
+    $job = $specMap[$id]
+    if ($null -eq $job) { $errors.Add("evidence_unknown_job:$id"); continue }
+    $required = [bool]$job.required
+    $instances = @()
+    if ($null -ne $job.PSObject.Properties["instances"]) { $instances = @($job.instances) }
+
+    if (-not $required) {
       if ($value -isnot [string]) { $errors.Add("evidence_shape_invalid:$id"); continue }
+      if (-not $ValidStatuses.Contains([string]$value)) { $errors.Add("status_invalid:$id=$value"); continue }
       if ($value -eq "success") {
         $errors.Add("plan_evidence_conflict:$id=success 但计划未要求运行")
         continue
@@ -264,8 +386,9 @@ function Invoke-VerifyMode {
       continue
     }
 
-    if ($spec.Instances.Count -gt 0) {
+    if ($instances.Count -gt 0) {
       if ($value -is [string]) { $errors.Add("multi_instance_evidence_missing:$id"); continue }
+      if ($value -isnot [pscustomobject]) { $errors.Add("evidence_shape_invalid:$id"); continue }
       $rowsProp = $value.PSObject.Properties["instances"]
       if ($null -eq $rowsProp -or $null -eq $rowsProp.Value) {
         $errors.Add("multi_instance_evidence_missing:$id")
@@ -276,32 +399,39 @@ function Invoke-VerifyMode {
       $seen = @{}
       $observed = [System.Collections.Generic.List[string]]::new()
       foreach ($row in $rows) {
-        if ($null -eq $row) { $errors.Add("instance_row_invalid:$id"); continue }
+        if ($null -eq $row -or $row -isnot [pscustomobject]) { $errors.Add("instance_row_invalid:$id"); continue }
         $rowIdProp = $row.PSObject.Properties["id"]
         $rowStatusProp = $row.PSObject.Properties["status"]
-        $rowId = if ($null -ne $rowIdProp) { [string]$rowIdProp.Value } else { "" }
-        if ([string]::IsNullOrWhiteSpace($rowId)) { $errors.Add("instance_id_missing:$id"); continue }
+        if ($null -eq $rowIdProp -or $rowIdProp.Value -isnot [string] -or [string]::IsNullOrWhiteSpace($rowIdProp.Value)) {
+          $errors.Add("instance_id_invalid:$id")
+          continue
+        }
+        $rowId = [string]$rowIdProp.Value
         if ($seen.ContainsKey($rowId)) { $errors.Add("instance_duplicate:$id/$rowId"); continue }
         $seen[$rowId] = $true
         $observed.Add($rowId)
-        $rowStatus = if ($null -ne $rowStatusProp) { [string]$rowStatusProp.Value } else { "" }
-        if ($rowStatus -notin $ValidStatuses) {
+        if ($null -eq $rowStatusProp -or $rowStatusProp.Value -isnot [string]) {
+          $errors.Add("instance_status_invalid:$id/$rowId")
+          continue
+        }
+        $rowStatus = [string]$rowStatusProp.Value
+        if (-not $ValidStatuses.Contains($rowStatus)) {
           $errors.Add("status_invalid:$id/$rowId=$rowStatus")
           continue
         }
         if ($rowStatus -ne "success") { $errors.Add("required_not_success:$id/$rowId=$rowStatus") }
       }
-      foreach ($want in $spec.Instances) {
+      foreach ($want in $instances) {
         if (-not $observed.Contains($want)) { $errors.Add("instance_missing:$id/$want") }
       }
       foreach ($got in $observed) {
-        if ($spec.Instances -notcontains $got) { $errors.Add("instance_unknown:$id/$got") }
+        if ($instances -notcontains $got) { $errors.Add("instance_unknown:$id/$got") }
       }
       continue
     }
 
     if ($value -isnot [string]) { $errors.Add("evidence_shape_invalid:$id"); continue }
-    if ($value -notin $ValidStatuses) { $errors.Add("status_invalid:$id=$value"); continue }
+    if (-not $ValidStatuses.Contains([string]$value)) { $errors.Add("status_invalid:$id=$value"); continue }
     if ($value -ne "success") { $errors.Add("required_not_success:$id=$value") }
   }
 
