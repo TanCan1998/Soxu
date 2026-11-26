@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-26T09:32:50Z",
+  "updated_at": "2026-11-26T09:43:08Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -95,9 +95,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "25bbb76420c157edd00e5130f935e511fb2b949637d4bad7abdbfbf338296515",
-      "size": 69047,
-      "normalized_sha256": "25bbb76420c157edd00e5130f935e511fb2b949637d4bad7abdbfbf338296515"
+      "sha256": "ae0f0bf188641555a6b3fb9ef8ff13b587d1a75621e60d434003818839bd8898",
+      "size": 69435,
+      "normalized_sha256": "ae0f0bf188641555a6b3fb9ef8ff13b587d1a75621e60d434003818839bd8898"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -944,6 +944,12 @@
       "sha256": "59e9c8604bf09290d8b23c698707bab59a72e7b8e12a0b2b91fd9a6fcb30c7a6",
       "size": 1980,
       "normalized_sha256": "59e9c8604bf09290d8b23c698707bab59a72e7b8e12a0b2b91fd9a6fcb30c7a6"
+    },
+    "docs/dev/git-checkpoint-rewind-commit.md": {
+      "role": "index",
+      "sha256": "4869e461f24d27fb75d4dfa85b102adb7b92bea7e4504490bc27655fbfbb64cb",
+      "size": 29214,
+      "normalized_sha256": "4869e461f24d27fb75d4dfa85b102adb7b92bea7e4504490bc27655fbfbb64cb"
     },
     "docs/dev/git-readonly-diff.md": {
       "role": "index",
