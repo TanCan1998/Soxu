@@ -5,9 +5,14 @@ use std::{env, ffi::OsString, path::Path};
 
 mod magpie;
 mod native;
+mod worktree_context;
 
 pub use magpie::{MagpieDiscovery, RouteSummary};
 pub use native::{NativeAgent, NativeCli};
+pub use worktree_context::{
+    WORKTREE_CONTEXT_FILE, WorktreeContext, WorktreeContextError, WorktreeContextServer,
+    WorktreeDirectory, prepare_worktree_context,
+};
 
 /// 环境发现运行模式。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

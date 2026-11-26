@@ -8,6 +8,9 @@
 
 - `M0`、`M0.5`（PR `#4`）与 **`M1: Protocol v1, Domain Core & Daemon Spine`（`#5` / `#6` / `#7`）已全部完成并合入 `main`**。**`M2: Magpie Discovery & 7 Native CLI Drivers`** 已交付双态发现（`#11`）、原生驱动（`#12`）、Codex、Pi、Claude Code、Qwen Code 本机只读对话（PR `#16`、`#18`、`#20`、`#22`）及 Copilot、OpenCode 本机只读快聊（PR `#24`、`#27`）。**Antigravity（`#26`）在 PR `#55` 接入 Daemon 托管的本机隔离只读 `QuickChat`，项目目录入口继续关闭。M2 仍有未交付范围。**
 - **Pi / Git 波次已收口**（`#34` → `#32` → `#33`）。M2j 的 Pi 原生纠偏和 M3a 的 Git 仓库身份与状态只读探测均已合入 `main`。M3b（`#39` / PR `#41`）已合入 `main`（`7cea1c4`），交付 `GitProbe::open_local_project` 本地项目只读接入：区分普通目录与 `GitWorktree`，拒绝 bare、损坏仓库、Git 元数据目录及权限错误；`soxu-git` 25 项专项测试通过。
+- **M3e 注册与安全检出已合入 `main`。** `#49` / PR `#53` 提供受控注册和只读诊断，`#51` / PR `#54` 提供固定 OID 的受控检出和失败禁用。
+- **M3e 第三阶段（`#56` / PR `#61`）已交付宿主接入控制面，待主控合流。** `DaemonState` 核验 `CheckoutStatus::Verified` 后，重核注册与目录身份、index 和固定提交树。路由失败单独记录，重验通过后可重试。`soxu-magpie` 在 `MagpieManaged` 为工作区准备 `direct` MCP 目录级上下文，`StandaloneNative` 可直接使用通过复核的工作区。`crates/soxu-daemon/src/state/native.rs` 与 `soxu-protocol` 保持冻结，真实 Agent 启动、Worktree 会话联调和运行时挂载待后续接入 PR。Linux 真实注册和检出链路待非 Windows 宿主补测。
+- **M3 两份设计已合入 `main`。** `#57` 的显式 Init/Clone 与损坏恢复二次授权见 [仓库初始化、克隆与工作树恢复](../dev/git-init-clone-and-recovery.md)。`#58` 的轮次 Checkpoint 快照、先建 Safety Snapshot 再 Rewind 和文件级结构化提交见 [检查点、回退与结构化提交](../dev/git-checkpoint-rewind-commit.md)。
 - 仓库已启用合并自动删支（`delete_branch_on_merge = true`）与 Paseo Worktree 回收。
 - **参考项目与索引进度（已全部完成）**：
   - [x] 拉取参考项目至 `.refs/`：`paseo`（7,818 文件）、`codeg`（3,324 文件）、`padu`（1,157 文件）
@@ -24,7 +27,7 @@
 | **M0.5** | Pure Black Design System & Dual Prototypes | ✅ 已完成 | 纯黑 7 级海拔 `tokens.json` + `shadcn/ui` 变量、MASTER + 7 份分页面规范、React 19 + `shadcn/ui` + Tailwind v4 双端原型与 7 分区独立设置、单文件桌面预览 `preview.html`、移动遥控 PWA 原型（PR `#4`） |
 | **M1** | Protocol v1, Domain Core & Daemon Spine | ✅ 已完成 | `soxu-protocol` 全量 RPC/WS `seq` 契约、`soxu-core` 状态桶/能力协商/安全红线/队列草稿、`soxu-daemon` SQLite WAL 持久化 + WS 增量追平 + `#offer=`/6 位码鉴权、`soxu-cli` 闭环（`#5` / `#6` / `#7`） |
 | **M2** | Magpie Discovery & 7 Native CLI Drivers | M2h、M2j 已完成，M2i 隔离只读快聊在审 | 六种原生只读 CLI 已合入，Pi 原生 `Queue` / `Steer` / `Stop` 已验证。Antigravity 的 Daemon 托管快聊见 PR `#55`，七代理全验收仍待完成。 |
-| **M3** | Git Worktree Pool, Checkpoints & Commit Engine | M3a–M3d 与 M3e 注册已合入，安全检出在审 | 仓库身份与结构化状态只读探测、本地项目身份、Worktree 只读注册清单和四基准只读 Diff 已合入。`#49` / PR `#53` 已合入，实现显式新分支受控注册与只读诊断。`#51` 交付固定 OID 的受控检出与失败禁用。显式 Init/Clone、Worktree 池、`direct` MCP 挂载、诊断恢复、Checkpoint Diff、安全回退与提交执行待交付。 |
+| **M3** | Git Worktree Pool, Checkpoints & Commit Engine | M3a–M3d、M3e 注册和检出、两份设计已合入，宿主接入待合流 | `#49` 受控注册与只读诊断、`#51` 固定提交检出与失败禁用已合入。`#56` 交付宿主登记、会话就绪门禁与 `direct` MCP 上下文准备。`#57`、`#58` 已完成设计审定。显式 Init/Clone、恢复、Worktree Agent 启动与会话联调、Checkpoint、Rewind 和结构化提交执行待实现。 |
 | **M4** | Live Mobile PWA & GPUI Workbench Foundation | ⏳ 待启动 | **双轨 100% 正交并行**：`apps/mobile-web` 去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对与 13 组视口验收；`soxu-desktop` GPUI 令牌编译器、双开源字体联动、可扩展 `i18n`、7 层焦点栈与四栏自适应壳层 |
 | **M5** | GPUI Core Views: Transcript, Composer & Inspector | ⏳ 待启动 | `soxu-desktop` 三路并行落地：`<=8.3Hz` 虚拟对话流 + 5 类工具卡/审批卡/提问卡 + 20px 轮次导航轨、760px 同步宽输入舱 + `@agent` 移交 + 三色圆环统计、右栏 Diff/Files、7 分区设置与核心业务模态框 |
 | **M6** | Scripts, PTY Terminal, Search & Automation | ⏳ 待启动 | `paseo.json` 受管脚本遥控、`#050505` 多窗格受控 PTY 终端、`Cmd+K` 五分区检索 + CodeGraph 符号补全 + 按需三步 Onboarding、Schedules & Heartbeats 定时调度中心、50,000 行 Diff 压测与跨平台打包 |
@@ -74,8 +77,9 @@
 
 | Issue | 工作区 / Agent | 写入范围与合入顺序 |
 | :--- | :--- | :--- |
-| [#51](https://github.com/TanCan1998/Soxu/issues/51) M3e 已注册 Worktree 的安全检出 | `feat/51-worktree-checkout` | `soxu-git` 检出接口与测试、crate README、本看板及 AOCI。Windows 保留目录身份拒绝，Linux 负责受控发布。交主控复审与合流。 |
-| [#26](https://github.com/TanCan1998/Soxu/issues/26) Antigravity 隔离只读快聊 | `feat/26-agy-quickchat` | [PR #55](https://github.com/TanCan1998/Soxu/pull/55) 已吸收主线 `b3eade0`，待 CI 与主控合流审查。 |
+| [#51](https://github.com/TanCan1998/Soxu/issues/51) M3e 已注册 Worktree 的安全检出 | `feat/51-worktree-checkout` | `soxu-git` 检出接口与测试、crate README、本看板及 AOCI。Windows 保留目录身份拒绝，Linux 负责受控发布。已由 PR `#54` 合入 `main`。 |
+| [#26](https://github.com/TanCan1998/Soxu/issues/26) Antigravity 隔离只读快聊 | `feat/26-agy-quickchat` | [PR #55](https://github.com/TanCan1998/Soxu/pull/55) 已合入 `main`，交付隔离只读快聊。 |
+| [#56](https://github.com/TanCan1998/Soxu/issues/56) M3e 宿主 Worktree 接入 | `feat/56-m3e-host-worktree-wiring` | [PR #61](https://github.com/TanCan1998/Soxu/pull/61) 已吸收 PR `#62` 的 Diff 测试修复，待主控合流。 |
 
 Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0f5e2e5`（`main`）。执行代理完成各自验证、推送和建 PR，主控负责审查、合入与归档。
 
@@ -120,8 +124,8 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 主控复审 `#49` 的受控注册/只读诊断 PR，补齐可用 Unix 宿主的专项实测；Windows 原生身份与 DACL 依赖另行决策。通过后按 `#47` 分别验收安全检出和宿主接入，显式 Init/Clone 按独立 Owned Paths 排期。
-2. Checkpoint 快照模型稳定后接入 Checkpoint 基准 Diff。执行回退前先保存可恢复快照。
-3. 结构化提交先实现预检，再接入提交执行。根依赖、协议或其他跨模块公共契约如需变更，单独排契约 PR，合入后再联调。
-4. `#26` 等待 PR `#55` 的 CI 与主控合流审查。Daemon 托管快聊的项目目录入口继续关闭，后续另行验收项目配置来源、启动竞态和运行期隔离。Copilot 项目钩子安全、遥测、历史导入、附件、移交、更高权限及移动端投递另排验收。M2 和 M3 均仍有未交付范围。
+1. 并行推进 `soxu-git` 核心能力。按 `#57` 实现显式 Init/Clone、失败留痕及损坏恢复的二次授权。按 `#58` 实现轮次 Checkpoint 与基准 Diff、Safety Snapshot 与 Rewind，以及文件级结构化提交的预检和执行。
+2. 单独排期 `state/native.rs` 的 Worktree 会话联调契约，衔接 `#56` 的宿主就绪状态、原生 Agent 启动与 `direct` MCP 运行时挂载。涉及 `soxu-protocol` 的变更先走独立契约 PR。
+3. 在非 Windows 宿主补测 `#49`、`#51`、`#56` 的真实注册、固定提交检出、宿主接入和路由重试。Windows 原生目录身份与 DACL 持续授权另行决策。
+4. `#26` 隔离只读快聊已合入。Daemon 托管快聊的项目目录入口继续关闭，后续另行验收项目配置来源、启动竞态和运行期隔离。Copilot 项目钩子安全、遥测、历史导入、附件、移交、更高权限及移动端投递另排验收。M2 和 M3 均仍有未交付范围。
 
