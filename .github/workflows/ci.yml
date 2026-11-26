@@ -31,6 +31,12 @@ jobs:
       gate_plan: ${{ steps.plan.outputs.gate_plan }}
       gate_self_test: ${{ steps.plan.outputs.gate_self_test }}
       gate_release_contract: ${{ steps.plan.outputs.gate_release_contract }}
+      # CI-B 结构化计划字段：CI-C 的动态平台矩阵按 required_platforms 展开，不改变 job 集合
+      schema_version: ${{ steps.scope.outputs.schema_version }}
+      plan_mode: ${{ steps.scope.outputs.plan_mode }}
+      required_platforms: ${{ steps.scope.outputs.required_platforms }}
+      required_jobs: ${{ steps.scope.outputs.required_jobs }}
+      test_profiles: ${{ steps.scope.outputs.test_profiles }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,12 +46,20 @@ jobs:
         id: scope
         shell: pwsh
         run: |
+          # 事件种类显式声明：PR 求 merge base，push 比较 before/after 完整树。
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $json = ./scripts/detect-check-scope.ps1 -Full -Json
           } elseif ("${{ github.event_name }}" -eq "pull_request") {
-            $json = ./scripts/detect-check-scope.ps1 -BaseRef "origin/${{ github.base_ref }}" -HeadRef HEAD -Json
+            # 绑定事件里不变的 base.sha：base 分支头会随 push 前进，
+            # 用可变 ref 求 merge base 会让同一 PR 计划与证据脱绑。
+            $baseRef = if (-not [string]::IsNullOrWhiteSpace("${{ github.event.pull_request.base.sha }}")) {
+              "${{ github.event.pull_request.base.sha }}"
+            } else {
+              "origin/${{ github.base_ref }}"
+            }
+            $json = ./scripts/detect-check-scope.ps1 -Event pull_request -BaseRef $baseRef -HeadRef HEAD -Json
           } else {
-            $json = ./scripts/detect-check-scope.ps1 -BaseRef "${{ github.event.before }}" -HeadRef "${{ github.sha }}" -Json
+            $json = ./scripts/detect-check-scope.ps1 -Event push -BaseRef "${{ github.event.before }}" -HeadRef "${{ github.sha }}" -Json
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $scope = ($json | Out-String) | ConvertFrom-Json -ErrorAction Stop
@@ -58,6 +72,13 @@ jobs:
           "mobile_web=$($scope.mobileWeb.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "paseo_orchestration=$($scope.paseoOrchestration.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "check_scope_self_test=$($scope.checkScopeSelfTest.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          # 结构化字段单行压缩后传出。必须用 -InputObject 包住数组：管道形式下
+          # 零元素得到空字符串、单元素得到 JSON 字符串，下游就无法区分“空”和“一个值”。
+          "schema_version=$($scope.schemaVersion)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "plan_mode=$($scope.mode)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "required_platforms=$(ConvertTo-Json -InputObject @($scope.requiredPlatforms) -Compress)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "required_jobs=$(ConvertTo-Json -InputObject @($scope.requiredJobs) -Compress)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "test_profiles=$(ConvertTo-Json -InputObject @($scope.testProfiles) -Compress)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Build deterministic CI gate plan
         id: plan

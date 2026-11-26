@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$Verifier = "",
   [switch]$RequireBash
 )
@@ -188,12 +188,19 @@ function New-PlanJson {
     [object[]]$RustInstances = $null,
     [string]$DependsOnRust = "rust",
     [string]$Version = "ci-gate-plan/v1",
+    [int]$ScopeSchemaVersion = 0,
+    [string]$PathContractOverride = "",
+    [switch]$OmitPathContract,
     [switch]$OmitSelfTest,
     [switch]$OmitScope,
     [switch]$OmitGate,
     [switch]$OmitChangedFiles
   )
   $plan = [ordered]@{ version = $Version; detector = "detect-changes" }
+  # 路径契约必须与 scope 推导一致：版本化 scope 原样保留，旧 scope 归一化反斜杠。
+  $derivedContract = if ($ScopeSchemaVersion -ge 1) { "repo-relative/v1" } else { "repo-relative/legacy" }
+  $contract = if ([string]::IsNullOrWhiteSpace($PathContractOverride)) { $derivedContract } else { $PathContractOverride }
+  if (-not $OmitPathContract) { $plan["pathContract"] = $contract }
   if (-not $OmitGate) { $plan["gate"] = "ci-gate" }
 
   $rustJob = [ordered]@{ id = "rust-check"; required = $RustRequired }
@@ -216,7 +223,15 @@ function New-PlanJson {
       paseoOrchestration = $Paseo
       checkScopeSelfTest = $ScopeSelfTest
     }
-    if (-not $OmitChangedFiles) { $scope["changedFiles"] = @($ChangedFiles) }
+    if ($ScopeSchemaVersion -ge 1) { $scope["schemaVersion"] = $ScopeSchemaVersion }
+    if (-not $OmitChangedFiles) {
+      $scopeFiles = if ($ScopeSchemaVersion -ge 1) {
+        @($ChangedFiles)
+      } else {
+        @($ChangedFiles | ForEach-Object { ([string]$_).Replace('\', '/') })
+      }
+      $scope["changedFiles"] = @($scopeFiles)
+    }
     $plan["scope"] = $scope
   }
   return ($plan | ConvertTo-Json -Depth 10)
@@ -231,6 +246,7 @@ function New-ScopeJson {
     [bool]$Paseo = $false,
     [bool]$ScopeSelfTest = $false,
     [object[]]$ChangedFiles = @("crates/soxu-git/src/probe.rs"),
+    [int]$ScopeSchemaVersion = 0,
     [switch]$OmitChangedFiles
   )
   $scope = [ordered]@{
@@ -241,6 +257,7 @@ function New-ScopeJson {
     paseoOrchestration = $Paseo
     checkScopeSelfTest = $ScopeSelfTest
   }
+  if ($ScopeSchemaVersion -ge 1) { $scope["schemaVersion"] = $ScopeSchemaVersion }
   if (-not $OmitChangedFiles) { $scope["changedFiles"] = @($ChangedFiles) }
   $scope["governance"] = $true
   return ($scope | ConvertTo-Json -Depth 5)
@@ -829,6 +846,85 @@ try {
 '@
   Assert-Fail "失败：changedFiles 含空路径" (Invoke-PlanMode $scopeEmptyChangedFile) 'CI-GATE-ERROR' 2
 
+  # ============ 三·补、路径契约保真：旧 Windows 入口 vs POSIX 字面入口 ============
+  # 旧无版本 scope 继续接受既有 Windows 路径格式，归一化为仓库相对规范路径。
+  $legacyPathScope = New-ScopeJson -Rust $false -RustScope "none" -ChangedFiles @('docs\ops\LESSONS.md')
+  $legacyPathPlan = Invoke-PlanMode $legacyPathScope
+  Assert-Pass "通过：旧无版本 scope 的 Windows 路径格式" $legacyPathPlan
+  if ($legacyPathPlan.Code -eq 0) {
+    $legacyPathObject = ($legacyPathPlan.Output.Trim() | ConvertFrom-Json -Depth 10)
+    Assert-Check ($legacyPathObject.pathContract -eq 'repo-relative/legacy') "旧 scope 计划必须声明 legacy 路径契约"
+    Assert-Check (@($legacyPathObject.scope.changedFiles).Count -eq 1) "旧 scope 路径不得被拆成多个条目"
+    Assert-Check ($legacyPathObject.scope.changedFiles[0] -eq 'docs/ops/LESSONS.md') "旧 Windows 路径归一化为仓库相对规范路径"
+    Assert-Check ($legacyPathObject.releaseContract -eq $false) "旧 scope 的普通文档路径不触发发布专项"
+  }
+
+  # 版本化 scope：POSIX 合法的字面反斜杠必须原样贯穿 Plan 与 Verify。
+  $literalScope = New-ScopeJson -Rust $false -RustScope "none" -ChangedFiles @('docs/literal\backslash.md') -ScopeSchemaVersion 1
+  $literalPlan = Invoke-PlanMode $literalScope
+  Assert-Pass "通过：版本化 scope 的 POSIX 字面反斜杠路径" $literalPlan
+  if ($literalPlan.Code -eq 0) {
+    $literalObject = ($literalPlan.Output.Trim() | ConvertFrom-Json -Depth 10)
+    Assert-Check ($literalObject.pathContract -eq 'repo-relative/v1') "版本化 scope 计划必须声明 v1 路径契约"
+    Assert-Check ($literalObject.scope.changedFiles[0] -eq 'docs/literal\backslash.md') "字面反斜杠在计划中原样保留，不被改写成分隔符"
+    Assert-Check ($literalObject.selfTest -eq $false) "字面反斜杠路径不得误触发门禁专项"
+    Assert-Check ($literalObject.releaseContract -eq $false) "字面反斜杠路径不得误触发发布专项"
+    Assert-Pass "通过：版本化计划与证据重算一致（Verify 同源推导）" (Invoke-GateVerify -PlanJson ($literalObject | ConvertTo-Json -Depth 10) -EvidenceJson $evidenceRustSkipped)
+  }
+
+  # 路径身份碰撞：同一串字面反斜杠输入，在两个入口下必须得到不同结论。
+  # 旧无版本 scope 把它当作 Windows 分隔符写法，归一化后就是仓库里真实存在的门禁脚本；
+  # 版本化 scope 认为它是一个字面文件名，不得冒用门禁专项。
+  $collisionGate = Invoke-PlanMode (New-ScopeJson -Rust $false -RustScope "none" -ChangedFiles @('scripts\verify-ci-gate.ps1'))
+  if ($collisionGate.Code -eq 0) {
+    $collisionGateObject = ($collisionGate.Output.Trim() | ConvertFrom-Json -Depth 10)
+    Assert-Check ($collisionGateObject.selfTest -eq $true) "旧 scope 的 Windows 路径写法确实指向真实门禁脚本"
+  }
+  $collisionGateVersioned = Invoke-PlanMode (New-ScopeJson -Rust $false -RustScope "none" -ChangedFiles @('scripts\verify-ci-gate.ps1') -ScopeSchemaVersion 1)
+  if ($collisionGateVersioned.Code -eq 0) {
+    $collisionGateVersionedObject = ($collisionGateVersioned.Output.Trim() | ConvertFrom-Json -Depth 10)
+    Assert-Check ($collisionGateVersionedObject.scope.changedFiles[0] -eq 'scripts\verify-ci-gate.ps1') "版本化 scope 保留字面反斜杠路径原样"
+    Assert-Check ($collisionGateVersionedObject.selfTest -eq $false) "版本化 scope 的字面反斜杠路径不得冒用门禁专项"
+  }
+
+  $collisionRelease = Invoke-PlanMode (New-ScopeJson -Rust $false -RustScope "none" -ChangedFiles @('.github\workflows\release.yml'))
+  if ($collisionRelease.Code -eq 0) {
+    $collisionReleaseObject = ($collisionRelease.Output.Trim() | ConvertFrom-Json -Depth 10)
+    Assert-Check ($collisionReleaseObject.releaseContract -eq $true) "旧 scope 的 Windows 路径写法确实指向真实发布工作流"
+  }
+  $collisionReleaseVersioned = Invoke-PlanMode (New-ScopeJson -Rust $false -RustScope "none" -ChangedFiles @('.github\workflows\release.yml') -ScopeSchemaVersion 1)
+  if ($collisionReleaseVersioned.Code -eq 0) {
+    $collisionReleaseVersionedObject = ($collisionReleaseVersioned.Output.Trim() | ConvertFrom-Json -Depth 10)
+    Assert-Check ($collisionReleaseVersionedObject.releaseContract -eq $false) "版本化 scope 的字面反斜杠路径不得冒用发布专项"
+  }
+
+  # 真实 release.yml 仍必须触发发布专项，只有它才算发布入口。
+  $realRelease = Invoke-PlanMode (New-ScopeJson -Rust $false -RustScope "none" -ChangedFiles @('.github/workflows/release.yml'))
+  if ($realRelease.Code -eq 0) {
+    $realReleaseObject = ($realRelease.Output.Trim() | ConvertFrom-Json -Depth 10)
+    Assert-Check ($realReleaseObject.releaseContract -eq $true) "真实的 .github/workflows/release.yml 修改仍触发发布专项"
+  }
+
+  # 路径契约不得被自封或降级：scope 与计划必须同源。
+  $planContractForged = New-PlanJson -Rust $false -RustScope "none" -ChangedFiles @('docs/ops/PROGRESS.md') -PathContractOverride 'repo-relative/v1'
+  Assert-Fail "失败：旧 scope 自封 v1 路径契约" (Invoke-GateVerify -PlanJson $planContractForged -EvidenceJson $evidenceRustSkipped) 'plan_path_contract_conflict'
+  $planContractMissing = New-PlanJson -Rust $false -RustScope "none" -ChangedFiles @('docs/ops/PROGRESS.md') -OmitPathContract
+  Assert-Fail "失败：计划缺少路径契约" (Invoke-GateVerify -PlanJson $planContractMissing -EvidenceJson $evidenceRustSkipped) 'plan_path_contract_missing'
+
+  $scopeVersionedAbsolute = @'
+{
+  "schemaVersion": 1,
+  "full": false,
+  "rust": false,
+  "rustScope": "none",
+  "mobileWeb": false,
+  "paseoOrchestration": false,
+  "checkScopeSelfTest": false,
+  "changedFiles": ["/etc/passwd"]
+}
+'@
+  Assert-Fail "失败：版本化 scope 接受绝对路径" (Invoke-PlanMode $scopeVersionedAbsolute) 'CI-GATE-ERROR' 2
+
   # ============ 四、突变敏感度：移除契约校验后绕过用例必须重新通过 ============
   $verifierText = Get-Content -LiteralPath $verifierPath -Raw -Encoding utf8
   $contractMarker = '  Test-PlanContract $plan $errors'
@@ -846,6 +942,20 @@ try {
 
   # ============ 五、工作流静态契约 ============
   Assert-Pass "通过：真实 ci.yml 门禁契约" (Invoke-WorkflowContract $ciWorkflow)
+
+  # 结构化 outputs 的数组序列化：0/1/多项都必须保持 JSON 数组（与 ci.yml 同一惯用法）
+  $zeroArrayJson = ConvertTo-Json -InputObject @() -Compress
+  $singleArrayJson = ConvertTo-Json -InputObject @('linux') -Compress
+  $multiArrayJson = ConvertTo-Json -InputObject @('linux', 'windows') -Compress
+  Assert-Check ($zeroArrayJson -eq '[]') "0 元素输出必须序列化为空数组而不是空字符串（实际：$zeroArrayJson）"
+  Assert-Check ($singleArrayJson -eq '["linux"]') "1 元素输出必须序列化为数组而不是 JSON 字符串（实际：$singleArrayJson）"
+  Assert-Check ($multiArrayJson -eq '["linux","windows"]') "多元素输出序列化为确定性数组（实际：$multiArrayJson）"
+
+  $variantJsonOutput = New-WorkflowVariant ".github/workflows/ci.yml" "ci-json-output" {
+    param($text)
+    $text.Replace('"required_platforms=$(ConvertTo-Json -InputObject @($scope.requiredPlatforms) -Compress)"', '"required_platforms=$((@($scope.requiredPlatforms) | ConvertTo-Json -Compress))"')
+  }
+  Assert-Fail "失败：结构化输出退回管道序列化" (Invoke-WorkflowContract $variantJsonOutput) 'detect_output_json_not_array:required_platforms'
 
   $variantContinueOnError = New-WorkflowVariant ".github/workflows/ci.yml" "ci-continue-on-error" {
     param($text)
