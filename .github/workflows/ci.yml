@@ -5,18 +5,60 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# 对标 Magpie 抗压并发策略：PR 推送新提交时取消旧 run 节省算力；main 永远跑完保障发版基准
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
+  detect-changes:
+    name: Detect Check Scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.scope.outputs.rust }}
+      rust_scope: ${{ steps.scope.outputs.rust_scope }}
+      rust_package_args: ${{ steps.scope.outputs.rust_package_args }}
+      mobile_web: ${{ steps.scope.outputs.mobile_web }}
+      paseo_orchestration: ${{ steps.scope.outputs.paseo_orchestration }}
+      check_scope_self_test: ${{ steps.scope.outputs.check_scope_self_test }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Analyze changed scope and reverse dependencies
+        id: scope
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $json = ./scripts/detect-check-scope.ps1 -Full -Json
+          } elseif ("${{ github.event_name }}" -eq "pull_request") {
+            $json = ./scripts/detect-check-scope.ps1 -BaseRef "origin/${{ github.base_ref }}" -HeadRef HEAD -Json
+          } else {
+            $json = ./scripts/detect-check-scope.ps1 -BaseRef "${{ github.event.before }}" -HeadRef "${{ github.sha }}" -Json
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $scope = ($json | Out-String) | ConvertFrom-Json -ErrorAction Stop
+          Write-Host "变更范围分析结果："
+          Write-Host ($json | Out-String)
+          "rust=$($scope.rust.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "rust_scope=$($scope.rustScope)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "rust_package_args=$($scope.rustPackageArgs)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "mobile_web=$($scope.mobileWeb.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "paseo_orchestration=$($scope.paseoOrchestration.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "check_scope_self_test=$($scope.checkScopeSelfTest.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
   governance-and-privacy:
     name: Git Emoji & Privacy Guard
+    needs: detect-changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -36,14 +78,33 @@ jobs:
           tar -xzf gitleaks.tar.gz gitleaks
           ./gitleaks git --redact --config .gitleaks.toml -v
 
+      - name: Run check scope detector self-test
+        if: needs.detect-changes.outputs.check_scope_self_test == 'true'
+        shell: pwsh
+        run: ./scripts/test-check-scope.ps1
+
+      - name: Run Paseo orchestration regression test
+        if: needs.detect-changes.outputs.paseo_orchestration == 'true'
+        shell: pwsh
+        run: ./scripts/test-paseo-orchestration.ps1
+
   rust-check:
     name: Rust Format, Clippy & Tests
+    needs: detect-changes
+    if: needs.detect-changes.outputs.rust == 'true'
     runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -52,14 +113,39 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        shell: pwsh
+        env:
+          RUST_SCOPE: ${{ needs.detect-changes.outputs.rust_scope }}
+          RUST_PACKAGE_ARGS: ${{ needs.detect-changes.outputs.rust_package_args }}
+        run: |
+          if ($env:RUST_SCOPE -eq 'workspace') {
+            cargo clippy --workspace --all-targets --locked -- -D warnings
+          } else {
+            $pkgArgs = @($env:RUST_PACKAGE_ARGS -split '\s+' | Where-Object { $_ })
+            Write-Host "增量 Clippy 范围: $($pkgArgs -join ' ')"
+            cargo clippy @pkgArgs --all-targets --locked -- -D warnings
+          }
 
-      - name: Run workspace unit & integration tests
-        run: cargo test --workspace
+      - name: Run scoped unit & integration tests
+        shell: pwsh
+        env:
+          RUST_SCOPE: ${{ needs.detect-changes.outputs.rust_scope }}
+          RUST_PACKAGE_ARGS: ${{ needs.detect-changes.outputs.rust_package_args }}
+        run: |
+          if ($env:RUST_SCOPE -eq 'workspace') {
+            cargo test --workspace --locked
+          } else {
+            $pkgArgs = @($env:RUST_PACKAGE_ARGS -split '\s+' | Where-Object { $_ })
+            Write-Host "增量测试范围: $($pkgArgs -join ' ')"
+            cargo test @pkgArgs --locked
+          }
 
   mobile-web-check:
     name: Mobile Web/PWA Typecheck & Build
+    needs: detect-changes
+    if: needs.detect-changes.outputs.mobile_web == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: apps/mobile-web
@@ -90,3 +176,31 @@ jobs:
 
       - name: Verify design system & zero-emoji gate
         run: node ../../scripts/verify-design-system.mjs
+
+  ci-gate:
+    name: CI Gate
+    needs: [detect-changes, governance-and-privacy, rust-check, mobile-web-check]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Summarize scoped CI execution
+        shell: pwsh
+        env:
+          DETECT_RESULT: ${{ needs.detect-changes.result }}
+          GOV_RESULT: ${{ needs.governance-and-privacy.result }}
+          RUST_RESULT: ${{ needs.rust-check.result }}
+          WEB_RESULT: ${{ needs.mobile-web-check.result }}
+        run: |
+          Write-Host "detect-changes=$env:DETECT_RESULT governance-and-privacy=$env:GOV_RESULT rust-check=$env:RUST_RESULT mobile-web-check=$env:WEB_RESULT"
+          if ($env:DETECT_RESULT -ne 'success' -or $env:GOV_RESULT -ne 'success') {
+            Write-Error "前置检测或治理隐私门禁未通过。"
+            exit 1
+          }
+          foreach ($r in @($env:RUST_RESULT, $env:WEB_RESULT)) {
+            if ($r -notin @('success', 'skipped')) {
+              Write-Error "受影响范围内的构建或测试失败（状态：$r）。"
+              exit 1
+            }
+          }
+          Write-Host "✓ 分级 CI 门禁全部通过！"

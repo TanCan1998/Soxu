@@ -538,22 +538,30 @@ impl DaemonState {
                     .get_workspace(workspace_id)
                     .map_err(internal_err)?
                     .ok_or_else(|| not_found_err("工作区"))?;
-                if workspace.archived
-                    || workspace.needs_recovery
-                    || workspace.isolation != WorkspaceIsolation::Local
-                {
+                if workspace.archived || workspace.needs_recovery {
                     return Err(invalid_directory());
                 }
-                let project = self
-                    .store
-                    .get_project(&workspace.project_id)
-                    .map_err(internal_err)?
-                    .ok_or_else(|| not_found_err("项目"))?;
-                let dir = PathBuf::from(project.root_path);
-                if !dir.is_absolute() || !dir.is_dir() {
-                    return Err(invalid_directory());
+                match &workspace.isolation {
+                    WorkspaceIsolation::Local => {
+                        let project = self
+                            .store
+                            .get_project(&workspace.project_id)
+                            .map_err(internal_err)?
+                            .ok_or_else(|| not_found_err("项目"))?;
+                        let dir = PathBuf::from(project.root_path);
+                        if !dir.is_absolute() || !dir.is_dir() {
+                            return Err(invalid_directory());
+                        }
+                        Ok(RunTarget::Directory(dir))
+                    }
+                    WorkspaceIsolation::Worktree { .. } => {
+                        let dir = self.resolve_ready_worktree_dir(
+                            &workspace.workspace_id,
+                            &workspace.display_path,
+                        )?;
+                        Ok(RunTarget::Directory(dir))
+                    }
                 }
-                Ok(RunTarget::Directory(dir))
             }
         }
     }

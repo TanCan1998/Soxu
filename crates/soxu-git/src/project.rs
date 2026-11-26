@@ -6,6 +6,11 @@ use crate::{GitError, GitProbe};
 
 const NOT_REPOSITORY: &[u8] =
     b"fatal: not a git repository (or any of the parent directories): .git\n";
+// Linux 的 Git 会额外说明已越过文件系统边界，且挂载点路径随运行环境变化。
+const NOT_REPOSITORY_MOUNT_POINT_PREFIX: &[u8] =
+    b"fatal: not a git repository (or any parent up to mount point ";
+const NOT_REPOSITORY_MOUNT_POINT_SUFFIX: &[u8] =
+    b")\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LocalProject {
@@ -72,7 +77,7 @@ impl GitProbe {
             let code = output.status.code();
             if code == Some(128)
                 && output.stdout.is_empty()
-                && output.stderr.as_slice() == NOT_REPOSITORY
+                && is_not_repository_stderr(&output.stderr)
             {
                 check_skipped_metadata(&directory, None)?;
                 return Ok(LocalProject::Directory { root: directory });
@@ -119,6 +124,24 @@ impl GitProbe {
             common_dir,
         }))
     }
+}
+
+/// 严格判定「当前目录不在任何 Git 仓库内」的 stderr 文本。
+///
+/// 只承认两种确定格式：Git for Windows 的固定单行文案，以及 Linux 会带上挂载点的两行文案。
+/// 其余形式（如 `fatal: not a git repository: …`、畸形或多行错误）一律返回 false，
+/// 由调用方继续按 fail-closed 处理，绝不降级为「普通目录」。
+fn is_not_repository_stderr(stderr: &[u8]) -> bool {
+    if stderr == NOT_REPOSITORY {
+        return true;
+    }
+    let Some(mount_point) = stderr
+        .strip_prefix(NOT_REPOSITORY_MOUNT_POINT_PREFIX)
+        .and_then(|rest| rest.strip_suffix(NOT_REPOSITORY_MOUNT_POINT_SUFFIX))
+    else {
+        return false;
+    };
+    !mount_point.is_empty() && !mount_point.contains(&b'\n')
 }
 
 fn check_skipped_metadata(directory: &Path, root: Option<&Path>) -> Result<(), ProjectOpenError> {
@@ -187,5 +210,53 @@ fn check_readable_file(path: &Path) -> io::Result<()> {
         Ok(_) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        NOT_REPOSITORY, NOT_REPOSITORY_MOUNT_POINT_PREFIX, NOT_REPOSITORY_MOUNT_POINT_SUFFIX,
+        is_not_repository_stderr,
+    };
+
+    fn mount_point_form(mount_point: &[u8]) -> Vec<u8> {
+        [
+            NOT_REPOSITORY_MOUNT_POINT_PREFIX,
+            mount_point,
+            NOT_REPOSITORY_MOUNT_POINT_SUFFIX,
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn accepts_exact_and_mount_point_not_repository_messages() {
+        assert!(is_not_repository_stderr(NOT_REPOSITORY));
+        assert!(is_not_repository_stderr(&mount_point_form(b"/")));
+        assert!(is_not_repository_stderr(&mount_point_form(
+            b"/mnt/f/workspace/repo"
+        )));
+        assert!(is_not_repository_stderr(&mount_point_form(
+            b"C:/workspace/repo with space"
+        )));
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_malformed_not_repository_messages() {
+        for stderr in [
+            b"fatal: not a git repository: .git\n".as_slice(),
+            b"fatal: not a git repository: /mnt/f/repo/.git\n",
+            b"fatal: not a git repository\n",
+            b"fatal: not a git repository (or any parent up to mount point )\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n",
+            b"fatal: not a git repository (or any parent up to mount point /\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n",
+            b"fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).",
+            b"fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\nextra\n",
+            b"fatal: not a git repository (or any parent up to mount point /a\nb)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n",
+            b"fatal: not a git repository (or any of the parent directories): .git",
+            b"error: not a git repository (or any of the parent directories): .git\n",
+            b"",
+        ] {
+            assert!(!is_not_repository_stderr(stderr), "{stderr:?}");
+        }
     }
 }

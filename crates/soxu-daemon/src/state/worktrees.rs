@@ -1,15 +1,16 @@
 //! 已检出 Worktree 的宿主登记与 direct MCP 上下文准备。
-//! 原生 Agent 启动与 Worktree 会话执行由后续合流接线。
+//! 只读原生会话由 `native.rs` 在首轮、续接与 FIFO 出队前调用 `resolve_ready_worktree_dir` 复核。
 
 use super::{DaemonState, internal_err, lock_err};
 use anyhow::{Result, anyhow, ensure};
 use soxu_git::{CheckoutStatus, GitProbe, WorktreeHead, WorktreeRegistrationCoordinator};
 use soxu_magpie::{
-    EnvironmentMode, WorktreeContext, WorktreeContextError, WorktreeDirectory,
-    prepare_worktree_context,
+    EnvironmentMode, WORKTREE_CONTEXT_FILE, WorktreeContext, WorktreeContextError,
+    WorktreeDirectory, prepare_worktree_context,
 };
 use soxu_protocol::{ActionableError, ErrorCode, WorkspaceIsolation, WorkspaceSummary};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// 宿主授权的一次接入请求。路径和协调域由本机可信调用方指定。
 pub struct WorktreeAdmissionRequest<'a> {
@@ -190,6 +191,48 @@ impl DaemonState {
         Ok(())
     }
 
+    pub(super) fn resolve_ready_worktree_dir(
+        &self,
+        workspace_id: &str,
+        expected_display_path: &str,
+    ) -> Result<PathBuf, ActionableError> {
+        let damaged = |summary| {
+            ActionableError::new(
+                ErrorCode::WorkspaceDamaged,
+                summary,
+                "无法启动该工作区下的原生对话",
+                "请重新核验工作区并重试上下文准备",
+            )
+        };
+        let ready = self
+            .worktree_ready
+            .lock()
+            .map_err(|_| lock_err("worktree_ready"))?;
+        let directory = ready
+            .get(workspace_id)
+            .ok_or_else(|| damaged("Worktree 尚未通过宿主接入复核"))?;
+        directory
+            .recheck()
+            .map_err(|_| damaged("Worktree 目录复核未通过"))?;
+        if directory.path() != Path::new(expected_display_path) {
+            return Err(damaged("Worktree 目录与持久化路径不一致"));
+        }
+
+        if self.magpie_detected {
+            let manifest = directory.anchored_path().join(WORKTREE_CONTEXT_FILE);
+            match fs::symlink_metadata(manifest) {
+                Ok(metadata) if is_link_or_reparse_point(&metadata) => {
+                    return Err(damaged("Worktree 上下文清单不能是符号链接或重解析点"));
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err(damaged("无法复核 Worktree 上下文清单")),
+            }
+        }
+
+        Ok(directory.path().to_path_buf())
+    }
+
     pub(super) fn worktree_directory_ready(
         &self,
         workspace_id: &str,
@@ -200,6 +243,20 @@ impl DaemonState {
             .map_err(|_| lock_err("worktree_ready"))?
             .get(workspace_id)
             .is_some_and(|directory| directory.recheck().is_ok()))
+    }
+}
+
+fn is_link_or_reparse_point(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        metadata.file_type().is_symlink()
+            || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
     }
 }
 
