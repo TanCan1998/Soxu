@@ -19,7 +19,7 @@
 
 | ID | 适用环节 | 强制动作 / 禁忌 | 级别 / 计数 | 当前落点 |
 | :--- | :--- | :--- | :--- | :--- |
-| `L-001` | 并行构建 | 禁用 `mise run`，须注入 `mise env --json` 再覆写独立 `$env:CARGO_TARGET_DIR` | `L3 · Seen 3×` | `AGENTS.md` / `SKILL.md` / `CODE_STANDARDS.md` |
+| `L-001` | 并行构建 | 禁用 `mise run`，须注入 `mise env --json`（`MISE_DISABLE_TOOLS=java,maven`）再覆写独立 `$env:CARGO_TARGET_DIR` | `L3 · Seen 3×` | `AGENTS.md` / `SKILL.md` / `CODE_STANDARDS.md` |
 | `L-002` | WSL/Linux 复验 | 前置真实 Rust/Node `bin` 绕开 `mise` shims 并独立 cache；不在 WSL 内跑 `git` | `L3 · Seen 2×` | `SKILL.md` / 本文 |
 | `L-003` | Pi 子代理选型 | 先用 `pi --list-models` 核实，优先高稳定自动路由组 `magpie/auto/deepseek-v4.1-flash-1017` | `L2 · Seen 2×` | 派发默认预设 / 本文 |
 | `L-004` | AOCI stdio MCP | `$env:TEMP` 独立 `.mjs` 首包发 `id: 1` `initialize`；Overview 截断按合同停链走定向检索；不动 `.aoci/config.json` | `L3 · Seen 3×` | `SKILL.md` / 本文 |
@@ -38,7 +38,7 @@
 
 ### `L-001` 并行隔离禁止 `mise run`，必须进程内注入环境并覆写独立 `CARGO_TARGET_DIR`
 - **场景与根因**（`Seen 3× (2026-11-25, 2026-11-26)`）：`mise run check-all` 会按 `mise.toml` 重新加载默认 `CARGO_TARGET_DIR = "../.cargo-target/soxu"`，多条 Worktree 并行时抢占同一 Cargo 文件锁。
-- **预防动作**：先注入 `mise env --json`（`MISE_DISABLE_TOOLS=python,java,maven`）到当前进程，再显式覆写独立 `$env:CARGO_TARGET_DIR`，随后直接执行 `mise-doctor.ps1`、`cargo` 或 `check-all.ps1`。
+- **预防动作**：先注入 `mise env --json`（`MISE_DISABLE_TOOLS=java,maven`、`PYTHONUTF8=1`）到当前进程，再显式覆写独立 `$env:CARGO_TARGET_DIR`，随后直接执行 `mise-doctor.ps1`、`cargo` 或 `check-all.ps1`。
 - **验证方式**：多路并行无 `Blocking waiting for file lock` 且产物落入各自缓存目录；**状态**：活跃（已晋升入 `CODE_STANDARDS.md`）。
 
 ### `L-002` WSL Linux 真机构建绕开 `mise` shims 与 Windows `.git` 隔离约定

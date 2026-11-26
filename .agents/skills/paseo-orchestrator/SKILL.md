@@ -90,8 +90,10 @@ pwsh -NoProfile -File scripts/paseo-ctl.ps1 workspace create `
 **并行构建环境示例。** 严禁用 `mise run ...` 启动门禁或 doctor，子任务会重读 `mise.toml` 并覆盖独立 target。先注入 `mise env --json`，再显式覆写 `$env:CARGO_TARGET_DIR` 为各自独立目录，随后直接运行脚本或 `cargo`。
 
 ```powershell
-$env:MISE_DISABLE_TOOLS = "python,java,maven"
+$env:MISE_DISABLE_TOOLS = "java,maven"
 $env:PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS = "false"
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 $miseEnvJson = mise env --json
 if ($LASTEXITCODE -ne 0) { throw "mise env --json 执行失败" }
 $miseEnv = ($miseEnvJson | Out-String) | ConvertFrom-Json
@@ -113,7 +115,7 @@ pwsh -NoProfile -File scripts/paseo-reference-context.ps1 `
 
 检查清单的 `issues`、`aoci.statusChecked` 与 `codegraph.statusChecked`，把选中参考的根、资产摘要、查询参数及明确回退完整写进任务书；清单本身不证明子代理已经读懂参考。资产缺失或状态异常不能隐藏，也不自动重建。若需开工前强制所有参考可查询，给盘点脚本加 `-RequireReady`。子代理开工后应回报参考根与 HEAD、AOCI 实际读取/校验状态、CodeGraph 实际查询与源码定位，PR 保留证据及取舍。
 
-**启动（仅限 `pi` agent + 绑定 `mise` 环境）。** 从主控仓库根执行。以下变量使用本次已核实的实际值（`$model` 须为 `pi --list-models` 验证过的 `magpie/...` 模型，如 `magpie/group/gpt-6.2-sol` / `magpie/group/gpt-6.2-astra`）。首条可见消息用短单行写明 Issue、参考项目名称、AOCI 和 CodeGraph、规定 `mise` 环境，并说明随后还有完整任务书。当前 `run --help` 只提供位置参数 `<prompt>`，禁止经 `run` 的位置参数传递多行任务书。统一通过 `scripts/paseo-run-pi.ps1` 启动，自动注入工作区 `mise env --json` 工具链前置 `PATH`、`MISE_DISABLE_TOOLS=python,java,maven` 与锁定变量：
+**启动（仅限 `pi` agent + 绑定 `mise` 环境）。** 从主控仓库根执行。以下变量使用本次已核实的实际值（`$model` 须为 `pi --list-models` 验证过的 `magpie/...` 模型，如 `magpie/group/gpt-6.2-sol` / `magpie/group/gpt-6.2-astra`）。首条可见消息用短单行写明 Issue、参考项目名称、AOCI 和 CodeGraph、规定 `mise` 环境，并说明随后还有完整任务书。当前 `run --help` 只提供位置参数 `<prompt>`，禁止经 `run` 的位置参数传递多行任务书。统一通过 `scripts/paseo-run-pi.ps1` 启动，自动注入工作区 `mise env --json` 工具链前置 `PATH`、`MISE_DISABLE_TOOLS=java,maven`、`PYTHONUTF8=1` 与锁定变量：
 
 ```powershell
 pwsh -NoProfile -File scripts/paseo-run-pi.ps1 `

@@ -14,6 +14,12 @@ try {
   cargo clippy --version
   node -v
   pnpm -v
+  $pyCmd = Get-Command python -ErrorAction SilentlyContinue
+  if ($pyCmd) {
+    Write-Host ("  [ok] python: {0} ({1})" -f ((& $pyCmd.Source --version 2>&1 | Out-String).Trim()), $pyCmd.Source)
+  } else {
+    Write-Host "  [missing] python (可选：用于辅助脚本)" -ForegroundColor Yellow
+  }
 
   foreach ($tool in @("gitleaks", "gh", "git", "codegraph", "pi")) {
     $cmd = Get-Command $tool -ErrorAction SilentlyContinue
