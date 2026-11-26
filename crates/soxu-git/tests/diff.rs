@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 use soxu_git::{
@@ -78,8 +78,19 @@ impl Fixture {
     }
 
     fn commit(&self) {
+        static COMMIT_SEQ: AtomicU64 = AtomicU64::new(0);
         self.git(["add", "--all"]);
-        self.git(["commit", "-qm", "fixture"]);
+        // 并行测试中的独立仓库也可能提交相同内容，为每次提交分配不同的时间戳。
+        let seq = COMMIT_SEQ.fetch_add(1, Ordering::Relaxed);
+        let date = format!("{} +0000", 1_700_000_000 + seq);
+        success(
+            self.command(&self.root)
+                .env("GIT_AUTHOR_DATE", &date)
+                .env("GIT_COMMITTER_DATE", &date)
+                .args(["commit", "-qm", "fixture"])
+                .output()
+                .expect("执行夹具提交"),
+        );
     }
 
     async fn diff(
@@ -670,6 +681,7 @@ async fn refuses_conflicts_gitlinks_and_missing_blobs() {
             .await,
         Err(DiffError::Unsupported("子模块"))
     ));
+    assert_ne!(head, commit);
     assert!(matches!(
         fixture
             .diff(
