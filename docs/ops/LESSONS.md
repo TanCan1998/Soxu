@@ -31,10 +31,11 @@
 | `L-010` | PR 关联与防竞态合入 | PR 正文裸写 `Closes #<num>` 不套反引号；合入强制带 `--match-head-commit <reviewed_sha>` | `L3 · Seen 1×` | `CODE_STANDARDS.md` / `SKILL.md` / 本文 |
 | `L-011` | `.ps1` UTF-8 防乱码 | 中文 Windows 无终端宿主默认 CP936；读写 `git` 输出的门禁脚本开头必设 `Console/OutputEncoding = UTF8` | `L3 · Seen 1×` | `check-all.ps1` / `verify-commits-and-privacy.ps1` |
 | `L-012` | Pi 上下文与缓存 | 项目级 `.pi/settings.json` 必设 `autoload: false` + `["!**"]` 禁 `context-mode` 防 `.pi/npm/` 漂移，且 `trust.json` 覆 worktrees | `L3 · Seen 1×` | `.pi/settings.json` / `.gitignore` / `SKILL.md` |
-| `L-013` | 平台矩阵告警 | `-D warnings` 只译当前平台分支；macOS 目标必跑 `cargo clippy --target aarch64-apple-darwin` 交叉证据，不加 `#[allow]`、不移栽 Linux 原语 | `L2 · Seen 1×` | 本文 / 波次验收 |
+| `L-013` | 平台矩阵告警 | `-D warnings` 只译当前平台分支，且覆盖范围必须是全 workspace `--all-targets`（含集成测试目标）；平台专用符号的 `use` 必须与用例同 `cfg` 门控；缺 Darwin C 工具链时交叉不可得，标未验并由原生 Runner 补齐；不加 `#[allow]`、不移栽 Linux 原语 | `L2 · Seen 2×` | 本文 / 波次验收 |
 | `L-014` | 测试夹具后台维护 | 夹具 Git 命令必须与生产只读入口同源加 `-c maintenance.auto=false -c gc.auto=0`；回归用 trace2 `child_start`/`child_exit`，启动与退出须同 `sid` + 同 `child_id`；正向对照加 `*autoDetach=false`，只按观察到的同进程退出证据表述，不认定后代已回收 | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-015` | 管道退出码 | `cargo ... \| tail` 拿到的是 `tail` 的 0；WSL/Linux 验证脚本必 `set -euo pipefail` 或查 `${PIPESTATUS[0]}`，重跑前 `--no-run` 重建并核对二进制 SHA/mtime | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-016` | 测试内子进程等待 | 观察“某子进程是否被派生”时，受测进程 stdin/stdout/stderr 全 `Stdio::null()`，证据只从 trace2 读；等待用 `spawn`+`try_wait`+截止+`kill`+回收窗口，五态可区分（成功/非零退出/超时/观察异常/回收未确认）；禁 `output()` 无界收集 | `L2 · Seen 1×` | 本文 / 波次验收 |
+| `L-017` | 夹具环境隔离 | 真实 run 块在隔离子进程执行时不得依赖宿主预装工具：注入受控版本桩（rustc/cargo/node/pnpm）并把子进程 PATH 限为「桩目录 + pwsh 目录 + 系统目录」；桩每次调用写日志、证据字段须等于桩值，并加「无桩目录时不得出现桩值」负例；POSIX 桩的 PATH 项须做 MSYS 规范化（Windows 的 `C:/…` 会被 bash 的 PATH 冒号拆成两项，须 `cygpath -u` 得 `/c/…`）；桩只用于夹具，生产 Finalize 仍走真实工具链且工具缺失时失败闭合 | `L2 · Seen 1×` | `test-ci-gate.ps1` / 本文 |
 
 ---
 
@@ -101,9 +102,9 @@
 - **验证方式**：AOCI `verify`/`check` 对齐、新工作树 `setup-worktree.ps1` 就绪且 Pi 启动不触发 `ctx_*` 拒读循环；**状态**：活跃（已同步写入 `ADR-010`）。
 
 ### `L-013` 平台矩阵告警只在目标平台编译时可见，必须交叉 Clippy 取证
-- **场景与根因**（`Seen 1× (2026-11-27)`）：`cargo clippy ... -- -D warnings` 只编译当前主机的 `cfg` 分支。`soxu-git` 的 `open_handle` 在 `#[cfg(not(any(target_os = "linux", windows)))]` 分支上留下未使用参数与 `needless_return`，Windows/Linux 本地与远端都不报警，直到 `macos-15` ARM64 原生 Runner 才暴露；反之 Linux 专属告警在 Windows 同样隐形。
-- **预防动作**：涉及平台条件编译的 crate 合入前必查 `rustup target list --installed`，并用 `cargo clippy -p <crate> --all-targets --target aarch64-apple-darwin --locked -- -D warnings` 补交叉编译证据。修法必须按 `cfg` 拆函数、保持 `UnsupportedPlatform` 等 fail-closed 语义，禁止 `#[allow]` 掩盖、禁止把 Linux 原语（`O_NOFOLLOW`/`O_DIRECTORY`）放宽到 Darwin。
-- **验证方式**：交叉 Clippy 零告警 + 远端对应平台 Runner 原生门禁；报告中严格区分「交叉编译证据」与「真机执行」，不得把前者写成后者。**状态**：活跃。
+- **场景与根因**（`Seen 2× (2026-11-27)`）：`cargo clippy ... -- -D warnings` 只编译当前主机的 `cfg` 分支。`soxu-git` 的 `open_handle` 在 `#[cfg(not(any(target_os = "linux", windows)))]` 分支上留下未使用参数与 `needless_return`，Windows/Linux 本地与远端都不报警，直到 `macos-15` ARM64 原生 Runner 才暴露；反之 Linux 专属告警在 Windows 同样隐形。第二次同因不同面：`crates/soxu-daemon/tests/worktree_lifecycle.rs` 把 `state::WorktreeAdmissionRequest`、`soxu_git::GitProbe`、`WORKTREE_CONTEXT_FILE` 写成顶层无条件 `use`，而使用点全在 `#[cfg(windows)]` 用例与 `#[cfg(target_os = "linux")]` 模块内，macOS 编译面零使用点，遂在集成测试目标上报三条 `unused import`（run `45929401718` / job `140278345298`，测试步骤 skipped，证据为 `build_failed`）。
+- **预防动作**：涉及平台条件编译的 crate 合入前必查 `rustup target list --installed`，并用 `cargo clippy -p <crate> --all-targets --target aarch64-apple-darwin --locked -- -D warnings` 补交叉编译证据。修法必须按 `cfg` 拆函数、保持 `UnsupportedPlatform` 等 fail-closed 语义，禁止 `#[allow]` 掩盖、禁止把 Linux 原语（`O_NOFOLLOW`/`O_DIRECTORY`）放宽到 Darwin。由本次新增两点：①覆盖范围口径写“全 workspace `--all-targets`”，不得用某个 crate（如 `soxu-git`）的交叉 Clippy 代表其它 crate 的集成测试目标已验证；②写测试时，平台专用符号的 `use` 必须与使用它的用例同 `cfg` 门控（形如 `#[cfg(any(windows, target_os = "linux"))] use ...;`），不要先写顶层无条件导入、等 CI 报错再拆。
+- **验证方式**：交叉 Clippy 零告警 + 远端对应平台 Runner 原生门禁；报告中严格区分「交叉编译证据」与「真机执行」，不得把前者写成后者。若交叉本身被环境阻断，必须如实公示并标未验：本次 `--target aarch64-apple-darwin` `exit 101`，停在 `libsqlite3-sys` 的 `cc-rs: failed to find tool "cc"`（无 Darwin C 工具链/SDK），属 C 构建边界而非“测试目标 Clippy 已通过”；不得为此装 SDK、反复重试交叉或修改依赖，改用“macOS 编译面只保留无条件顶层代码”逐处比对使用点（人工使用点审查只用于定位，双平台全绿不证明 Darwin lint 通过），并交由 `#88` 合流后的真实 `macos-15` Runner 用“原错误 + 修复后同目标 Clippy”组成回退证据。**状态**：活跃。
 
 ### `L-014` 测试夹具的 Git 命令必须与生产只读入口同源禁用后台维护
 - **场景与根因**（`Seen 1× (2026-11-27)`）：run `45914578287` 的 Ubuntu 24.04 任务上，`binary_and_non_utf8_text_keep_distinct_output_contracts` 的整树快照只差 `.git/objects/maintenance.lock` 的增删与 `.git/objects` 的 mtime。根因是**夹具自己的 `git commit`** 派生了 detached `git maintenance run --auto`（trace2 可见 `child_start` 带 `--detach`），它持有 `objects/maintenance.lock` 并推进目录 mtime，与快照断言并发写。生产只读入口（`probe.rs`、`checkpoint/git.rs`、`repository_create/sandbox.rs`）都已用 `-c maintenance.auto=false -c gc.auto=0` 关闭，夹具漏了这套同源守卫。

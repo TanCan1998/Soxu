@@ -539,9 +539,9 @@
     },
     "crates/soxu-daemon/tests/worktree_lifecycle.rs": {
       "role": "observe",
-      "sha256": "d5e82eba1f913e9bd0f0e00f4c4d16fbed60fa80fbf515d67fd9af4bcec1a044",
-      "size": 33761,
-      "normalized_sha256": "d5e82eba1f913e9bd0f0e00f4c4d16fbed60fa80fbf515d67fd9af4bcec1a044"
+      "sha256": "47e4235afb4c34269794b734c5e33951feb2416b4996017ea61c61c32dbcf9c1",
+      "size": 33920,
+      "normalized_sha256": "47e4235afb4c34269794b734c5e33951feb2416b4996017ea61c61c32dbcf9c1"
     },
     "crates/soxu-desktop/Cargo.toml": {
       "role": "index",
@@ -1133,9 +1133,9 @@
     },
     "docs/ops/LESSONS.md": {
       "role": "index",
-      "sha256": "c96999a399eb489b52eb03a32f4b7905a9fcf3d0a480c0ad76a2f3069ec1d0d3",
-      "size": 20506,
-      "normalized_sha256": "c96999a399eb489b52eb03a32f4b7905a9fcf3d0a480c0ad76a2f3069ec1d0d3"
+      "sha256": "43be505e05b66ea9fcf414e932ea6b40c25c1fadf9e954602387b2a6c1456b05",
+      "size": 22148,
+      "normalized_sha256": "43be505e05b66ea9fcf414e932ea6b40c25c1fadf9e954602387b2a6c1456b05"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
