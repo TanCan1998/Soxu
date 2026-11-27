@@ -52,6 +52,18 @@ Invoke-Step "[1/7] 校验 Git Emoji 提交历史与隐私安全..." {
   if ($plan.checkScopeSelfTest) {
     pwsh -NoProfile -File scripts/test-check-scope.ps1
   }
+  # CI-D：工具链版本的唯一真相源是 mise.toml。读取脚本或工作流变更时必须跑它的回归矩阵，
+  # 否则 CI 可能悄悄退回已安装版本或硬编码常量，而本地门禁看不出来。
+  $toolchainPlan = if ($plan.PSObject.Properties["changedFiles"]) { @($plan.changedFiles) } else { @() }
+  $toolchainTouched = @($toolchainPlan | Where-Object {
+      $_ -eq "mise.toml" -or
+      $_ -eq "scripts/read-mise-versions.ps1" -or
+      $_ -eq "scripts/test-read-mise-versions.ps1" -or
+      $_ -eq ".github/workflows/ci.yml"
+    }).Count -gt 0
+  if ($plan.full -or $toolchainTouched) {
+    pwsh -NoProfile -File scripts/test-read-mise-versions.ps1
+  }
 }
 
 if ($plan.mobileWeb) {

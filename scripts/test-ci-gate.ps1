@@ -1930,7 +1930,18 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
     'Finalize sanitized format evidence'
     'Finalize sanitized platform evidence'
     'Finalize sanitized mobile web evidence'
+    'Write sanitized platform summary'
+    'Write sanitized gate summary'
   )
+  # CI-D 工具链接线只做结构断言：它们在 Actions 里要拿真实 rustc/node/pnpm 与
+  # mise.toml 比对，受控版本桩下必然失配，强行往返只会得到一个恒假的断言。
+  # 它们的严格性由 test-read-mise-versions.ps1 的 81 项断言覆盖。
+  $expectedToolchainBlocks = [ordered]@{
+    'Read locked toolchain versions from mise.toml'           = '-GitHubOutput'
+    'Assert installed Rust version matches mise.toml'         = '-AssertInstalled'
+    'Assert installed Rust & Cargo versions match mise.toml'  = '-AssertInstalled'
+    'Assert installed Node & pnpm versions match mise.toml'   = '-AssertInstalled'
+  }
   # Stage step 的真实名字对应唯一采集阶段；漏一个就是少一个平台的执行证据。
   $expectedStageBlocks = [ordered]@{
     'Check formatting'                          = 'cargo-fmt'
@@ -1938,7 +1949,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
     'Run Clippy'                                = 'cargo-clippy'
     'Run scoped unit & integration tests'       = 'cargo-test'
   }
-  $expectedAllBlocks = @($expectedExecutableBlocks) + @($expectedStageBlocks.Keys)
+  $expectedAllBlocks = @($expectedExecutableBlocks) + @($expectedStageBlocks.Keys) + @($expectedToolchainBlocks.Keys)
 
   $allBlocks = @(Get-RunBlocks $ciWorkflow)
   $blockGrouped = @{}
@@ -1951,10 +1962,21 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
   Assert-Check ($missingBlocks.Count -eq 0) "缺少预期的脚本接线 step：$($missingBlocks -join ', ')"
 
   # 反向覆盖：真实工作流里调脚本的 step 必须全部列入，否则新增接线会漏测。
-  $scriptStepBlocks = @($allBlocks | Where-Object { $_.body -match 'scripts/(verify-ci-gate|collect-ci-evidence)\.ps1' })
+  $scriptStepBlocks = @($allBlocks | Where-Object { $_.body -match 'scripts/(verify-ci-gate|collect-ci-evidence|read-mise-versions)\.ps1' })
   $unlistedBlocks = @($scriptStepBlocks | Where-Object { $expectedAllBlocks -notcontains $_.name })
   Assert-Check ($unlistedBlocks.Count -eq 0) "存在未纳入回归的脚本接线 step：$((@($unlistedBlocks | ForEach-Object { $_.name })) -join ', ')"
   Assert-Check ($scriptStepBlocks.Count -eq $expectedAllBlocks.Count) "调脚本的接线 step 总数必须精确为 $($expectedAllBlocks.Count)（实际 $($scriptStepBlocks.Count)）"
+
+  # CI-D 工具链接线：结构必须真的把版本交给 GHA 输出 / 必须真的做实测比对。
+  foreach ($toolchainStepName in $expectedToolchainBlocks.Keys) {
+    $toolchainBlocks = $blockGrouped[$toolchainStepName]
+    Assert-Check ($null -ne $toolchainBlocks) "缺少工具链接线 step「$toolchainStepName」"
+    if ($null -eq $toolchainBlocks) { continue }
+    $toolchainBody = $toolchainBlocks[0].body
+    $requiredFlag = [string]$expectedToolchainBlocks[$toolchainStepName]
+    Assert-Check ($toolchainBody.Contains($requiredFlag)) "工具链接线「$toolchainStepName」必须含 $requiredFlag"
+    Assert-Check ($toolchainBody -match 'if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}') "工具链接线「$toolchainStepName」必须把脚本非零退出传递出去"
+  }
 
   # Stage step 不执行 cargo，但必须断言其采集调用形态与阶段名完全正确。
   foreach ($stageStepName in $expectedStageBlocks.Keys) {
@@ -2034,6 +2056,18 @@ exit 0
     (@($rtStubBin, $PSHOME, '/usr/bin', '/bin') -join ':')
   }
 
+  # CI-D Summary：给“Write sanitized platform summary”准备真实 stages.json 与 Summary 目标文件。
+  $rtStagesPath = Join-Path $rtTemp 'ci-stages/stages.json'
+  New-Item -ItemType Directory -Path (Split-Path -Parent $rtStagesPath) -Force | Out-Null
+  $rtStageRecords = @(
+    [ordered]@{ name = 'cargo-fetch'; command = 'cargo fetch --locked'; status = 'passed'; exitCode = 0; durationMs = 12500 }
+    [ordered]@{ name = 'cargo-clippy'; command = 'cargo clippy'; status = 'passed'; exitCode = 0; durationMs = 61234 }
+    [ordered]@{ name = 'cargo-test'; command = 'cargo test'; status = 'passed'; exitCode = 0; durationMs = 90300 }
+  )
+  Set-Content -LiteralPath $rtStagesPath -Value (ConvertTo-Json -InputObject @($rtStageRecords) -Depth 8 -Compress) -Encoding utf8 -NoNewline
+  $rtStepSummaryPath = Join-Path $rtTemp 'step-summary.md'
+  Set-Content -LiteralPath $rtStepSummaryPath -Value '' -Encoding utf8 -NoNewline
+
   $rtEnv = @{
     GATE_PLAN              = $evPlan
     DETECT_RESULT          = 'success'
@@ -2041,6 +2075,10 @@ exit 0
     FMT_RESULT             = 'success'
     RUST_RESULT            = 'success'
     WEB_RESULT             = 'skipped'
+    SUMMARY_PLATFORM       = 'windows'
+    SUMMARY_CACHE          = 'hit'
+    SUMMARY_STAGES         = $rtStagesPath
+    GITHUB_STEP_SUMMARY    = $rtStepSummaryPath
     EVIDENCE_JOB_STATUS    = 'success'
     EVIDENCE_RUN_ID        = $script:testRunId
     EVIDENCE_RUN_ATTEMPT   = $script:testAttempt
@@ -2085,7 +2123,7 @@ exit 0
     foreach ($block in $rtBlocks) {
       # 消费型 step 读共享输入根；Finalize 必须写进自己的 RUNNER_TEMP，
       # 共用同一根会互相覆盖，也无法证明每个作业只产出自己的那份证据。
-      $isConsumer = $block.name -like 'Build deterministic*' -or $block.name -like 'Verify *'
+      $isConsumer = $block.name -like 'Build deterministic*' -or $block.name -like 'Verify *' -or $block.name -like 'Write sanitized*'
       if ($isConsumer) {
         $blockTemp = $rtTemp
       } else {
@@ -2136,6 +2174,18 @@ exit 0
     foreach ($stubTool in @('rustc', 'cargo', 'node', 'pnpm')) {
       Assert-Check ($stubCalls -match "(?m)^$stubTool\b") "受控版本桩 $stubTool 必须被真实 run 块调用（桩日志：$($stubCalls.Trim())）"
     }
+
+    # CI-D：Summary 块必须真的产出脱敏摘要（阶段耗时、缓存状态、计划内跳过原因）。
+    $summaryText = ''
+    if (Test-Path -LiteralPath $rtStepSummaryPath) { $summaryText = [string](Get-Content -LiteralPath $rtStepSummaryPath -Raw -Encoding utf8) }
+    Assert-Check ($summaryText.Contains('cargo-clippy')) "Summary 块必须写入阶段名"
+    Assert-Check ($summaryText.Contains('61.2')) "Summary 块必须写入秒级耗时（61.2）"
+    Assert-Check ($summaryText.Contains('依赖缓存：hit')) "Summary 块必须回显缓存状态"
+    Assert-Check ($summaryText.Contains('阶段累计')) "Summary 块必须给出阶段累计，并标注不含排队与 checkout"
+    Assert-Check ($summaryText.Contains('mobile-web-check')) "Summary 块必须列出计划内跳过的作业"
+    Assert-Check ($summaryText.Contains('跳过：1 项')) "Summary 块必须写明确的跳过数量"
+    Assert-Check (-not ($summaryText -match '[A-Za-z]:\\')) "Summary 块不得写入 Windows 绝对路径"
+    Assert-Check (-not ($summaryText -match '/(home|Users)/')) "Summary 块不得写入用户目录"
     Assert-Check ($stubCalls -match '(?m)^pnpm --version') "移动端 Finalize 块必须以 pnpm --version 形式查询版本"
 
     $previousPathForProbe = [System.Environment]::GetEnvironmentVariable('PATH')
@@ -2281,6 +2331,106 @@ $args = @(
     $text.Replace("    if: needs.detect-changes.outputs.rust == 'true'`n", "")
   }
   Assert-Fail "失败：rust 作业失去计划门控" (Invoke-WorkflowContract $variantUngatedRust) 'rust_job_ungated'
+
+  # ============ 五·一、CI-D 契约：工具链来源 / 缓存键 / 并发分组 / 摘要接线 ============
+  $variantToolchainHardcoded = New-WorkflowVariant ".github/workflows/ci.yml" "ci-toolchain-hardcoded" {
+    param($text)
+    $text.Replace('          toolchain: ${{ needs.detect-changes.outputs.rust_version }}' + "`n" + '          components: rustfmt', '          toolchain: 1.99.1' + "`n" + '          components: rustfmt')
+  }
+  Assert-Fail "失败：Rust 工具链退回硬编码版本" (Invoke-WorkflowContract $variantToolchainHardcoded) 'toolchain_version_hardcoded'
+
+  $variantNodeHardcoded = New-WorkflowVariant ".github/workflows/ci.yml" "ci-node-hardcoded" {
+    param($text)
+    $text.Replace('          node-version: ${{ needs.detect-changes.outputs.node_version }}', "          node-version: '26'")
+  }
+  Assert-Fail "失败：Node 版本退回硬编码" (Invoke-WorkflowContract $variantNodeHardcoded) 'node_version_hardcoded'
+
+  $variantPnpmHardcoded = New-WorkflowVariant ".github/workflows/ci.yml" "ci-pnpm-hardcoded" {
+    param($text)
+    $text.Replace('          version: ${{ needs.detect-changes.outputs.pnpm_version }}', '          version: 12')
+  }
+  Assert-Fail "失败：pnpm 版本退回硬编码" (Invoke-WorkflowContract $variantPnpmHardcoded) 'pnpm_version_hardcoded'
+
+  $variantNoVersionSource = New-WorkflowVariant ".github/workflows/ci.yml" "ci-version-source-missing" {
+    param($text)
+    $text.Replace('          ./scripts/read-mise-versions.ps1 -GitHubOutput $env:GITHUB_OUTPUT' + "`n", '')
+  }
+  Assert-Fail "失败：缺少 mise.toml 版本读取步骤" (Invoke-WorkflowContract $variantNoVersionSource) 'toolchain_source_script_missing'
+
+  $variantGroupNotEventScoped = New-WorkflowVariant ".github/workflows/ci.yml" "ci-concurrency-group" {
+    param($text)
+    $text.Replace('  group: ci-${{ github.event_name }}-${{ github.ref }}', '  group: ci-${{ github.ref }}')
+  }
+  Assert-Fail "失败：并发分组未按事件分开" (Invoke-WorkflowContract $variantGroupNotEventScoped) 'concurrency_group_not_event_scoped'
+
+  $variantCancelLiteral = New-WorkflowVariant ".github/workflows/ci.yml" "ci-concurrency-cancel-literal" {
+    param($text)
+    $text.Replace("  cancel-in-progress: `${{ github.event_name == 'pull_request' }}", '  cancel-in-progress: true')
+  }
+  # queue: max 与字面量 cancel-in-progress: true 是 GitHub 会直接判非法工作流的组合
+  Assert-Fail "失败：queue: max 与 cancel-in-progress: true 共存" (Invoke-WorkflowContract $variantCancelLiteral) 'concurrency_queue_max_with_cancel_true'
+
+  $variantQueueInvalid = New-WorkflowVariant ".github/workflows/ci.yml" "ci-concurrency-queue-invalid" {
+    param($text)
+    $text.Replace("  queue: max`n", "  queue: unlimited`n")
+  }
+  Assert-Fail "失败：queue 取值不在 GitHub 接受范围" (Invoke-WorkflowContract $variantQueueInvalid) 'concurrency_queue_invalid:unlimited'
+
+  $variantCacheKeyNarrow = New-WorkflowVariant ".github/workflows/ci.yml" "ci-cache-key-narrow" {
+    param($text)
+    $text.Replace('-profile-dev-features-default-lock-${{ hashFiles(''Cargo.lock'') }}', '')
+  }
+  Assert-Fail "失败：缓存键缺 profile/feature/锁文件维度" (Invoke-WorkflowContract $variantCacheKeyNarrow) 'cache_key_dimension_missing:profile-'
+
+  $variantSummaryMissing = New-WorkflowVariant ".github/workflows/ci.yml" "ci-summary-missing" {
+    param($text)
+    $text.Replace('      - name: Write sanitized gate summary', '      - name: Write gate summary')
+  }
+  Assert-Fail "失败：缺失脱敏摘要接线" (Invoke-WorkflowContract $variantSummaryMissing) 'summary_step_missing:Write sanitized gate summary'
+
+  # ============ 五·二、Summary 模式：内容与脱敏 ============
+  $summaryStagePath = Join-Path $tempRoot 'summary-stages.json'
+  Set-Content -LiteralPath $summaryStagePath -Encoding utf8 -NoNewline -Value (ConvertTo-Json -InputObject @(
+      [ordered]@{ name = 'cargo-fetch'; command = 'cargo fetch --locked'; status = 'passed'; exitCode = 0; durationMs = 4200 }
+      [ordered]@{ name = 'cargo-clippy'; command = 'cargo clippy'; status = 'passed'; exitCode = 0; durationMs = 33300 }
+      [ordered]@{ name = 'cargo-test'; command = 'cargo test'; status = 'test_failed'; exitCode = 101; durationMs = 500 }
+    ) -Depth 6 -Compress)
+  $summaryOutPath = Join-Path $tempRoot 'summary-out.md'
+  $summaryRun = Invoke-Verifier @(
+    '-Mode', 'Summary', '-StagesPath', $summaryStagePath, '-PlatformId', 'linux',
+    '-CacheStatus', 'miss',
+    '-SkipsJson', '{"rust-format":"Rust 源码与 Cargo 清单未触及","mobile-web-check":"前端与设计系统未触及"}',
+    '-SummaryPath', $summaryOutPath
+  )
+  Assert-Pass "通过：Summary 模式生成脱敏摘要" $summaryRun
+  $summaryDoc = if (Test-Path -LiteralPath $summaryOutPath) { [string](Get-Content -LiteralPath $summaryOutPath -Raw -Encoding utf8) } else { '' }
+  Assert-Check ($summaryDoc.Contains('| cargo-clippy | passed | 33.3 |')) "Summary 必须逐阶段给出状态与秒级耗时"
+  Assert-Check ($summaryDoc.Contains('| cargo-test | test_failed | 0.5 |')) "Summary 必须如实标出失败阶段"
+  Assert-Check ($summaryDoc.Contains('依赖缓存：miss')) "Summary 必须回显缓存状态"
+  Assert-Check ($summaryDoc.Contains('阶段累计：38.0 s')) "Summary 必须写出阶段累计（42.0+33.3+0.5/10 不可凑数）"
+  Assert-Check ($summaryDoc.Contains('跳过：2 项')) "Summary 必须写出跳过项数量"
+  Assert-Check ($summaryDoc.Contains('rust-format：Rust 源码与 Cargo 清单未触及')) "Summary 必须写出跳过原因"
+
+  # 脱敏：平台名/原因里夹带绝对路径或令牌时必须被改写，不得原样落进公开的 Step Summary。
+  $summaryLeakPath = Join-Path $tempRoot 'summary-leak.md'
+  $summaryLeak = Invoke-Verifier @(
+    '-Mode', 'Summary', '-PlatformId', 'C:\soxu-build\platform',
+    '-SkipsJson', '{"gh":"token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /home/runner/work/soxu"}',
+    '-SummaryPath', $summaryLeakPath
+  )
+  Assert-Pass "通过：Summary 对敏感内容不报错" $summaryLeak
+  $summaryLeakDoc = if (Test-Path -LiteralPath $summaryLeakPath) { [string](Get-Content -LiteralPath $summaryLeakPath -Raw -Encoding utf8) } else { '' }
+  Assert-Check ($summaryLeakDoc.Contains('[redacted-path]')) "Summary 必须把绝对路径改写为占位符"
+  Assert-Check ($summaryLeakDoc.Contains('[redacted-token]')) "Summary 必须把令牌改写为占位符"
+  Assert-Check (-not ($summaryLeakDoc -match 'ghp_[A-Za-z0-9]{16,}')) "Summary 不得原文写出令牌"
+  Assert-Check (-not ($summaryLeakDoc -match 'C:\\soxu-build')) "Summary 不得原文写出 Windows 路径"
+
+  # 阶段数据缺失时必须只降级汇报，不得因此拖坠整个 run。
+  $summaryMissingRun = Invoke-Verifier @(
+    '-Mode', 'Summary', '-StagesPath', (Join-Path $tempRoot 'missing-stages.json'),
+    '-PlatformId', 'windows', '-SummaryPath', (Join-Path $tempRoot 'summary-missing.md')
+  )
+  Assert-Pass "通过：阶段数据缺失时 Summary 仍不阻断" $summaryMissingRun
 
   Assert-Pass "通过：真实 release.yml 发布契约" (Invoke-ReleaseContract $releaseWorkflow)
 

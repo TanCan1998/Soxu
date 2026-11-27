@@ -13,10 +13,17 @@ on:
         options: [scope, full, full-with-intel]
         default: scope
 
-# 对标 Magpie 抗压并发策略：PR 推送新提交时取消旧 run 节省算力；main 永远跑完保障发版基准
+# CI-D 并发策略（字面量必须是 GitHub 当前接受的取值，由 verify-ci-gate.ps1 的契约防守）：
+#   - 组名含事件名：workflow_dispatch 与 push/PR 各自独立分组，手动全量验证不占主线槽位；
+#   - PR 新提交取消同组旧 run 节省算力；
+#   - main 不取消在途 run（cancel-in-progress 解析为 false），并以 queue: max 允许最多 100 个 pending
+#     排队，避免连续 push 把仍有效的 pending run 替换掉；
+#   - queue: max 与字面量 cancel-in-progress: true 是 GitHub 明令非法的组合，
+#     因此取消语义只能写成按事件判定的表达式。
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  queue: max
 
 permissions:
   contents: read
@@ -49,10 +56,24 @@ jobs:
       base_sha: ${{ steps.scope.outputs.base_sha }}
       head_sha: ${{ steps.scope.outputs.head_sha }}
       checkout_sha: ${{ steps.scope.outputs.checkout_sha }}
+      # CI-D：工具链版本只在这里读一次，其余作业一律消费这四个输出，禁止再写字面量。
+      rust_version: ${{ steps.toolchain.outputs.rust_version }}
+      node_version: ${{ steps.toolchain.outputs.node_version }}
+      pnpm_version: ${{ steps.toolchain.outputs.pnpm_version }}
+      mise_toml_sha256: ${{ steps.toolchain.outputs.mise_toml_sha256 }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      # CI-D：工具链版本的唯一真相源是本次受信任检出树里的 mise.toml。
+      # 解析失败（缺项、浮动版本、重复声明、畸形 TOML）一律非零退出，不回退内置默认值。
+      - name: Read locked toolchain versions from mise.toml
+        id: toolchain
+        shell: pwsh
+        run: |
+          ./scripts/read-mise-versions.ps1 -GitHubOutput $env:GITHUB_OUTPUT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Analyze changed scope and reverse dependencies
         id: scope
@@ -247,8 +268,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: 1.99.1
+          toolchain: ${{ needs.detect-changes.outputs.rust_version }}
           components: rustfmt
+
+      # CI-D：action 参数写对不等于真的用上了这个版本，装完必须实测比对。
+      - name: Assert installed Rust version matches mise.toml
+        shell: pwsh
+        run: |
+          ./scripts/read-mise-versions.ps1 -AssertInstalled -AssertTools rust
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # 纯 Rust 格式检查只在 Ubuntu 上跑一次，不随平台矩阵复制。
       - name: Check formatting
@@ -331,13 +359,24 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: 1.99.1
+          toolchain: ${{ needs.detect-changes.outputs.rust_version }}
           components: clippy
 
+      - name: Assert installed Rust & Cargo versions match mise.toml
+        shell: pwsh
+        run: |
+          ./scripts/read-mise-versions.ps1 -AssertInstalled -AssertTools rust
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       # 单一实例内依赖、Clippy 与测试共用一个构建目录，避免逐阶段重建。
+      # CI-D：缓存键显式绑定 OS、架构、工具链版本、Cargo.lock、profile 与有影响的 feature。
+      # 自带的 shared-key 不够显式：少任一维度都会让不同依赖图互相复用缓存，
+      # 逐实例证据就会把“缓存命中”误读成“构建更快”。
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
-          key: ${{ matrix.platform.id }}
+          key: ${{ matrix.platform.id }}-${{ runner.os }}-${{ runner.arch }}-rust-${{ needs.detect-changes.outputs.rust_version }}-profile-dev-features-default-lock-${{ hashFiles('Cargo.lock') }}
+          cache-on-failure: false
 
       - name: Fetch dependencies (shared build directory)
         shell: pwsh
@@ -456,6 +495,21 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # CI-D：把本平台的分阶段耗时、缓存状态与跳过原因写进 Step Summary。
+      # Summary 只是汇报，不参与门禁判定，也不得输出路径、环境或令牌。
+      - name: Write sanitized platform summary
+        if: always()
+        shell: pwsh
+        env:
+          SUMMARY_PLATFORM: ${{ matrix.platform.id }}
+          SUMMARY_CACHE: ${{ steps.rust-cache.outputs.cache-hit }}
+          SUMMARY_STAGES: ${{ runner.temp }}/ci-evidence/stages.json
+        run: |
+          pwsh -NoProfile -File scripts/verify-ci-gate.ps1 -Mode Summary `
+            -StagesPath $env:SUMMARY_STAGES -PlatformId $env:SUMMARY_PLATFORM `
+            -CacheStatus $env:SUMMARY_CACHE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   mobile-web-check:
     name: Mobile Web/PWA Typecheck & Build
     needs: detect-changes
@@ -474,13 +528,21 @@ jobs:
 
       - uses: pnpm/action-setup@v6
         with:
-          version: 12
+          version: ${{ needs.detect-changes.outputs.pnpm_version }}
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '26'
+          node-version: ${{ needs.detect-changes.outputs.node_version }}
           cache: 'pnpm'
           cache-dependency-path: apps/mobile-web/pnpm-lock.yaml
+
+      # CI-D：Node/pnpm 曾经与 mise.toml 漂移（'26' / 12），装完必须实测比对。
+      - name: Assert installed Node & pnpm versions match mise.toml
+        shell: pwsh
+        working-directory: .
+        run: |
+          ./scripts/read-mise-versions.ps1 -AssertInstalled -AssertTools node,pnpm
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -638,3 +700,22 @@ jobs:
             if (-not [string]::IsNullOrWhiteSpace($started)) { $evidenceParams['AttemptStartedAt'] = $started }
           }
           ./scripts/verify-ci-gate.ps1 @evidenceParams
+
+      # CI-D：整轮脱敏摘要。逐平台耗时由各平台作业各写一条，这里补上“计划内跳过及原因”。
+      # 必须区分真实执行与计划内 skipped：占位/跳过的 job 不产生耗时，也不能当成本轮开跑。
+      - name: Write sanitized gate summary
+        if: always()
+        shell: pwsh
+        env:
+          FMT_RESULT: ${{ needs.rust-format.result }}
+          RUST_RESULT: ${{ needs.rust-check.result }}
+          WEB_RESULT: ${{ needs.mobile-web-check.result }}
+        run: |
+          $skips = [ordered]@{}
+          if ($env:FMT_RESULT -eq 'skipped') { $skips['rust-format'] = 'Rust 源码与 Cargo 清单未触及' }
+          if ($env:RUST_RESULT -eq 'skipped') { $skips['rust-check'] = 'Rust 源码与 Cargo 清单未触及' }
+          if ($env:WEB_RESULT -eq 'skipped') { $skips['mobile-web-check'] = '前端与设计系统未触及' }
+          $skipJson = ($skips | ConvertTo-Json -Compress)
+          if ([string]::IsNullOrWhiteSpace($skipJson)) { $skipJson = '{}' }
+          pwsh -NoProfile -File scripts/verify-ci-gate.ps1 -Mode Summary -SkipsJson $skipJson -SummaryTitle 'CI 门禁汇总'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

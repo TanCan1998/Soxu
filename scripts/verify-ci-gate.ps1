@@ -1,5 +1,5 @@
-﻿param(
-  [ValidateSet("Plan", "Verify", "Evidence", "Contract", "ReleaseContract", "ExtractRuns")]
+param(
+  [ValidateSet("Plan", "Verify", "Evidence", "Contract", "ReleaseContract", "ExtractRuns", "Summary")]
   [string]$Mode = "Verify",
   [string]$ScopePath = "",
   [string]$ScopeJson = "",
@@ -16,7 +16,14 @@
   [string]$CheckoutSha = "",
   [string]$AttemptStartedAt = "",
   [string]$WorkflowPath = "",
-  [string]$ReleaseWorkflowPath = ""
+  [string]$ReleaseWorkflowPath = "",
+  # Summary 模式：只做脱敏的耗时/缓存/跳过汇总，不参与门禁判定。
+  [string]$StagesPath = "",
+  [string]$SummaryPath = "",
+  [string]$PlatformId = "",
+  [string]$CacheStatus = "",
+  [string]$SkipsJson = "",
+  [string]$SummaryTitle = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +35,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 #   Verify          以“固定 job 契约 + scope 重新推导”对账计划与 needs 实际证据
 #   Contract        静态校验 ci.yml 的门禁契约（稳定名称、静态 needs、无 continue-on-error）
 #   ReleaseContract 静态校验 release.yml 的四平台资产清单与校验和契约
+#   Summary         把单平台阶段耗时/缓存状态/计划内跳过写成脱敏 Step Summary（不参与判定）
 #
 # 设计红线：计划是数据，不能凭删 job、换 job、翻转 required 或篡改触发标志削弱门禁。
 # Verify 会用与 Plan 完全相同的推导函数，从计划自带的 scope 重新算出期望计划再逐项比对。
@@ -1256,6 +1264,86 @@ function Invoke-ContractMode([string]$PathValue) {
   if ($formatText -notmatch "needs\.detect-changes\.outputs\.rust == 'true'") { $errors.Add("rust_format_job_ungated") }
   if ($formatText -match '(?m)^\s+matrix:') { $errors.Add("rust_format_matrix_forbidden") }
 
+  # ---- CI-D：工具链版本唯一真相源 / 缓存键边界 / 并发分组 ----
+  # 硬编码版本是 mise.toml 与 CI 静默漂移的根因，直接拒绝而不是“建议”。
+  if ($text -match '(?m)^\s+toolchain:\s*\d') { $errors.Add("toolchain_version_hardcoded") }
+  if ($text -match "(?m)^\s+node-version:\s*'?\d") { $errors.Add("node_version_hardcoded") }
+  if ($text -match '(?m)^\s+version:\s*\d+\s*$') { $errors.Add("pnpm_version_hardcoded") }
+  if ($text -notmatch 'scripts/read-mise-versions\.ps1') { $errors.Add("toolchain_source_script_missing") }
+  # 版本必须在检测器作业里读一次并写成 GHA 输出；作业内其它地方只能消费输出，不能重读。
+  if ($detectText -notmatch 'read-mise-versions\.ps1') { $errors.Add("toolchain_source_script_missing") }
+  if ($detectText -notmatch 'read-mise-versions\.ps1[^\n]*-GitHubOutput') { $errors.Add("toolchain_source_not_published") }
+  if ($detectText -notmatch '(?m)^\s+id:\s*toolchain\s*$') { $errors.Add("toolchain_step_id_missing") }
+  # 版本必须经 detect-changes 的步骤输出传递：跨 job 只能靠 outputs，不能重读文件或写常量。
+  foreach ($toolOutput in @("rust_version", "node_version", "pnpm_version", "mise_toml_sha256")) {
+    if ($text -notmatch ("outputs\." + $toolOutput)) { $errors.Add("toolchain_output_not_published:$toolOutput") }
+  }
+  # 格式检查与矩阵作业各接一次 rust 版本（共 ≥2），少一处就是漏接。
+  $rustVersionConsumer = 'toolchain:\s*\$\{\{\s*needs\.detect-changes\.outputs\.rust_version\s*\}\}'
+  if (@([regex]::Matches($text, $rustVersionConsumer)).Count -lt 2) {
+    $errors.Add("toolchain_output_not_consumed:rust_version")
+  }
+  if ($text -notmatch 'node-version:\s*\$\{\{\s*needs\.detect-changes\.outputs\.node_version\s*\}\}') {
+    $errors.Add("toolchain_output_not_consumed:node_version")
+  }
+  if ($text -notmatch 'version:\s*\$\{\{\s*needs\.detect-changes\.outputs\.pnpm_version\s*\}\}') {
+    $errors.Add("toolchain_output_not_consumed:pnpm_version")
+  }
+  # 只把版本号写进 action 参数不足以证明真的用上了这个版本，装完必须实测比对。
+  if (@([regex]::Matches($text, 'read-mise-versions\.ps1[^\n]*-AssertInstalled')).Count -lt 2) {
+    $errors.Add("toolchain_drift_guard_missing")
+  }
+
+  # 缓存键必须显式绑定 OS、架构、工具链、锁文件、profile 与有影响的 feature：
+  # 少任一维度都会让不同环境或不同依赖图互相复用缓存，证据随之失真。
+  if ($rustText -notmatch 'Swatinem/rust-cache') { $errors.Add("cache_action_missing") }
+  if ($rustText -notmatch '(?m)^\s+id:\s*rust-cache\s*$') { $errors.Add("cache_step_id_missing") }
+  $cacheKeyLine = (@($rustText -split "`n" | Where-Object { $_ -match '^\s+key:\s' }) | Select-Object -First 1)
+  if ([string]::IsNullOrEmpty($cacheKeyLine)) {
+    $errors.Add("cache_key_missing")
+  } else {
+    foreach ($dimension in @("matrix.platform.id", "runner.os", "runner.arch", "outputs.rust_version", "profile-", "features-", "Cargo.lock")) {
+      if (-not $cacheKeyLine.Contains($dimension)) { $errors.Add("cache_key_dimension_missing:$dimension") }
+    }
+  }
+
+  # 并发分组：组名必须按事件分开（手动触发不占用 push/PR 的槽位），
+  # 只有 PR 才取消旧 run（main 保留在途并排队），且 queue 不得与 cancel-in-progress: true 共存。
+  $concurrencyLines = [System.Collections.Generic.List[string]]::new()
+  $inConcurrency = $false
+  foreach ($line in (Get-WorkflowLines $text)) {
+    if ($line -match '^concurrency:\s*$') { $inConcurrency = $true; continue }
+    if ($inConcurrency) {
+      if ($line -match '^\S') { break }
+      $concurrencyLines.Add($line)
+    }
+  }
+  if ($concurrencyLines.Count -eq 0) {
+    $errors.Add("concurrency_block_missing")
+  } else {
+    $concurrencyText = ($concurrencyLines -join "`n")
+    if ($concurrencyText -notmatch 'group:\s*ci-\$\{\{\s*github\.event_name\s*\}\}-\$\{\{\s*github\.ref\s*\}\}') {
+      $errors.Add("concurrency_group_not_event_scoped")
+    }
+    if ($concurrencyText -notmatch 'cancel-in-progress:\s*\$\{\{\s*github\.event_name\s*==\s*.pull_request.\s*\}\}') {
+      $errors.Add("concurrency_pr_cancel_missing")
+    }
+    $queueMatch = [regex]::Match($concurrencyText, '(?m)^\s+queue:\s*(\S+)\s*$')
+    if ($queueMatch.Success) {
+      $queueValue = $queueMatch.Groups[1].Value
+      if ($queueValue -notin @("single", "max")) { $errors.Add("concurrency_queue_invalid:$queueValue") }
+      if ($queueValue -eq "max" -and $concurrencyText -match '(?m)^\s+cancel-in-progress:\s*true\s*$') {
+        $errors.Add("concurrency_queue_max_with_cancel_true")
+      }
+    }
+  }
+
+  # Step Summary 必须由校验脚本生成，才能保证脱敏逻辑只有一份实现。
+  foreach ($summaryStepName in @("Write sanitized platform summary", "Write sanitized gate summary")) {
+    if ($text -notmatch [regex]::Escape($summaryStepName)) { $errors.Add("summary_step_missing:$summaryStepName") }
+  }
+  if ($text -notmatch '(?m)-Mode Summary') { $errors.Add("summary_mode_not_used") }
+
   # CI Gate 必须在同一 Run/Attempt/SHA 上对账平台证据，并具备读取原始 job 的权限。
   if ($gateText -notmatch 'download-artifact') { $errors.Add("gate_evidence_download_missing") }
   # 产物名与下载 pattern 均必须带 attempt：否则重跑会写入同名产物，
@@ -1362,6 +1450,126 @@ function Invoke-ReleaseContractMode([string]$PathValue) {
   return $errors
 }
 
+function Format-Seconds($DurationMs) {
+  if ($null -eq $DurationMs) { return "未知" }
+  $value = 0.0
+  if (-not [double]::TryParse([string]$DurationMs, [ref]$value)) { return "未知" }
+  if ($value -lt 0) { return "未知" }
+  return ([math]::Round($value / 1000.0, 1)).ToString("0.0", [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+# 所有进入 Step Summary 的文本必须先过脱敏：绝对路径、用户目录与令牌一律不出现。
+function ConvertTo-SummarySafeText([string]$Value) {
+  if ([string]::IsNullOrEmpty($Value)) { return "" }
+  $sanitized = [string]$Value
+  foreach ($prefix in @($env:RUNNER_TEMP, $env:GITHUB_WORKSPACE, $env:GITHUB_JOB, $env:HOME, $env:USERPROFILE)) {
+    if (-not [string]::IsNullOrWhiteSpace($prefix) -and $prefix.Length -gt 3) {
+      $sanitized = $sanitized.Replace($prefix, "[workspace]")
+    }
+  }
+  $sanitized = [regex]::Replace($sanitized, '[A-Za-z]:\\[^\s\|)]*', '[redacted-path]')
+  $sanitized = [regex]::Replace($sanitized, '(^|[\s(])/(?:home|Users|root|tmp|mnt)/[^\s\|)]*', '$1[redacted-path]')
+  $sanitized = [regex]::Replace($sanitized, '(?i)\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})\b', '[redacted-token]')
+  $sanitized = $sanitized.Replace("|", "/")
+  return $sanitized
+}
+
+function Read-SummaryStages([string]$SourcePath) {
+  if ([string]::IsNullOrWhiteSpace($SourcePath)) { return @() }
+  if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { return @() }
+  try {
+    $raw = Get-Content -LiteralPath $SourcePath -Raw -Encoding utf8
+    if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
+    return @($raw | ConvertFrom-Json -Depth 12 -ErrorAction Stop)
+  } catch {
+    return @()
+  }
+}
+
+function Read-SummarySkips([string]$SkipJson) {
+  if ([string]::IsNullOrWhiteSpace($SkipJson)) { return @() }
+  $result = [System.Collections.Generic.List[object]]::new()
+  try {
+    $parsed = $SkipJson | ConvertFrom-Json -Depth 6 -ErrorAction Stop
+  } catch {
+    return @()
+  }
+  if ($null -eq $parsed) { return @() }
+  if ($parsed -is [System.Management.Automation.PSCustomObject]) {
+    foreach ($property in $parsed.PSObject.Properties) {
+      $result.Add([pscustomobject]@{ Job = $property.Name; Reason = [string]$property.Value })
+    }
+    return @($result)
+  }
+  foreach ($item in @($parsed)) {
+    $jobName = if ($item.PSObject.Properties["job"]) { [string]$item.job } else { [string]$item.name }
+    $reason = if ($item.PSObject.Properties["reason"]) { [string]$item.reason } else { "计划内跳过" }
+    $result.Add([pscustomobject]@{ Job = $jobName; Reason = $reason })
+  }
+  return @($result)
+}
+
+# Summary 只是汇报，不参与门禁判定：任何异常都只告警，不能让上报步骤拖坠整个 run。
+function Invoke-SummaryMode {
+  $title = if ([string]::IsNullOrWhiteSpace($SummaryTitle)) { "CI 耗时与缓存摘要" } else { ConvertTo-SummarySafeText $SummaryTitle }
+  $platform = if ([string]::IsNullOrWhiteSpace($PlatformId)) { "全部平台" } else { ConvertTo-SummarySafeText $PlatformId }
+  $cacheValue = if ([string]::IsNullOrWhiteSpace($CacheStatus)) { "unknown" } else { (ConvertTo-SummarySafeText $CacheStatus).ToLowerInvariant() }
+  if ($cacheValue -notin @("hit", "miss", "true", "false", "unknown")) { $cacheValue = "unknown" }
+  $cacheLabel = if ($cacheValue -in @("hit", "true")) { "hit" } elseif ($cacheValue -in @("miss", "false")) { "miss" } else { "unknown" }
+
+  $markdown = [System.Collections.Generic.List[string]]::new()
+  $markdown.Add("### $title（$platform）")
+  $markdown.Add("")
+
+  $stages = @(Read-SummaryStages $StagesPath)
+  if ($stages.Count -eq 0) {
+    $markdown.Add("- 阶段数据：未产出（本次未执行可采集的阶段或采集步骤被跳过）")
+  } else {
+    $markdown.Add("| 阶段 | 状态 | 耗时(s) |")
+    $markdown.Add("| --- | --- | --- |")
+    $totalMs = 0.0
+    $totalKnown = $true
+    foreach ($stage in $stages) {
+      $stageName = ConvertTo-SummarySafeText ([string]$stage.name)
+      $stageStatus = ConvertTo-SummarySafeText ([string]$stage.status)
+      $seconds = Format-Seconds $stage.durationMs
+      if ($seconds -eq "未知") { $totalKnown = $false } else { $totalMs += [double]::Parse($seconds, [System.Globalization.CultureInfo]::InvariantCulture) * 1000.0 }
+      $markdown.Add("| $stageName | $stageStatus | $seconds |")
+    }
+    # 必须写“阶段累计”而不是“墙钟”：排队、action 安装与 checkout 不在其中。
+    if ($totalKnown) {
+      $markdown.Add("")
+      $markdown.Add("- 阶段累计：$([math]::Round($totalMs / 1000.0, 1).ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture)) s（不含排队、checkout 与 action 安装）")
+    }
+  }
+
+  $markdown.Add("- 依赖缓存：$cacheLabel")
+
+  $skips = @(Read-SummarySkips $SkipsJson)
+  if ($skips.Count -eq 0) {
+    $markdown.Add("- 跳过：0 项")
+  } else {
+    $markdown.Add("- 跳过：$($skips.Count) 项")
+    foreach ($skip in $skips) {
+      $markdown.Add("  - $(ConvertTo-SummarySafeText $skip.Job)：$(ConvertTo-SummarySafeText $skip.Reason)")
+    }
+  }
+
+  $text = ($markdown -join "`n") + "`n"
+  $target = if ([string]::IsNullOrWhiteSpace($SummaryPath)) { $env:GITHUB_STEP_SUMMARY } else { $SummaryPath }
+  if ([string]::IsNullOrWhiteSpace($target)) {
+    Write-Output $text
+  } else {
+    $parent = Split-Path -Parent $target
+    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
+      New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    Add-Content -LiteralPath $target -Value $text -Encoding utf8
+  }
+  Write-Host ("已写入脱敏摘要：$platform（阶段 $($stages.Count) 段，跳过 $($skips.Count) 项，缓存 $cacheLabel）")
+  return 0
+}
+
 function Write-CheckResult([System.Collections.Generic.List[string]]$Errors, [string]$ModeName) {
   if ($Errors.Count -eq 0) {
     Write-Host "✓ CI 门禁校验通过（模式：$ModeName）" -ForegroundColor Green
@@ -1401,6 +1609,14 @@ try {
       $blocksJson = Invoke-ExtractRunsMode $WorkflowPath
       Write-Output $blocksJson
       exit 0
+    }
+    "Summary" {
+      try {
+        exit (Invoke-SummaryMode)
+      } catch {
+        Write-Host "::warning::CI-GATE-SUMMARY $($_.Exception.Message)" -ForegroundColor Yellow
+        exit 0
+      }
     }
     default {
       throw "未知模式：$Mode"
