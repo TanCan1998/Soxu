@@ -1,0 +1,146 @@
+name: EXP GPUI macOS Probe
+
+# Soxu #93 隔离实验：只在实验分支运行，不进入产品 PR、不修改产品 CI。
+# 仅使用 GitHub 托管标准 Runner；不使用 larger runner、签名服务或任何产品 Secret。
+
+on:
+  push:
+    branches: [exp/93-gpui-macos-probe]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: GPUI probe (macos-15 ARM64)
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      RUST_BACKTRACE: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Record runner identity
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/evidence"
+          out="$RUNNER_TEMP/evidence/runner.txt"
+          {
+            echo "runner_os=$RUNNER_OS"
+            echo "runner_arch=$RUNNER_ARCH"
+            echo "uname_m=$(uname -m)"
+            echo "sw_vers=$(sw_vers | tr '\n' ' ')"
+            echo "kernel=$(uname -a)"
+            echo "cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo n/a)"
+            echo "arm64_hint=$(sysctl -n hw.optional.arm64 2>/dev/null || echo n/a)"
+            echo "hw_model=$(sysctl -n hw.model 2>/dev/null || echo n/a)"
+            echo "managername=$(launchctl managername 2>/dev/null || echo n/a)"
+            echo "session_type=$(launchctl print gui/$(id -u) 2>/dev/null | head -1 || echo n/a)"
+            echo "who=$(who 2>/dev/null | tr '\n' '|' || echo n/a)"
+            echo "windowserver_procs=$(ps -Ao comm | grep -c -i windowserver || true)"
+            echo "xcodebuild=$(xcodebuild -version 2>/dev/null | tr '\n' ' ' || echo n/a)"
+            echo "sdk=$(xcrun --show-sdk-version 2>/dev/null || echo n/a)"
+            echo "swift=$(swift --version 2>&1 | head -1 || echo n/a)"
+          } | tee "$out"
+
+      - name: Probe displays, Metal device and offscreen drawable
+        shell: bash
+        run: |
+          set -eu
+          out="$RUNNER_TEMP/evidence/gpu.txt"
+          system_profiler SPDisplaysDataType > "$RUNNER_TEMP/evidence/displays.txt" 2>&1 || echo "system_profiler displays failed" >> "$RUNNER_TEMP/evidence/displays.txt"
+          cat > "$RUNNER_TEMP/probe.swift" <<'SWIFT'
+          import Metal
+          import CoreGraphics
+
+          if let session = CGSessionCopyCurrentDictionary() as? [String: Any] {
+              print("cgsession_present=1")
+              let keys = ["kCGSSessionOnConsoleKey", "kCGSSessionLoginDoneKey", "CGSSessionScreenIsLocked", "kCGSSessionUserNameKey"]
+              for key in keys {
+                  print("cgsession_\(key)=\(session[key] ?? "missing")")
+              }
+          } else {
+              print("cgsession_present=0")
+          }
+
+          guard let device = MTLCreateSystemDefaultDevice() else {
+              print("metal_device=NONE")
+              exit(0)
+          }
+          print("metal_device=\(device.name)")
+          print("metal_unified_memory=\(device.hasUnifiedMemory)")
+          print("metal_low_power=\(device.isLowPower)")
+          print("metal_max_threadgroup=\(device.maxThreadsPerThreadgroup)")
+
+          let width = 64
+          let height = 64
+          let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+              pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+          descriptor.usage = [.renderTarget]
+          descriptor.storageMode = .shared
+          guard let texture = device.makeTexture(descriptor: descriptor) else {
+              print("offscreen_texture=NONE")
+              exit(0)
+          }
+          guard let queue = device.makeCommandQueue(),
+                let buffer = queue.makeCommandBuffer() else {
+              print("offscreen_queue=NONE")
+              exit(0)
+          }
+          let pass = MTLRenderPassDescriptor()
+          pass.colorAttachments[0].texture = texture
+          pass.colorAttachments[0].loadAction = .clear
+          pass.colorAttachments[0].storeAction = .store
+          pass.colorAttachments[0].clearColor = MTLClearColor(red: 0.25, green: 0.5, blue: 0.75, alpha: 1.0)
+          guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else {
+              print("offscreen_encoder=NONE")
+              exit(0)
+          }
+          encoder.endEncoding()
+          buffer.commit()
+          buffer.waitUntilCompleted()
+          print("offscreen_status=\(buffer.status == .completed ? "completed" : "failed")")
+          if let error = buffer.error { print("offscreen_error=\(error)") }
+
+          var bytes = [UInt8](repeating: 0, count: width * height * 4)
+          texture.getBytes(&bytes, bytesPerRow: width * 4,
+                           from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+          print("offscreen_first_pixel_bgra=\(bytes[0]),\(bytes[1]),\(bytes[2]),\(bytes[3])")
+          SWIFT
+          swift "$RUNNER_TEMP/probe.swift" 2>&1 | tee "$out" || echo "swift_probe_exit=$?" | tee -a "$out"
+
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.99.1
+
+      - name: Record toolchain
+        shell: bash
+        run: |
+          set -eu
+          {
+            echo "rustc=$(rustc --version)"
+            echo "cargo=$(cargo --version)"
+            echo "gpui_pin=$(grep -m1 '^gpui' exp/gpui-macos-probe/Cargo.toml)"
+          } | tee "$RUNNER_TEMP/evidence/toolchain.txt"
+
+      - name: Run GPUI context tests
+        shell: bash
+        working-directory: exp/gpui-macos-probe
+        run: |
+          set -eu
+          log="$RUNNER_TEMP/evidence/cargo-test.log"
+          cargo test --locked -- --test-threads=1 2>&1 | tee "$log"
+          echo "cargo_test_exit=ok" | tee -a "$RUNNER_TEMP/evidence/result.txt"
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: exp-gpui-macos-probe-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          retention-days: 14
+          if-no-files-found: warn

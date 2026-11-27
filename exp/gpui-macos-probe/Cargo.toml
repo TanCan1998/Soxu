@@ -1,0 +1,23 @@
+[package]
+name = "gpui-macos-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Soxu #93 隔离实验夹具：验证 GPUI 在真实 macOS Runner 上的测试与渲染能力边界"
+
+# 独立 workspace：不进入 Soxu 产品 workspace，也不得被产品 Cargo.toml 引用。
+[workspace]
+
+[dependencies]
+# 与 Soxu M4 计划采用的版本绑定；实验内允许显式固定，产品分支不得引入。
+gpui = { version = "=0.2.2", features = ["test-support"] }
+
+[dev-dependencies]
+futures = "0.3.34"
+
+[lib]
+path = "src/lib.rs"
+
+[[test]]
+name = "gpui_context"
+path = "tests/gpui_context.rs"
