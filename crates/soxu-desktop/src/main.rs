@@ -114,11 +114,3 @@ const _: () = {
                 + soxu_desktop::tokens::sizing::STATUSBAR_HEIGHT_PX
     );
 };
-
-#[cfg(test)]
-mod tests {
-    // 窗口几何常量守卫已前移至文件顶部编译期 `const` 断言（clippy assertions_on_constants），
-    // 此处不再重复运行期断言；本测试模块保留供后续运行期用例扩展。
-    #![allow(unused_imports)]
-    use super::*;
-}
