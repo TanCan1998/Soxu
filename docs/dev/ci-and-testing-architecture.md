@@ -461,7 +461,38 @@ soxu-desktop-<version>-darwin-amd64.dmg
 
 ### 7.3 实际回读
 
-<!-- CI_READBACK_PLACEHOLDER -->
+**PR 首次推送（head `419bdad`）的 `CI` run：`46021033688`（conclusion `success`）**
+
+实测门禁计划（`Detect Check Scope` 日志原文，`checkoutSha = e7df525`）：
+
+```json
+{"version":"ci-gate-plan/v1","pathContract":"repo-relative/v1","detector":"detect-changes","gate":"ci-gate",
+ "jobs":[{"id":"governance-and-privacy","required":true},
+         {"id":"rust-format","required":false,"depends_on":"rust"},
+         {"id":"rust-check","required":false,"depends_on":"rust"},
+         {"id":"mobile-web-check","required":false,"depends_on":"mobile_web"}],
+ "selfTest":false,"releaseContract":false,
+ "scope":{"schemaVersion":1,"full":false,"rust":false,"rustScope":"none","mobileWeb":false,
+          "paseoOrchestration":false,"checkScopeSelfTest":false,"platforms":[],
+          "changedFiles":[".aoci/baseline.json","aoci.code.txt","docs/dev/ci-and-testing-architecture.md"]}}
+```
+
+实际作业结论（`gh pr checks`）：
+
+| 作业 | 计划 | 实际 | 耗时 |
+| :--- | :--- | :--- | :--- |
+| `Detect Check Scope` | 必跑 | `pass` | 7s |
+| `Git Emoji & Privacy Guard` | 必跑 | `pass` | 13s |
+| `Rust Format Check` | `required=false` | `skipping` | 0 |
+| `Rust (${{ matrix.platform.id }})` | 矩阵 0 实例（`platforms=[]`） | `skipping` | 0 |
+| `Mobile Web/PWA Typecheck & Build` | `required=false` | `skipping` | 0 |
+| `CI Gate` | 必跑 | `pass` | 17s |
+
+结论：
+
+1. 纯文档变更在现有 `ci-gate-plan/v1` 下**不需要**任何 Rust/PWA 算力，`CI Gate` 仍按「计划内跳过必须显式 `skipped`」逐实例核对，未被空跑放行。
+2. 本地 `scripts/check-all.ps1` 的范围结论（`rust=跳过`、`mobileWeb=False`、`paseo=False`）与远端检测器完全一致：本地跳过的阶段在远端同样是 `skipping`，不存在「本地跳过、远端空跑」的偏差。
+3. `CI Gate` 校验的不是聚合字符串，而是从原始 jobs 派生的逐实例状态；本次 `Rust` 矩阵实例数为 0，因此不会产生「矩阵漏跑但无人发现」的缺口。
 
 ### 7.4 M4 引入 GPUI 后需要演进的点（本 PR 不做）
 
