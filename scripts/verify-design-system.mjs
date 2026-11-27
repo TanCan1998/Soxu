@@ -193,6 +193,53 @@ for (const htmlRel of ["desktop.html", "index.html", "public/manifest.webmanifes
   }
 }
 
+// 6. 校验设计令牌 Rust 常量产物存在性，以及 sync 脚本“三产物 + --check 接线”
+//    本段只做存在性与接线检查，不用正则重算颜色/尺寸语义（语义唯一真相源仍是 tokens.json）。
+const rustTokensPath = path.join(repoRoot, "crates", "soxu-desktop", "src", "theme", "tokens.rs");
+if (!fs.existsSync(rustTokensPath)) {
+  errors.push(
+    "缺失 Rust 设计令牌生成文件: crates/soxu-desktop/src/theme/tokens.rs（请执行 node scripts/sync-design-tokens.mjs --write）",
+  );
+} else {
+  const rustHead = fs.readFileSync(rustTokensPath, "utf8").split(/\r?\n/).slice(0, 3).join("\n");
+  if (!rustHead.includes("scripts/sync-design-tokens.mjs") || !rustHead.includes("禁止手改")) {
+    errors.push(
+      "crates/soxu-desktop/src/theme/tokens.rs 文件头缺少“由 scripts/sync-design-tokens.mjs 生成，禁止手改”标注",
+    );
+  }
+}
+
+const syncTokensScriptPath = path.join(repoRoot, "scripts", "sync-design-tokens.mjs");
+if (!fs.existsSync(syncTokensScriptPath)) {
+  errors.push("缺失设计令牌同步脚本: scripts/sync-design-tokens.mjs");
+} else {
+  const syncSource = fs.readFileSync(syncTokensScriptPath, "utf8");
+  const wiringChecks = [
+    {
+      ok: syncSource.includes('"theme", "tokens.rs"'),
+      message: "scripts/sync-design-tokens.mjs 未声明 Rust 常量产物路径 crates/soxu-desktop/src/theme/tokens.rs",
+    },
+    {
+      ok:
+        syncSource.includes("const targets = [") &&
+        syncSource.includes("designCssPath,") &&
+        syncSource.includes("mobileCssPath,") &&
+        syncSource.includes("rustTokensPath,"),
+      message: "scripts/sync-design-tokens.mjs 的 targets 未同时包含 tokens.css / tokens.generated.css / theme/tokens.rs 三份产物",
+    },
+    {
+      ok:
+        syncSource.includes('if (mode === "check")') &&
+        syncSource.includes("for (const target of targets)") &&
+        syncSource.includes("if (actual !== target.content)"),
+      message: "scripts/sync-design-tokens.mjs 的 --check 未对所有 targets 做逐字节比对（漂移必非零退出）",
+    },
+  ];
+  for (const check of wiringChecks) {
+    if (!check.ok) errors.push(check.message);
+  }
+}
+
 console.log(
   errors.length === 0
     ? "[design:verify] 令牌、七维规范、shadcn/ui 组件、品牌词纪律、单文件预览与零 Emoji 门禁全部通过！"
