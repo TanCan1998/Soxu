@@ -70,7 +70,7 @@
    - **合流联动**：新建 Worktree 时联动 `soxu-magpie` 自动补齐 `direct` MCP（AOCI / CodeGraph）工作区上下文。
 4. **M4 — 移动遥控 PWA 真机闭环 + GPUI 桌面底座（双轨 100% 正交并行）**：
    - **Wave 4.1（单流准备 PR，`#118` 进行中）**：在根 `Cargo.toml` 引入 `gpui` / `gpui-component` 并配置开发编译优化，扩展 `scripts/sync-design-tokens.mjs` 生成零漂移 Rust 主题常量并接入 `--check`。版本裁决：crates.io `gpui` 最新稳定版为 0.2.2，而 `gpui-component` 0.11.0 硬绑定 Zed gpui 0.3.x 线（以 `gpui-pre` 之名发行），经主控裁决采用 `gpui = { package = "gpui-pre", version = "=0.3.14" } + gpui-component 0.11.0`，避免同树双实现；`theme/gpui_colors.rs` 把 `tokens.rs` 颜色常量映射为 GPUI `rgb`/`rgba`/`Hsla` 并配 6 项单元测试（含负向漂移验证）。
-   - **Wave 4.2（双轨正交并行）**：轨道 A（`apps/mobile-web` + `soxu-daemon` Web 伺服）去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对并完成 13 组视口验收；轨道 B（`soxu-desktop`）搭建 Pure Black/Light 主题插值、双开源字体与 `effective_code_family()`、可扩展 `i18n`、7 层焦点栈与四栏自适应壳层。
+   - **Wave 4.2（双轨正交并行）**：轨道 A（`apps/mobile-web` + `soxu-daemon` Web 伺服）去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对并完成 13 组视口验收；轨道 B（`soxu-desktop`，`#124` 进行中）搭建 GPUI 应用壳层底座：`main.rs` 经 `gpui-pre-platform =0.3.14`（同 ADR-012 快照线）挂载真实 GPUI App 与主窗口（标题/尺寸/最小尺寸按 MASTER，GUI 冒烟实测窗口标题 `Soxu`）、全局主题状态 `ThemeState`（明暗切换/跟随系统 + `observe_window_appearance`）、双开源字体预设与 `effective_code_family()`、key→文案 i18n 骨架（zh-CN 默认/热注册回落）、7 层焦点栈纯逻辑与四栏自适应断点策略（400/640/1024）及 `WorkbenchShell` 占位骨架，40 项单元测试全绿。
 5. **M5 — GPUI 桌面核心视图 3 路并行**：
    - 按 `crates/soxu-desktop/src/` 独立子目录 3 路并行：A 路（虚拟对话流 `<=8.3Hz` 合批 + 5 类工具卡/审批卡/提问卡 + 20px 轮次导航轨）、B 路（760px 同步宽输入舱 + 纯图标权限与投递 + 可配模型移交 + 三色圆环与 11 项统计）、C 路（右栏 Diff/Files + 7 分区设置弹窗 + 提交/配对/回退/透视等核心模态框）。
 6. **M6 — 受管脚本、受控 PTY、全局检索与自动化收口 3 路并行**：
@@ -210,6 +210,14 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 | `#115` 设计令牌编译为 Rust 主题常量并纳入零漂移校验 | `feat/115-gpui-theme-tokens` / `wks_19r49pwc` | `scripts/sync-design-tokens.mjs`、`scripts/verify-design-system.mjs`、`crates/soxu-desktop/src/{lib.rs,theme/**}`（必要时 `main.rs`、crate `Cargo.toml`，不得新增依赖）、本看板、AOCI |
 
 参考 Padu（`fbe97a38`）的 `scripts/generate-themes.ts` 三产物 `targets` + `--check` 逐文件比对组织方式；因其 `theme_palette.rs` 依赖 `bezel-gpui` 0.3.21 且用 `#[allow(dead_code)]`，本单不照搬 API/版本，改为零依赖常量 + 库目标公开导出。验收边界：`tokens.rs` 只是常量底座，GPUI 主题结构与 7 层焦点栈待 Wave 4.2 接入。
+
+#### 进行中波次 `wave-m4-w2b-20261128`（M4 Wave 4.2 轨道 B：GPUI 应用壳层底座，`#124`）
+
+| Issue / 任务 | 分支 / Paseo 工作区 | Owned Paths |
+| :--- | :--- | :--- |
+| `#124` GPUI 应用壳层与主题/字体/i18n/焦点栈底座 | `feat/124-desktop-shell` / Paseo 工作树 `19r49pwc` | `crates/soxu-desktop/**`（含其 `Cargo.toml`）、`docs/ops/PROGRESS.md`、本分支 AOCI；同因扩围（主控已裁决）：根 `Cargo.toml` 的 `[workspace.dependencies]` 追加 `gpui-pre-platform = "=0.3.14"` 单行 + `Cargo.lock` 同步 |
+
+实现切片：`main.rs` 经 `gpui_platform::application()` 挂载真实 GPUI App（窗口 `Soxu` / `1120×720` / 最小 `360×480`，几何常量由编译期 `const` 断言锚定令牌断点）；`theme/theme_state.rs` 全局主题状态（Dark/Light/System + `observe_window_appearance` 跟随系统）；`font.rs` 双 OFL 字体预设 + `effective_code_family()` 联动契约；`i18n.rs` key→文案骨架（zh-CN 默认、热注册、zh-CN 不可覆盖、缺失回落）；`focus.rs` 7 层焦点栈纯逻辑（单一激活层/模态锁定/Esc 消费）；`layout.rs` 400/640/1024 断点与四栏策略；`shell.rs` `WorkbenchShell` 四栏占位骨架（零 I/O 渲染）。40 项单测全绿；依赖边界：新增 `gpui-pre-platform =0.3.14` 为 gpui-pre 快照线官方入口 crate（`Cargo.lock` 净新增其传递依赖闭包，`cargo verify-project` 与 `--locked` 全链验证通过）。
 
 ### 3.2 已合入交付与验收证据边界
 

@@ -12,6 +12,10 @@ workspace = true
 anyhow.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
+# GPUI 官方应用入口（Application::with_platform 的宿主平台实现），与 gpui-pre 0.3.14
+# 同一快照线（ADR-012）。Windows 无需额外 feature；任务书第 1 条 main.rs 挂载 gpui App
+# 的必要入口。
+gpui-pre-platform = "=0.3.14"
 serde.workspace = true
 serde_json.workspace = true
 soxu-core.workspace = true
