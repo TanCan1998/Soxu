@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 #[cfg(target_os = "linux")]
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(target_os = "linux")]
+use std::time::{Duration, Instant};
 
 use soxu_git::{
     GitProbe, InitMode, RepositoryCreateCoordinator, RepositoryCreateError,
@@ -77,7 +79,7 @@ fn probe() -> GitProbe {
 }
 
 #[cfg(target_os = "linux")]
-fn git(directory: &Path, arguments: &[&str]) -> Output {
+fn git_command(directory: &Path, extra_args: &[&str]) -> Command {
     let program = probe().program().to_owned();
     let mut command = Command::new(program);
     command
@@ -91,17 +93,29 @@ fn git(directory: &Path, arguments: &[&str]) -> Output {
             "commit.gpgsign=false",
             "-c",
             "init.defaultBranch=main",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
         ])
-        .args(arguments)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .args(extra_args);
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("GIT_") {
             command.env_remove(name);
         }
     }
-    let output = command.output().expect("运行夹具 Git 命令");
+    command
+}
+
+#[cfg(target_os = "linux")]
+fn git(directory: &Path, arguments: &[&str]) -> Output {
+    let output = git_command(directory, &[])
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("运行夹具 Git 命令");
     assert!(
         output.status.success(),
         "夹具 Git 命令失败：{arguments:?} {}",
@@ -132,6 +146,248 @@ fn source_repository_at(source: &Path) -> PathBuf {
     git(&source, &["add", "README.md"]);
     git(&source, &["commit", "-m", "初始提交"]);
     source
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct MaintenanceTrace {
+    written: bool,
+    started: bool,
+    detached: bool,
+    exited: bool,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+enum CommitOutcome {
+    Succeeded,
+    Failed(Option<i32>),
+    TimedOut,
+    WaitErrored,
+    ReapUnconfirmed,
+}
+
+#[cfg(target_os = "linux")]
+const COMMIT_DEADLINE: Duration = Duration::from_secs(60);
+#[cfg(target_os = "linux")]
+const POLL_INTERVAL: Duration = Duration::from_millis(20);
+#[cfg(target_os = "linux")]
+const REAP_WINDOW: Duration = Duration::from_secs(10);
+
+#[cfg(target_os = "linux")]
+const CONTROL_MAINTENANCE_ARGS: [&str; 8] = [
+    "-c",
+    "maintenance.auto=true",
+    "-c",
+    "gc.auto=0",
+    "-c",
+    "maintenance.autoDetach=false",
+    "-c",
+    "gc.autoDetach=false",
+];
+
+#[cfg(target_os = "linux")]
+fn trace_child_id(line: &str) -> Option<u32> {
+    const KEY: &str = "\"child_id\":";
+    let rest = line.get(line.find(KEY)? + KEY.len()..)?;
+    rest.chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .ok()
+}
+
+#[cfg(target_os = "linux")]
+fn trace_sid(line: &str) -> Option<&str> {
+    const KEY: &str = "\"sid\":\"";
+    let rest = line.get(line.find(KEY)? + KEY.len()..)?;
+    Some(&rest[..rest.find('"')?])
+}
+
+#[cfg(target_os = "linux")]
+fn summarize_trace(text: &str) -> MaintenanceTrace {
+    let mut started: Vec<(&str, u32)> = Vec::new();
+    let mut detached = false;
+    for line in text.lines() {
+        if !line.contains("\"event\":\"child_start\"") || !line.contains("\"maintenance\"") {
+            continue;
+        }
+        let (Some(sid), Some(child_id)) = (trace_sid(line), trace_child_id(line)) else {
+            continue;
+        };
+        started.push((sid, child_id));
+        detached |= line.contains("\"--detach\"");
+    }
+    let exited = text.lines().any(|line| {
+        if !line.contains("\"event\":\"child_exit\"") {
+            return false;
+        }
+        let (Some(sid), Some(child_id)) = (trace_sid(line), trace_child_id(line)) else {
+            return false;
+        };
+        started.contains(&(sid, child_id))
+    });
+    MaintenanceTrace {
+        written: !text.is_empty(),
+        started: !started.is_empty(),
+        detached,
+        exited,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn reap_direct_child(child: &mut std::process::Child) -> bool {
+    let deadline = Instant::now() + REAP_WINDOW;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL_INTERVAL),
+            _ => return false,
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn await_child(child: &mut std::process::Child, deadline: Duration) -> CommitOutcome {
+    let started = Instant::now();
+    let mut observed_error = false;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if status.success() {
+                    CommitOutcome::Succeeded
+                } else {
+                    CommitOutcome::Failed(status.code())
+                };
+            }
+            Ok(None) if started.elapsed() < deadline => std::thread::sleep(POLL_INTERVAL),
+            Ok(None) => break,
+            Err(_) => {
+                observed_error = true;
+                break;
+            }
+        }
+    }
+    let _ = child.kill();
+    if !reap_direct_child(child) {
+        return CommitOutcome::ReapUnconfirmed;
+    }
+    if observed_error {
+        CommitOutcome::WaitErrored
+    } else {
+        CommitOutcome::TimedOut
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn outcome_detail(outcome: &CommitOutcome) -> String {
+    match outcome {
+        CommitOutcome::Succeeded => "succeeded".to_owned(),
+        CommitOutcome::Failed(code) => format!("failed(exit={code:?})"),
+        CommitOutcome::TimedOut => "timed_out".to_owned(),
+        CommitOutcome::WaitErrored => "wait_errored".to_owned(),
+        CommitOutcome::ReapUnconfirmed => "reap_unconfirmed".to_owned(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn traced_commit(
+    directory: &Path,
+    trace: &Path,
+    extra_args: &[&str],
+) -> (CommitOutcome, MaintenanceTrace) {
+    fs::write(directory.join("traced.txt"), b"traced\n").expect("跟踪提交文件");
+    git(directory, &["add", "traced.txt"]);
+    let mut command = git_command(directory, extra_args);
+    command
+        .env("GIT_TRACE2_EVENT", trace)
+        .args(["commit", "-m", "跟踪提交"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().expect("启动夹具提交");
+    let outcome = await_child(&mut child, COMMIT_DEADLINE);
+    let observed = summarize_trace(&fs::read_to_string(trace).unwrap_or_default());
+    (outcome, observed)
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn maintenance_exit_must_come_from_the_same_parent_sid() {
+    let started = r#"{"event":"child_start","sid":"trace-root","child_id":0,"argv":["git","maintenance","run","--auto","--quiet","--no-detach"]}"#;
+    let nested_sid_exit =
+        r#"{"event":"child_exit","sid":"trace-root/nested","child_id":0,"code":0}"#;
+    let other_child_exit = r#"{"event":"child_exit","sid":"trace-root","child_id":1,"code":0}"#;
+    let same_sid_exit = r#"{"event":"child_exit","sid":"trace-root","child_id":0,"code":0}"#;
+
+    let nested = summarize_trace(&format!("{started}\n{nested_sid_exit}\n"));
+    assert!(nested.started, "{nested:?}");
+    assert!(
+        !nested.exited,
+        "同 child_id 但不同 sid 不得计为已退出：{nested:?}"
+    );
+
+    let other_child = summarize_trace(&format!("{started}\n{other_child_exit}\n"));
+    assert!(
+        !other_child.exited,
+        "同 sid 但不同 child_id 不得计为已退出：{other_child:?}"
+    );
+
+    let matched = summarize_trace(&format!("{started}\n{same_sid_exit}\n"));
+    assert!(
+        matched.exited,
+        "同 sid + 同 child_id 必须计为已退出：{matched:?}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn fixture_commits_never_start_background_maintenance() {
+    let fixture = Fixture::new("maintenance-guard");
+    let guarded = fixture.path("guarded-source");
+    fs::create_dir_all(&guarded).expect("源目录");
+    git(&guarded, &["init", "--initial-branch=main"]);
+    let (outcome, observed) = traced_commit(&guarded, &fixture.path("guarded-trace.json"), &[]);
+    assert!(
+        matches!(outcome, CommitOutcome::Succeeded),
+        "受测提交未在期限内成功（{}）：{observed:?}",
+        outcome_detail(&outcome)
+    );
+    assert!(
+        observed.written,
+        "trace2 未写入，本次观察无效：{observed:?}"
+    );
+    assert!(
+        !observed.started,
+        "夹具提交派生了后台 git maintenance 子进程：{observed:?}"
+    );
+
+    let control = fixture.path("control-source");
+    fs::create_dir_all(&control).expect("对照源目录");
+    git(&control, &["init", "--initial-branch=main"]);
+    let (outcome, observed) = traced_commit(
+        &control,
+        &fixture.path("control-trace.json"),
+        &CONTROL_MAINTENANCE_ARGS,
+    );
+    assert!(
+        matches!(outcome, CommitOutcome::Succeeded),
+        "对照提交未在期限内成功（{}）：{observed:?}",
+        outcome_detail(&outcome)
+    );
+    assert!(observed.written, "对照提交的 trace2 未写入：{observed:?}");
+    assert!(
+        observed.started,
+        "对照提交未观察到 maintenance 子进程，观察通道失效：{observed:?}"
+    );
+    assert!(
+        !observed.detached,
+        "对照的维护子进程仍以 --detach 运行，会残留后台进程：{observed:?}"
+    );
+    assert!(
+        observed.exited,
+        "对照未观察到同 sid + 同 child_id 的 child_exit，无法确认维护已结束：{observed:?}"
+    );
 }
 
 #[cfg(target_os = "linux")]
