@@ -32,11 +32,13 @@
 | `L-011` | `.ps1` UTF-8 防乱码 | 中文 Windows 无终端宿主默认 CP936；读写 `git` 输出的门禁脚本开头必设 `Console/OutputEncoding = UTF8` | `L3 · Seen 1×` | `check-all.ps1` / `verify-commits-and-privacy.ps1` |
 | `L-012` | Pi 上下文与缓存 | 项目级 `.pi/settings.json` 必设 `autoload: false` + `["!**"]` 禁 `context-mode` 防 `.pi/npm/` 漂移，且 `trust.json` 覆 worktrees | `L3 · Seen 1×` | `.pi/settings.json` / `.gitignore` / `SKILL.md` |
 | `L-013` | 平台矩阵告警 | `-D warnings` 只译当前平台分支，且覆盖范围必须是全 workspace `--all-targets`（含集成测试目标）；平台专用符号的 `use` 必须与用例同 `cfg` 门控；缺 Darwin C 工具链时可用已装 Darwin ARM64 target 跑 `--workspace --exclude <C 依赖 crate> --all-targets` 交叉，并**单列排除范围与原生待办**；不加 `#[allow]`、不移栽 Linux 原语 | `L2 · Seen 3×` | 本文 / 波次验收 |
-| `L-014` | 测试夹具后台维护 | 夹具 Git 命令必须与生产只读入口同源加 `-c maintenance.auto=false -c gc.auto=0`；回归用 trace2 `child_start`/`child_exit`，启动与退出须同 `sid` + 同 `child_id`；正向对照加 `*autoDetach=false`，只按观察到的同进程退出证据表述，不认定后代已回收 | `L2 · Seen 1×` | 本文 / 波次验收 |
+| `L-014` | 测试夹具后台维护 | 夹具 Git 命令必须与生产只读入口同源加 `-c maintenance.auto=false -c gc.auto=0`；回归用 trace2 `child_start`/`child_exit`，启动与退出须同 `sid` + 同 `child_id`；正向对照加 `*autoDetach=false`；观察用 trace 文件写在夹具自建真实根内，不复用系统临时目录裸文件；只按观察到的同进程退出证据表述，不认定后代已回收 | `L2 · Seen 2×` | 本文 / 波次验收 |
 | `L-015` | 管道退出码 | `cargo ... \| tail` 拿到的是 `tail` 的 0；WSL/Linux 验证脚本必 `set -euo pipefail` 或查 `${PIPESTATUS[0]}`，重跑前 `--no-run` 重建并核对二进制 SHA/mtime | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-016` | 测试内子进程等待 | 观察“某子进程是否被派生”时，受测进程 stdin/stdout/stderr 全 `Stdio::null()`，证据只从 trace2 读；等待用 `spawn`+`try_wait`+截止+`kill`+回收窗口，五态可区分（成功/非零退出/超时/观察异常/回收未确认）；禁 `output()` 无界收集 | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-017` | 夹具环境隔离 | 真实 run 块在隔离子进程执行时不得依赖宿主预装工具：注入受控版本桩（rustc/cargo/node/pnpm）并把子进程 PATH 限为「桩目录 + pwsh 目录 + 系统目录」；桩每次调用写日志、证据字段须等于桩值，并加「无桩目录时不得出现桩值」负例；POSIX 桩的 PATH 项须做 MSYS 规范化（Windows 的 `C:/…` 会被 bash 的 PATH 冒号拆成两项，须 `cygpath -u` 得 `/c/…`）；桩只用于夹具，生产 Finalize 仍走真实工具链且工具缺失时失败闭合 | `L2 · Seen 1×` | `test-ci-gate.ps1` / 本文 |
 | `L-018` | 测试夹具根与路径校验 | 断言“拒绝链接/重解析点”的夹具，其合法根必须先取自真实路径（`canonicalize`），再从该真实根派生资产、启动目录与重验目标；未规范化的系统临时目录会让正向构造先被拒绝、负向断言到不了被测分支。规范化**仅限 Unix**：Windows 的 `\\?\` 前缀会破坏 `cmd mklink /J` 与 Node `cwd` 契约。有意构造的链接/junction/逃逸路径一律原样交给被测函数 | `L2 · Seen 1×` | 本文 / 波次验收 |
+| `L-019` | 平台能力夹具 | 文件名含非法 UTF-8 字节的夹具只在 Linux 建立盘语义：`macos-15` Runner 对 `diff.rs` 同类夹具实测 `fs::write` 返回 `EILSEQ`，`probe.rs`/`worktrees.rs` 的 `create_dir`/`write` 属同因推断且未原生复现，不得借此推断 Darwin 或其他文件系统整体能力。此类用例一律 `#[cfg(target_os = "linux")]`，不得用 `cfg(unix)` 广域桶；测试名与 `cfg` 同口径，并一次性搜完同 crate 兄弟集测 | `L2 · Seen 1×` | 本文 / 波次验收 |
+| `L-020` | 同因扩围裁决 | 发现不在 Owned Paths 的同因缺陷时，先按 `[BLOCKED / NEED-DECISION]` 上报复现证据与目标执行顺序，由主控裁决把同因点并入同一 PR 扩白名单；不得自行越权修改，也不另开碎片化热修复 PR | `L2 · Seen 1×` | 本文 / `SKILL.md` |
 
 ---
 
@@ -108,9 +110,9 @@
 - **验证方式**：交叉 Clippy 零告警 + 远端对应平台 Runner 原生门禁；报告中严格区分「交叉编译证据」与「真机执行」，不得把前者写成后者。若交叉本身被环境阻断，必须如实公示并标未验：本次 `--target aarch64-apple-darwin` `exit 101`，停在 `libsqlite3-sys` 的 `cc-rs: failed to find tool "cc"`（无 Darwin C 工具链/SDK），属 C 构建边界而非“测试目标 Clippy 已通过”；不得为此装 SDK、反复重试交叉或修改依赖，改用“macOS 编译面只保留无条件顶层代码”逐处比对使用点（人工使用点审查只用于定位，双平台全绿不证明 Darwin lint 通过），并交由 `#88` 合流后的真实 `macos-15` Runner 用“原错误 + 修复后同目标 Clippy”组成回退证据。`#96` 已用③的口径取得本机交叉回退证据：同一 `--workspace --exclude soxu-daemon --all-targets --target aarch64-apple-darwin` 命令修复前 `exit 101`（`15.47s`，2 条 error，`worktree_context.rs:2:22`），修复后 `exit 0`（`0.86s`，0 error / 0 warning）；该 `exit 0` 仅覆盖排除 `soxu-daemon` 后的目标面，不能冒称全仓或 Darwin 原生通过。**状态**：活跃。
 
 ### `L-014` 测试夹具的 Git 命令必须与生产只读入口同源禁用后台维护
-- **场景与根因**（`Seen 1× (2026-11-27)`）：run `45914578287` 的 Ubuntu 24.04 任务上，`binary_and_non_utf8_text_keep_distinct_output_contracts` 的整树快照只差 `.git/objects/maintenance.lock` 的增删与 `.git/objects` 的 mtime。根因是**夹具自己的 `git commit`** 派生了 detached `git maintenance run --auto`（trace2 可见 `child_start` 带 `--detach`），它持有 `objects/maintenance.lock` 并推进目录 mtime，与快照断言并发写。生产只读入口（`probe.rs`、`checkpoint/git.rs`、`repository_create/sandbox.rs`）都已用 `-c maintenance.auto=false -c gc.auto=0` 关闭，夹具漏了这套同源守卫。
-- **预防动作**：把守卫集中到夹具 Git 命令的唯一构造点（单一 `command_with` helper）。回归用 `GIT_TRACE2_EVENT` 的 `child_start`/`child_exit` 直接断言行为，不用 `sleep`、不删断言、不靠反复重跑；正向对照必须追加 `-c maintenance.autoDetach=false -c gc.autoDetach=false`（已验证 Git 2.53/2.56 均支持），让提交同步等待维护结束，并以**同 `sid` + 同 `child_id`** 的 `child_exit` 核实对照确实等到了该维护子进程退出；只表述对照实际观察到的退出证据，不认定其后代进程已全部回收。对照必须用**有界等待 + 无管道收集**（见 `L-016`），不得用 `Command::output()` 等可能派生子进程的命令。注意 `gc.auto=0` 单独并不足以阻止派生（Linux Git 2.53 实测仍派生），`maintenance.auto=false` 才是关键；对照只翻 `maintenance.auto=true`，`gc.auto` 保持 `0`，不要为了“让维护真跑一下”去开 `gc.auto`。
-- **验证方式**：删掉夹具守卫后回归用例如期失败（`started: true, detached: true`），恢复后受测字节 SHA-256 不变并通过；修复前旧实现重跑 40 次全部通过，证明重跑不能作为修复证据。**状态**：活跃。
+- **场景与根因**（`Seen 2× (2026-11-27)`）：run `45914578287` 的 Ubuntu 24.04 任务上，`binary_and_non_utf8_text_keep_distinct_output_contracts` 的整树快照只差 `.git/objects/maintenance.lock` 的增删与 `.git/objects` 的 mtime。根因是**夹具自己的 `git commit`** 派生了 detached `git maintenance run --auto`（trace2 可见 `child_start` 带 `--detach`），它持有 `objects/maintenance.lock` 并推进目录 mtime，与快照断言并发写。生产只读入口（`probe.rs`、`checkpoint/git.rs`、`repository_create/sandbox.rs`）都已用 `-c maintenance.auto=false -c gc.auto=0` 关闭，夹具漏了这套同源守卫。第二次同因不同面：`crates/soxu-git/tests/repository_create.rs::git` 同样缺少这套守卫，`#89` head `b8ca5fcd` 的 run `45951887087`（Linux job `140349512352`）在 `clone_records_authorized_source_without_temporary_path` 失败，源快照唯一差异也是 `.git/objects/maintenance.lock`（before 有、after 无）；`#103` 以 trace2 正负对照取得实际派生证据后才定因，**不把锁文件名字当作完整定因**。
+- **预防动作**：把守卫集中到夹具 Git 命令的唯一构造点（单一 `command_with` helper；`repository_create.rs` 为 `git_command`，`extra_args` 追加在守卫之后）。回归用 `GIT_TRACE2_EVENT` 的 `child_start`/`child_exit` 直接断言行为，不用 `sleep`、不删断言、不靠反复重跑；正向对照必须追加 `-c maintenance.autoDetach=false -c gc.autoDetach=false`（已验证 Git 2.53/2.56 均支持），让提交同步等待维护结束，并以**同 `sid` + 同 `child_id`** 的 `child_exit` 核实对照确实等到了该维护子进程退出；只表述对照实际观察到的退出证据，不认定其后代进程已全部回收。对照必须用**有界等待 + 无管道收集**（见 `L-016`），不得用 `Command::output()` 等可能派生子进程的命令。注意 `gc.auto=0` 单独并不足以阻止派生（Linux Git 2.53 实测仍派生），`maintenance.auto=false` 才是关键；对照只翻 `maintenance.auto=true`，`gc.auto` 保持 `0`，不要为了“让维护真跑一下”去开 `gc.auto`。观察用 trace 文件写在夹具自建的真实根内（名字在该 fixture 私有根内唯一），不复用系统临时目录的独立裸文件，也不预删可能碰撞的路径。
+- **验证方式**：删掉夹具守卫后回归用例如期失败（`started: true, detached: true`），恢复后受测字节 SHA-256 不变并通过；修复前旧实现重跑 40 次全部通过，证明重跑不能作为修复证据。`#103` 以同一判据在 `repository_create.rs` 上复现：移除 `git_command` 的两行守卫后 `fixture_commits_never_start_background_maintenance` 确定性失败（`MaintenanceTrace { written: true, started: true, detached: true, exited: true }`，`exit 101`），恢复后源文件 SHA-256 与重建的受测二进制 SHA-256 均回到移除前同一值。**状态**：活跃。
 
 ### `L-015` 管道会吞掉子进程退出码，重跑前必须重建二进制
 - **场景与根因**（`Seen 1× (2026-11-27)`）：`cargo test ... | tail` 的退出码是 `tail` 的 `0`，编译或测试失败会被静默当作成功；另一次竞态重复实验中，回退实验后恢复源码却没有重新构建，直接跑到了回退实验遗留的旧二进制，得出「全仓套件 8/8 失败」的错误结论。后者是操作疏漏，不是工具缺陷：`cargo test` 已按 mtime 判断，只是当时没有触发重建。
@@ -127,10 +129,20 @@
 - **预防动作**：凡“拒绝链接/重解析点/路径逃逸”的夹具，先创建自己的临时目录，再以 `canonicalize` 取真实路径为根，**全部资产、启动目录、日志与重验目标都从这一个真实根派生**，让正向构造真正成功、负向断言真正落到被测分支。**有意构造**的资产链接、祖先链接、junction、目录替换与 `..` 路径仍原样传给被测函数，不得提前规范化。规范化必须限定在 `#[cfg(unix)]`：Windows 上 `canonicalize` 会附加 `\\?\` 扩展路径前缀，实测会让 `soxu-drivers --test native` 由 `10 passed` 退化为 `4 passed / 6 failed`（Node 夹具 `process.cwd()` 的物理路径与 `SOXU_FIXTURE_CWD` 不再字符串相等，子进程断言退出），并使 `cmd mklink /J` 失效。
 - **验证方式**：`TMPDIR` 指向受控 symlink 的 Linux 全仓 `cargo test --workspace --locked --no-fail-fast` 修复前 `exit 101` / 修复后 `exit 0`，普通目录对照 `exit 0`，两者均 40 个套件全通过；逐目标计数分别回到 `2 / 6 / 16 / 9 / 27 / 28 / 6` 通过，且负向用例仍在。**状态**：活跃（未晋升，待复现计数或脚本防呆）。
 
+### `L-019` 非法 UTF-8 文件名的夹具只在 Linux 建立盘语义，用具体目标而非 `unix` 桶
+- **场景与根因**（`Seen 1× (2026-11-27)`）：`#89` head `b8ca5fcd` 的 run `45951887087`（`macos-15` ARM64）在 `crates/soxu-git/tests/diff.rs::unix_preserves_raw_linebreak_name_and_refuses_a_replaced_symlink` 的 `fs::write` 报 `EILSEQ`。夹具文件名 `line\nbyte\xff` 含非法 UTF-8 字节，而**当前 `macos-15` Runner 所用文件系统对该夹具返回 `EILSEQ`**；Linux 是本项目明确验证支持原始字节路径语义的运行面。属“平台能力明确却写成 `cfg(unix)` 广域桶”的类型错误，与 `L-013` 的导入面/分支面问题同族但根因不同（这次是测试**建盘语义**的平台边界，不是 lint 面）。
+- **预防动作**：依赖“文件系统可表示非法字节路径”的用例一律 `#[cfg(target_os = "linux")]`，与仓库既有 `checkpoint.rs::linux_rejects_links_fifos_...`、`repository_create.rs` 同口径；测试名同步改成 `linux_...` 并在注释里写清实测 Runner 的 `EILSEQ` 边界，**不往“某种文件系统只接受合法 UTF-8”这类泛化结论写**。不得为让它“能跑”而删用例、加 `#[allow]`、改被测代码或把夹具改成 lossy。改完必须定向搜全仓同因：`rg -n -g '*.rs' 'from_bytes|from_vec' crates` 配合 `\xff`/`\xfe` 字面量（PS7 不展开 `crates/**/*.rs` 这类 glob，必须交给 `rg` 的 `-g`），并逐个区分“建盘夹具”与“纯内存字节解析”——本次即据此发现 `tests/probe.rs`、`tests/worktrees.rs` 各一处同因建盘夹具（受 `diff` 先行失败掩盖），而 `status.rs`、`worktrees.rs` 的清单解析与 `diff.rs` 的 `\xff` 文件**内容**属跨平台安全，一并保留。
+- **验证方式**：Linux 全仓 `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 与 `cargo test --workspace --locked --no-fail-fast --offline` 均 `exit 0`，三处原始字节用例在 Linux **实际执行**并通过；Windows 同目标分别 `15 / 8 / 10 passed`（三处 Linux 用例不编译）；Darwin 交叉 `cargo clippy --workspace --exclude soxu-daemon --all-targets --target aarch64-apple-darwin` `exit 0`；三者均不得陈述为 macOS 原生通过。**状态**：活跃。
+
+### `L-020` 同因扩围由主控裁决并入同一 PR，不越权也不碎片化
+- **场景与根因**（`Seen 1× (2026-11-27)`）：`#100` 首轮只修 `diff.rs` 一处，定向扫描发现 `probe.rs`/`worktrees.rs` 两处同因用例不在 Owned Paths 内。若子代理自行扩面即越权；若各自另开 Issue/PR，则需三轮独立验证、三轮 Darwin 重跑才能全部闭合，且每轮都会被前一处先行失败掩盖。
+- **预防动作**：先按 `[BLOCKED / NEED-DECISION]` 上报精确复现、目标执行顺序与掩盖机制，不动手修改；主控裁决后由主控把 Owned Paths 正式扩至同因文件，执行代理在同一工作树/分支续做并保留原环境、参考索引复用与安全边界，不重启代理或另开分支。
+- **验证方式**：三处用例在同一 PR 内同口径门控与改名，一次 WSL 全仓复验三处均实际执行通过；PR 正文与看板同步记录裁决与扩围原因。**状态**：活跃。
+
 ---
 
 ## 四、已自动化防呆归档区
 
 > 当「活跃规则速查表」中的经验已被仓库脚本或自动化测试完全机器防呆且连续两个波次零复发后，将其迁入本区归档，以保持主控日常上下文精干。
 
-- *暂无已迁出归档项（当前 `L-001` ~ `L-016` 与 `L-018` 处于活跃巡检期；`L-017` 由 `#88` 冻结候选占用，合流后补齐）。*
+- *暂无已迁出归档项（当前 `L-001` ~ `L-016`、`L-018` ~ `L-020` 处于活跃巡检期；`L-017` 由 `#88` 冻结候选占用，合流后补齐）。*

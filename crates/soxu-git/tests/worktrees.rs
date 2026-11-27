@@ -449,9 +449,9 @@ fn branch_validation_matches_native_git_check_ref_format() {
     assert_eq!(before, fixture.snapshot());
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
-async fn native_unix_newline_and_non_utf8_worktree_paths_remain_lossless() {
+async fn native_linux_newline_and_non_utf8_worktree_paths_remain_lossless() {
     use std::os::unix::ffi::OsStrExt;
     let fixture = Fixture::new();
     let repo = fixture.repo("main");
