@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-27T01:03:43Z",
+  "updated_at": "2026-11-27T01:45:25Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "c9a035694a810d0f9ef6cf26a14d50122356c9d74926969b812840ba809b4c1e",
-      "size": 92412,
-      "normalized_sha256": "c9a035694a810d0f9ef6cf26a14d50122356c9d74926969b812840ba809b4c1e"
+      "sha256": "2f2f10bb9cad85e5e116b9fdf7256b1929889dd313f239e01b331a05d431aef4",
+      "size": 92345,
+      "normalized_sha256": "2f2f10bb9cad85e5e116b9fdf7256b1929889dd313f239e01b331a05d431aef4"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1139,9 +1139,9 @@
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "850ea35cdd4a066feb7fc18261f47ab8b72c07ef87aa5b553201ad4d20a9f107",
-      "size": 35874,
-      "normalized_sha256": "850ea35cdd4a066feb7fc18261f47ab8b72c07ef87aa5b553201ad4d20a9f107"
+      "sha256": "5b74a626a8c0dc78d0c4040f25e3495a7a7232692e26f845d33bbba063703a22",
+      "size": 36134,
+      "normalized_sha256": "5b74a626a8c0dc78d0c4040f25e3495a7a7232692e26f845d33bbba063703a22"
     },
     "docs/user/getting-started.md": {
       "role": "index",
@@ -1175,9 +1175,9 @@
     },
     "scripts/collect-ci-evidence.ps1": {
       "role": "index",
-      "sha256": "7de8a7d534c3310655ac9698f25b8aa9ac5b278ac13f6aa4a826bb3a8ae89ddd",
-      "size": 16071,
-      "normalized_sha256": "7de8a7d534c3310655ac9698f25b8aa9ac5b278ac13f6aa4a826bb3a8ae89ddd"
+      "sha256": "b92d1092a19a0e5d32c60d63ef1e7bc3f7b15f62cd0c037c94fb87f06faa5d1a",
+      "size": 17471,
+      "normalized_sha256": "b92d1092a19a0e5d32c60d63ef1e7bc3f7b15f62cd0c037c94fb87f06faa5d1a"
     },
     "scripts/detect-check-scope.ps1": {
       "role": "index",
@@ -1241,9 +1241,9 @@
     },
     "scripts/test-ci-gate.ps1": {
       "role": "index",
-      "sha256": "77246277ec7ffd3b6190447140f68113e4160a6aa28e2610f83dec3883f32953",
-      "size": 120083,
-      "normalized_sha256": "77246277ec7ffd3b6190447140f68113e4160a6aa28e2610f83dec3883f32953"
+      "sha256": "1f23d336bbf5d11e0dd8b61542a0dfceb658fa5be5ea7dc4d4a67c56386e298b",
+      "size": 124092,
+      "normalized_sha256": "1f23d336bbf5d11e0dd8b61542a0dfceb658fa5be5ea7dc4d4a67c56386e298b"
     },
     "scripts/test-paseo-orchestration.ps1": {
       "role": "index",

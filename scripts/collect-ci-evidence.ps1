@@ -147,16 +147,25 @@ function Get-LogObservation([string]$Path) {
   # Cargo 只在顶层打印套件边界；段内多条 test result 即派生进程输出。
   # Windows 上 cargo 打印 Running tests\\x.rs，Linux 上为 tests/x.rs，两者都必须识别。
   $suitePattern = '^\s*(?:Running unittests |Running tests[/\\]|Doc-tests )'
+  # 每个执行单元（顶层二进制或其派生进程）都会先打印一行 running N tests。
+  # 段内 running 行数与 test result 行数不一致，就说明有执行单元未结束或日志被截断。
+  $startPattern = '^\s*running \d+ tests?\s*$'
   $resultPattern = 'test result:\s*(?<verdict>[A-Za-z]+)\.\s*(?<p>\d+)\s+passed;\s*(?<f>\d+)\s+failed;\s*(?<i>\d+)\s+ignored;\s*(?<m>\d+)\s+measured;\s*(?<x>\d+)\s+filtered out'
 
   $segments = [System.Collections.Generic.List[object]]::new()
   $outsideResults = [System.Collections.Generic.List[object]]::new()
+  $outsideStarts = 0
+  $outsideResultsBeforeStart = 0
   $current = $null
   $totalResultLines = 0
   foreach ($line in ($text -split "`r?`n")) {
     if ($line -match $suitePattern) {
-      $current = [pscustomobject]@{ Results = [System.Collections.Generic.List[object]]::new() }
+      $current = [pscustomobject]@{ Results = [System.Collections.Generic.List[object]]::new(); Starts = 0; ResultsBeforeStart = 0 }
       $segments.Add($current)
+      continue
+    }
+    if ($line -match $startPattern) {
+      if ($null -eq $current) { $outsideStarts++ } else { $current.Starts++ }
       continue
     }
     $match = [regex]::Match($line, $resultPattern)
@@ -171,37 +180,61 @@ function Get-LogObservation([string]$Path) {
       Verdict  = $match.Groups['verdict'].Value
     }
     if ($row.Verdict -eq 'FAILED') { $observation.TestsFailed = $true }
-    if ($null -eq $current) { $outsideResults.Add($row) } else { $current.Results.Add($row) }
+    if ($null -eq $current) {
+      if ($outsideStarts -eq 0) { $outsideResultsBeforeStart++ }
+      $outsideResults.Add($row)
+    } else {
+      if ($current.Starts -eq 0) { $current.ResultsBeforeStart++ }
+      $current.Results.Add($row)
+    }
   }
   $observation.TestResultLines = $totalResultLines
   $observation.SuiteCount = $segments.Count
 
   $rows = [System.Collections.Generic.List[object]]::new()
   $reason = ""
+  $incomplete = $false
   if ($segments.Count -eq 0) {
-    # 无套件边界：只有恰好一条 result 才能当作单测试套件的真实汇总。
-    if ($outsideResults.Count -eq 1) {
-      $rows.Add($outsideResults[0])
-    } elseif ($totalResultLines -eq 0) {
-      $reason = "no_test_result_lines"
-    } else {
+    # 无套件边界：必须“一个开始行 + 一条汇总 + 顺序正确”才能当作单测试套件。
+    if ($outsideResults.Count -gt 1) {
       $reason = "unattributed_test_result_lines"
+    } elseif ($outsideResults.Count -eq 1) {
+      if ($outsideStarts -eq 1 -and $outsideResultsBeforeStart -eq 0) {
+        $rows.Add($outsideResults[0])
+      } else {
+        $reason = "incomplete_suite_summary"
+      }
+    } elseif ($outsideStarts -gt 0) {
+      $reason = "incomplete_suite_summary"
+    } else {
+      $reason = "no_test_result_lines"
     }
-  } elseif ($outsideResults.Count -gt 0) {
-    # 边界前的 result 行无法归属任何套件，不猜。
+  } elseif ($outsideResults.Count -gt 0 -or $outsideStarts -gt 0) {
+    # 边界前的执行单元或汇总行无法归属任何套件，不猜。
     $reason = "result_outside_suite_boundary"
   } else {
     $nested = 0
     $ambiguous = $false
     foreach ($segment in $segments) {
-      if ($segment.Results.Count -eq 0) { continue }
-      if ($segment.Results.Count -eq 1) { $rows.Add($segment.Results[0]); continue }
-      $nested += $segment.Results.Count - 1
-      $ambiguous = $true
+      if ($segment.Results.Count -eq 0) {
+        # 有边界但没有任何汇总：即使连 running 行都还没打印，也算不完整。
+        $incomplete = $true
+        continue
+      }
+      if ($segment.Results.Count -gt 1) {
+        $nested += $segment.Results.Count - 1
+        $ambiguous = $true
+        continue
+      }
+      # 恰好一条汇总：只有开、始、汇总顺序正确且数量一致时才能归属到该套件。
+      if ($segment.Starts -ne 1 -or $segment.ResultsBeforeStart -ne 0) { $incomplete = $true; continue }
+      $rows.Add($segment.Results[0])
     }
     $observation.NestedResultLines = $nested
     if ($ambiguous) {
       $reason = "nested_test_result_lines"
+    } elseif ($incomplete) {
+      $reason = "incomplete_suite_summary"
     } elseif ($rows.Count -eq 0) {
       $reason = "no_test_result_lines"
     }

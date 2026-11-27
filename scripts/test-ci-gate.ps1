@@ -1639,6 +1639,76 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
     Assert-Check ($shapeOutside.Record.countsReason -eq 'result_outside_suite_boundary') "边界外原因必须稳定（实际 $($shapeOutside.Record.countsReason)）"
   }
 
+  # 两个真实反例：套件已开始但没有汇总（后续套件），以及顶层未结束但已见子进程汇总。
+  # 两者都属“不完整”，整阶段未知，不得取已完整那一段的数字。
+  $shapeIncompleteSecond = Invoke-LogShapeStage 'incomplete-second' @'
+   Running tests/first.rs (target/debug/deps/first-a)
+
+running 2 tests
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+   Running tests/second.rs (target/debug/deps/second-b)
+
+running 3 tests
+'@
+  if ($null -ne $shapeIncompleteSecond.Record) {
+    Assert-Check ($shapeIncompleteSecond.Record.countsKnown -eq $false) "存在未结束的后续套件时不得报部分计数"
+    Assert-Check ($null -eq $shapeIncompleteSecond.Record.counts) "不完整日志的 counts 必须为 null"
+    Assert-Check ($shapeIncompleteSecond.Record.countsReason -eq 'incomplete_suite_summary') "不完整原因必须稳定（实际 $($shapeIncompleteSecond.Record.countsReason)）"
+  }
+
+  $shapeVisibleNesting = Invoke-LogShapeStage 'visible-nesting' @'
+   Running tests/top.rs (target/debug/deps/top-c)
+
+running 3 tests
+running 1 test
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.02s
+'@
+  if ($null -ne $shapeVisibleNesting.Record) {
+    Assert-Check ($shapeVisibleNesting.Record.countsKnown -eq $false) "可见子进程汇总且顶层未结束时不得取子进程数字"
+    Assert-Check ($null -eq $shapeVisibleNesting.Record.counts) "该形状的 counts 必须为 null"
+    Assert-Check ($shapeVisibleNesting.Record.countsReason -eq 'incomplete_suite_summary') "可见嵌套不完整原因必须稳定（实际 $($shapeVisibleNesting.Record.countsReason)）"
+  }
+
+  # 不完整 + FAILED：计数未知但失败分型不能丢。
+  $shapeIncompleteFailed = Invoke-LogShapeStage 'incomplete-failed' @'
+   Running tests/top.rs (target/debug/deps/top-c)
+
+running 3 tests
+running 1 test
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+'@ 101
+  if ($null -ne $shapeIncompleteFailed.Record) {
+    Assert-Check ($shapeIncompleteFailed.Record.countsKnown -eq $false -and $null -eq $shapeIncompleteFailed.Record.counts) "不完整时计数必须未知"
+    Assert-Check ($shapeIncompleteFailed.Record.status -eq 'test_failed') "未知计数不得掩盖 FAILED 分型（实际 $($shapeIncompleteFailed.Record.status)）"
+  }
+
+  # 补审边界：第二套件只打印了 Cargo Running 边界、连 running N tests 都未就打印就中断。
+  # 有边界但无汇总一律不完整，不能因为另一段完整就报已知计数。
+  $shapeBoundaryOnly = Invoke-LogShapeStage 'boundary-only' @'
+   Running tests/first.rs (target/debug/deps/first-a)
+
+running 2 tests
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+   Running tests/second.rs (target/debug/deps/second-b)
+'@
+  if ($null -ne $shapeBoundaryOnly.Record) {
+    Assert-Check ($shapeBoundaryOnly.Record.countsKnown -eq $false) "仅有 Running 边界的空段也属不完整"
+    Assert-Check ($null -eq $shapeBoundaryOnly.Record.counts) "有边界但无汇总时 counts 必须为 null"
+    Assert-Check ($shapeBoundaryOnly.Record.countsReason -eq 'incomplete_suite_summary') "缺汇总原因必须稳定（实际 $($shapeBoundaryOnly.Record.countsReason)）"
+  }
+
+  # 开始与汇总行顺序错乱（先汇总后 running）同样不可归属。
+  $shapeOutOfOrder = Invoke-LogShapeStage 'result-before-start' @'
+   Running tests/a.rs (target/debug/deps/a)
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s
+running 2 tests
+'@
+  if ($null -ne $shapeOutOfOrder.Record) {
+    Assert-Check ($shapeOutOfOrder.Record.countsKnown -eq $false) "汇总行早于开始行时不得计数"
+    Assert-Check ($shapeOutOfOrder.Record.countsReason -eq 'incomplete_suite_summary') "顺序错乱原因必须稳定（实际 $($shapeOutOfOrder.Record.countsReason)）"
+  }
+
   # 未知计数不得掩盖真实失败：嵌套 + 退出码 101 + FAILED 必须仍判 test_failed。
   $shapeNestedFailed = Invoke-LogShapeStage 'nested-failed' @'
    Running tests\wl.rs (target\debug\deps\wl-c.exe)
