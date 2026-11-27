@@ -136,19 +136,14 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 | Issue / 任务 | 分支 / Paseo 工作区 | 状态 | Owned Paths |
 | :--- | :--- | :--- | :--- |
 | `#94` / PR `#95` Darwin Daemon 测试导入热修复 | `fix/94-daemon-darwin-test-imports` / `wks_fa74a88079bc342e` | 已锁 `fb0da0fb` 由 PR `#95` 合入 `main`（`32e01097`），合入树 `4a21ba34` 与受审树一致；PR run `45932340468` success，main run `45932680368` 为放行依据；Darwin 原生回退证据仍待 `#88` 合流后的真实 `macos-15` Runner 补齐 | `crates/soxu-daemon/tests/worktree_lifecycle.rs`（最小平台导入）、本看板、`LESSONS.md` 的 `L-013`、本分支 AOCI |
+
+`#89` head `3db8969` 的 run `45929401718`（attempt 1，Darwin job `140278345298`）在 `Run Clippy` 报 `crates/soxu-daemon/tests/worktree_lifecycle.rs` 三处 `unused import`：`state::WorktreeAdmissionRequest`、`soxu_git::GitProbe`、`WORKTREE_CONTEXT_FILE`，测试步骤 skipped（证据记录为 `build_failed`，并非测试失败或原生通过）。三个符号的**全部**使用点只落在 `#[cfg(windows)]` 的系统拒绝用例与 `#[cfg(target_os = "linux")]` 的 `linux` 模块内，macOS 编译面一处也没有。修复保持最小：把三者从顶层无条件 `use` 移出，改为与用例同口径的 `#[cfg(any(windows, target_os = "linux"))]` 单条导入，测试体、断言、`Unsupported`/`UnsupportedFilesystem` 与权限边界一字未改，未加 `#[allow]`、未删用例、未屏蔽任何测试目标。主控独立复核：Windows 范围门禁 `62.63s`、Rust `41/0/3`、专项 5；WSL `20.94s`、专项 6；Darwin 以同范围非 Daemon 交叉 Clippy 复现并验证（修复前 `exit 101` 15.58s → 修复后 `exit 0` 8.80s），全仓 Darwin 原生待新矩阵。主控独立复核：Windows 范围门禁 `75.57s`、`worktree_lifecycle` `27/0/3`（工作树专项 `3` 通过）；WSL 全 `workspace --all-targets` Clippy + 专项 `8` 通过 `67.78s`；测试源码 SHA-256 `47e4235afb4c34269794b734c5e33951feb2416b4996017ea61c61c32dbcf9c1`；覆盖口径为**两个无条件 + 六个 Linux 用例**（不是三 + 五）。
+
 #### 已合入热修复：Magpie 测试导入（`#96`）
 
 | Issue / 任务 | 分支 / Paseo 工作区 | 状态 | Owned Paths |
 | :--- | :--- | :--- | :--- |
 | `#96` / PR `#97` Magpie 测试导入热修复 | `wks_892f5dddf5b05a63`（已归档） | 已锁 `04c6283` 由 PR `#97` 合入 `main`（`e6ea5ba8`），受审/CI 检出/合入三棵树均为 `c71a74f9`；审核 run `45937478475` 通过，main run `45937841659` success；归档后不在活跃列表、代理 closed、Git Worktree 注册与目录已移除，本地 squash 分支保留 | `crates/soxu-magpie/tests/worktree_context.rs`（最小平台导入）、本看板、`LESSONS.md`、本分支 AOCI |
-
-`#89` head `3db8969` 的 run `45929401718`（attempt 1，Darwin job `140278345298`）在 `Run Clippy` 报 `crates/soxu-daemon/tests/worktree_lifecycle.rs` 三处 `unused import`：`state::WorktreeAdmissionRequest`、`soxu_git::GitProbe`、`WORKTREE_CONTEXT_FILE`，测试步骤 skipped（证据记录为 `build_failed`，并非测试失败或原生通过）。三个符号的**全部**使用点只落在 `#[cfg(windows)]` 的系统拒绝用例与 `#[cfg(target_os = "linux")]` 的 `linux` 模块内，macOS 编译面一处也没有。修复保持最小：把三者从顶层无条件 `use` 移出，改为与用例同口径的 `#[cfg(any(windows, target_os = "linux"))]` 单条导入，测试体、断言、`Unsupported`/`UnsupportedFilesystem` 与权限边界一字未改，未加 `#[allow]`、未删用例、未屏蔽任何测试目标。主控独立复核：Windows 范围门禁 `75.57s`、`worktree_lifecycle` `27/0/3`（工作树专项 `3` 通过）；WSL 全 `workspace --all-targets` Clippy + 专项 `8` 通过 `67.78s`；测试源码 SHA-256 `47e4235afb4c34269794b734c5e33951feb2416b4996017ea61c61c32dbcf9c1`；覆盖口径为**两个无条件 + 六个 Linux 用例**（不是三 + 五）。
-
-#### 在办热修复：Darwin Magpie 测试导入（`#96`）
-
-| Issue / 任务 | 分支 / Paseo 工作区 | 状态 | Owned Paths |
-| :--- | :--- | :--- | :--- |
-| `#96` Darwin Magpie 测试导入热修复 | `fix/96-magpie-darwin-test-imports` / `wks_892f5dddf5b05a63` | 本地候选已就绪，待主控独立复验与锁 SHA 合入（与 `#88` 并行，仅动测试文件导入面） | `crates/soxu-magpie/tests/worktree_context.rs`（最小平台导入）、本看板、`LESSONS.md` 的 `L-013`、本分支 AOCI |
 
 `#89` head `df2849aa` 的 run `45934505956`（attempt 1，检出 `fc5d9034`，Darwin job `140294571285`）在 `macos-15` ARM64 的 `Run Clippy` 报 `crates/soxu-magpie/tests/worktree_context.rs` 两项 `unused import`：`WORKTREE_CONTEXT_FILE` 与 `WorktreeContextServer`，测试步骤 skipped（证据为构建失败，既不计为测试失败，也不构成 Darwin 原生通过）。两者使用点全部落在 `#[cfg(any(windows, target_os = "linux"))]` 的三个用例内（`WORKTREE_CONTEXT_FILE` 三处、`WorktreeContextServer` 三处），macOS 编译面零使用点。修复保持最小：从顶层无条件 `use` 移出，改为同口径 `#[cfg(any(windows, target_os = "linux"))]` 单条导入，测试体与断言一字未改，可在 Darwin 编译的 `native_and_shared_routes_do_not_create_assets` 与 `rejects_a_link_in_the_authorized_directory_chain` 保持无条件，未加 `#[allow]`、未删用例、未屏蔽任何测试目标。
 
@@ -213,6 +208,6 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 3. CI-C 已在册交付（合流候选待主控验收）：把 CI-B 的结构化计划（`platforms` / `platformMatrix` / `requiredPlatforms` / `requiredJobs` / `testProfiles` 与 `baseSha` / `headSha` / `checkoutSha`）接到真实三平台动态矩阵执行与逐平台证据聚合：每个平台一个 Rust 矩阵实例、依赖/Clippy/测试共用一个构建目录，纯 Rust 格式检查在 Ubuntu 上跑一次；`CI Gate` 检查名、必跑只认 `success` 的严格证据与失败闭合保持不变，不为接入矩阵而削弱对账。
 4. Git 后续候选继续按契约与共享写入范围排序：`#57-2` 只读恢复预览（恢复执行须另经二次授权）、`#58-D` 先建 Safety Snapshot 再执行 Rewind、`#58-E` 文件级结构化提交的预检与执行；`direct` MCP 运行时挂载与 Worktree 内写权限另排期，涉及 `soxu-protocol` 的变更先走独立契约 PR。
 5. 未经核验的跨平台原生测试与正式发版仍列为待办。Intel 只保留两条入口：显式 `full-with-intel` 手动入口与正式发版（tag）入口；普通 `-Full` 不含 Intel，也不从文件路径或 `release.yml` 修改推导。`repository_create` 的 `/proc/self/fd`、Windows reparse 加固与 Darwin 写入拒绝属 OS 契约，由常规 Windows/Linux/macOS ARM64 三平台覆盖。
-6. 首轮矩阵暴露的两处冻结源码缺陷已由 `#90` / PR `#91` 修复并合入 `354fbd7b`；第二轮 `run 45934505956` 暴露的 `soxu-magpie` 测试导入缺陷由 `#96` / PR `#97` 修复并合入 `e6ea5ba8`：Linux `crates/soxu-git/tests/diff.rs:483` 的整树快照与夹具后台 `git maintenance` 竞态（夹具提交改为与生产只读入口同源的 `-c maintenance.auto=false -c gc.auto=0` 守卫，并加 trace2 `child_start`/`child_exit` 回归）；Darwin `crates/soxu-git/src/repository_create/platform.rs:336` 未使用参数与 `:353` `needless_return`。两者均未以删除断言、放宽元数据比对或 `allow` 压告警处理。首轮 `run 45914578287`（attempt 1）失败仍作为真实证据保留，不以刷新覆盖。
+6. 首轮 `run 45914578287`（attempt 1）暴露的两处冻结源码缺陷均属 `#90` / PR `#91`，已修复并合入 `354fbd7b`：Linux `crates/soxu-git/tests/diff.rs:483` 的整树快照与夹具后台 `git maintenance` 竞态（夹具提交改为与生产只读入口同源的 `-c maintenance.auto=false -c gc.auto=0` 守卫，并加 trace2 `child_start`/`child_exit` 回归）；Darwin `crates/soxu-git/src/repository_create/platform.rs:336` 未使用参数与 `:353` `needless_return`。两者均未以删除断言、放宽元数据比对或 `allow` 压告警处理。另，`run 45934505956` 在 `macos-15` 报的 `soxu-magpie` 两项导入是一条**独立诊断**，由 `#96` / PR `#97` 处理并合入 `e6ea5ba8`，不属首轮同一缺陷链。首轮 `run 45914578287`（attempt 1）失败仍作为真实证据保留，不以刷新覆盖。
 7. 在非 Windows 宿主补测 `#49`、`#51`、`#56`、`#69` 的真实注册、固定提交检出、宿主接入、路由重试与 Worktree 原生会话。`#69` 的 Linux 专属 `mod linux` 用例未在真实 Linux 宿主编译或运行（本机 WSL 启动返回 ERROR_BAD_EXE_FORMAT 且缺少 x86_64-linux-gnu-gcc），需留待 Linux 宿主补测。Windows 原生目录身份与 DACL 持续授权另行决策。
 8. `#26` 隔离只读快聊已合入。Daemon 托管快聊的项目目录入口继续关闭，后续另行验收项目配置来源、启动竞态和运行期隔离。Copilot 项目钩子安全、遥测、历史导入、附件、移交、更高权限及移动端投递另排验收。M2 和 M3 均仍有未交付范围。
