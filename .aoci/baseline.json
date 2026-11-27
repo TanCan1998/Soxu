@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-27T15:02:36Z",
+  "updated_at": "2026-11-27T15:05:14Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -1133,9 +1133,9 @@
     },
     "docs/dev/ci-and-testing-architecture.md": {
       "role": "index",
-      "sha256": "132f14dc0f3ddec77c01840bc202b98f47e993e4042d4a5d33ab8709caf255d4",
-      "size": 41788,
-      "normalized_sha256": "132f14dc0f3ddec77c01840bc202b98f47e993e4042d4a5d33ab8709caf255d4"
+      "sha256": "57d1a7e520f2cf9f6bf5076e04f3bfa782b8e120bac89b24ae7a78222723e8fa",
+      "size": 41786,
+      "normalized_sha256": "57d1a7e520f2cf9f6bf5076e04f3bfa782b8e120bac89b24ae7a78222723e8fa"
     },
     "docs/dev/contributing.md": {
       "role": "index",

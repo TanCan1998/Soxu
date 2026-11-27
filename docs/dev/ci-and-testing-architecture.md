@@ -158,7 +158,7 @@
   - `$RUNNER_TEMP/visual/<case>/expected.png`
   - `$RUNNER_TEMP/visual/<case>/actual.png`
   - `$RUNNER_TEMP/visual/<case>/diff.png`（差异高亮）
-  
+
   作为 `visual-diff-<run_attempt>-<platform>` artifact 上传（`retention-days` 与现有证据一致，14 天），并在失败日志里打印三份文件的**绝对路径与 artifact 名**。
 - **基线更新**：只能由显式提交（如 `GPUI_SHOT_UPDATE=1` 或等价语义）产生，PR 必须附 diff 图与「为何新基线正确」的说明；禁止在 CI 上自动更新基线。
 
