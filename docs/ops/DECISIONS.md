@@ -61,3 +61,31 @@
   1. 在仓库根目录配置 `.pi/settings.json`，在项目作用域内将 `npm:context-mode` 的 `extensions` 与 `skills` 置空，保障长链路编码时完整 `read` 源码与 API Prompt Cache 稳定性；不修改全局面向外部重 I/O 场景的通用设置。
   2. 以 **AOCI 认知索引 + CodeGraph 符号关系图 + Git 版本化 `docs/ops/` 事实文档**替代 FTS5 压缩记忆；命令输出侧通过 `scripts/detect-check-scope.ps1` 精准收敛范围与日志摘要替代黑盒过滤；重型编译日志排障与外部网页调研交由独立探索会话完成。
   3. 本机使用前须确保 Pi `trust.json` 覆盖主仓与对应的 Paseo worktrees 祖先目录，以激活项目级 `.pi/settings.json` 与自动 AOCI MCP 挂载。
+
+## ADR-011：双仓工具链单一真相源、可区分缓存边界与按事件分组的并发治理（CI-D）
+- **状态**：已采纳（2026-11-27，Issue `#92`，对标 `paseo` / `padu`）
+- **背景**：`mise.toml` 已锁定 Rust `1.99.1`、Node `26.13.1`、pnpm `12.21.0`，但工作流里仍有三类硬编码：`toolchain: 1.99.1`（格式与矩阵各一处）、`version: 12`、`node-version: '26'`；联动发布仓另用 `toolchain: stable` + `version: 12` + `node-version: '26'`。CI-C 的审核 run 已实测 PWA 作业装到 `pnpm 12.17.0`，与锁定的 `12.21.0` 不一致——即"声明一套、实跑一套"，且不会报错，逐平台证据因此失真。缓存键 `key: ${{ matrix.platform.id }}` 也没有工具链、锁文件、profile 与 feature 维度。
+- **决策**：
+  1. **版本单一真相源**：新增 `scripts/read-mise-versions.ps1`，从受信任来源（工作树或 `-Ref` 提交）严格提取三个精确版本。缺项、范围/浮动/复合/标签版本、重复声明、未知工具或字段、畸形 TOML 一律非零退出，**不回退内置默认值**；输出只含版本、`mise.toml` 摘要与 ref 名，不含绝对路径或令牌。
+  2. **只读一次、按输出传递**：版本只在 `detect-changes` 解析并写成 `rust_version` / `node_version` / `pnpm_version` / `mise_toml_sha256`，其余作业一律消费输出；安装后各跑一次 `-AssertInstalled` 把实测 `rustc` / `node` / `pnpm` 与声明比对，让"参数写对但没真装上"也失败闭合。
+  3. **缓存键七维绑定**：`platform.id` / `runner.os` / `runner.arch` / `rust_version` / `profile-dev` / `features-default` / `hashFiles('Cargo.lock')`。实测缓存键由 `v0-rust-rust-check-<os>-<arch>-<hash>` 变为 `v0-rust-<platform>-<os>-<arch>-rust-<version>-profile-dev-features-default-lock-<sha>-…`，新旧键不交叉，不会跨工具链或跨依赖图复用。
+  4. **并发按事件分组**：组名 `ci-<event>-<ref>`，`cancel-in-progress` 仅对 `pull_request` 为真。**实测约束**：GitHub 在**运行时**求值 `concurrency`，`queue: max` 与解析为 `true` 的 `cancel-in-progress`（动态表达式同样算）共存会让整个 workflow 判非法并**零作业**失败。因此在"同一 workflow 必须同时服务 PR 取消与 main 排队"的前提下只能使用 `queue: single`，并把该组合写进静态契约（`concurrency_queue_max_with_dynamic_cancel`）拦住后续回退。
+  5. **发布链路同源且不缓存**：发布仓从已核验 `commit_sha` 的 `mise.toml` 读版本（复用源仓解析器，不复制实现、不写常量），三作业消费输出并实测比对；发布链**不挂任何持久依赖缓存**，并把 `rust-cache` / `actions/cache` / `sccache` / pnpm cache 纳入禁止清单——主仓 CI 与发布仓共用 Actions 缓存服务，同键构建可能命中不同源码树的指纹产物。
+  6. **darwin-amd64 原生 Intel**：正式发布的 amd64 改由 `macos-15-intel` 原生构建并执行二进制 + daemon 冒烟，不再以 arm64 宿主交叉编译后标注"未原生验证"；四平台资产名、SHA256SUMS 严格校验、SLSA、逐作业 SHA 校验与只读权限保持不变。
+- **实测证据**（同一 SHA `cd32db4`、同一 Runner 标签与工具链、`Cargo.lock` 未变，run `46024301919` 的 attempt 1 冷 / attempt 2 热）：
+
+  | 平台 | 阶段耗时 冷→热（ms） | 缓存包 | 实测工具链 |
+  | :--- | :--- | :--- | :--- |
+  | linux | fetch 818→402 · clippy 32407→4842 · test 49883→36192 | 209,487,214 B | rustc/cargo `1.99.1` |
+  | macos-arm64 | fetch 2027→4004 · clippy 24540→13005 · test 51732→77171 | 178,139,667 B | rustc/cargo `1.99.1` |
+  | windows | fetch 13409→16758 · clippy 31951→9485 · test 130850→126677 | 187,068,052 B | rustc/cargo `1.99.1` |
+  | PWA 作业 | — | — | node `v26.13.1` / pnpm `12.21.0` |
+
+  **不宣称整体提速**：热缓存主要改善 Clippy（linux 32.4s→4.8s、windows 31.9s→9.5s、macos 24.5s→13.0s），而 `cargo-test` 在 macos 与 windows 上并未变快（macos 51.7s→77.2s，windows 130.9s→126.7s），`cargo-fetch` 在 macos/windows 上反而变慢。这些是真实观测值，受 Runner 方差影响，不构成"缓存使整体构建更快"的结论。
+- **并发实测**（真实 run，禁止 push `main`，故 main 自身 ref 未直接实测）：
+  - **PR 取消**：run `46026390870`（`ee8d54c`，创建 15:36:21，已 in_progress）被随后创建的 run `46026504778`（`686b405`，创建 15:37:08）取消；已完成的 `Detect` / `Rust Format` / `PWA` 保留 success，`Governance` 与三个 `Rust` 矩阵实例为 cancelled，`CI Gate` 按契约判 failure——取消不计为通过。
+  - **手动触发独立分组**：run `46026504778`（pull_request，首个 job 15:37:47 起）与 run `46026938724`（workflow_dispatch，首个 job 15:40:10 起）**同时 in_progress**（重叠 15:40:10–15:43:08），证明 dispatch 组与 PR 组互不占位。
+  - **非取消语义排队**：run `46026961283`（dispatch，创建 15:40:16）**未取消**在途的 `46026938724`，其首个 job 直到 15:45:18 才开始（对方 15:45:15 结束），排队约 302s 后 FIFO 执行。这与 `main` push 的配置路径完全同一（`cancel-in-progress` 解析为 false）。
+  - **口径纪律**：`run_started_at` 在排队 run 上等于创建时间，排队等待只能从**首个 job 的 `started_at`** 读出；墙钟只能用 job 起止计算，不能用 run 的 API 时间戳凑。
+- **校验与契约**：`verify-ci-gate.ps1` 新增硬编码版本、版本来源接线、缓存键维度、并发组/取消/queue 合法组合、摘要接线断言；`test-ci-gate.ps1` 扩到 514 项断言（含 8 个负向变体与 Summary 脱敏用例）；`test-read-mise-versions.ps1` 81 项断言；`check-all.ps1` 在 `mise.toml`/读取脚本/`ci.yml` 变更时自动跑版本自测。
+- **未验证边界**（不得当作已完成）：① 联动仓未实际运行 `release.yml`（无 `v*` 正式 tag 授权，也未确认 `SOXU_RELEASES_TOKEN`/`SOXU_DEPLOY_KEY`），`macos-15-intel` 原生 Runner 与 daemon 冒烟**未在真实发布 run 中执行**，只做了 workflow 语法与安全自检；② `main` 自身 ref 的排队未直接实测（禁止 push `main`），以同配置的非取消分组实测替代；③ `queue: max` 的多 pending 能力在本仓不可用（见决策 4），本 PR 不声称取得 `queue: max` 通过证据。
