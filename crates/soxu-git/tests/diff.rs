@@ -1128,9 +1128,15 @@ async fn fifty_thousand_lines_return_metadata_but_oversized_review_fails_closed(
     assert_eq!(snapshot(&fixture.temp), before);
 }
 
-#[cfg(unix)]
+/// 夹具文件名含非法 UTF-8 字节（`0xff`），只有 Linux 文件系统接受这种名字。
+///
+/// 此处不能用 `cfg(unix)`：Darwin 的内核文件系统 API 只接受合法 UTF-8 文件名，
+/// `fs::write` 在 `macos-15` ARM64 上返回 `EILSEQ`（Illegal byte sequence），
+/// 而 Linux 允许原始字节路径，测试语义（原始字节路径无损 + 被替换的符号链接被拒绝）
+/// 只在 Linux 上成立。Windows 本来就不在 `unix` 编译面内。
+#[cfg(target_os = "linux")]
 #[tokio::test]
-async fn unix_preserves_raw_linebreak_name_and_refuses_a_replaced_symlink() {
+async fn linux_preserves_raw_linebreak_name_and_refuses_a_replaced_symlink() {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::symlink;
 

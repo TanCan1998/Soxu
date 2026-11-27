@@ -157,7 +157,26 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 同一根因在 `TMPDIR` 指向受控 symlink 时于 Linux 全量复现，落到 7 个测试目标：`soxu-daemon --lib`（1 失败）、`soxu-daemon --test native_assets`（5 失败）、`soxu-daemon --test rpc_ws_e2e`（2 失败）、`soxu-drivers --test native`（1 失败）、`soxu-git --lib`（5 失败）、`soxu-git --test repository_create`（27 失败）、`soxu-magpie --test worktree_context`（5 失败）。`soxu-daemon --test rpc_ws_e2e` 的两项只是 Codex 守卫用例（`spawn_guarded_daemon` 与两个 `native_asset_guard_rechecks_*`）：AGY 用例在别名条件下本来就通过，因为私有 guard 分支经 `antigravity::quick_chat_directory(guard, chat_id)` 直接取 guard 根下的 `quick-chats`，不经过 `runtime.quick_chat_root`，故 `spawn_antigravity_daemon` 保持原样零改动。
 
+#### 在办热修复：Darwin 非法字节路径夹具（`#100`）
+
+| Issue / 任务 | 分支 / Paseo 工作区 | 状态 | Owned Paths |
+| :--- | :--- | :--- | :--- |
+| `#100` Darwin 非法字节路径夹具门控 | `fix/100-darwin-raw-path-test` / `wks_6756d9ae8127d9ec` | 本地候选就绪，待主控独立复验与锁 SHA 合入（与 `#88` 并行，只动 `soxu-git` 的 Diff 测试夹具门控） | `crates/soxu-git/tests/diff.rs`（最小平台门控）、本看板、`LESSONS.md` 的 `L-019`、本分支 AOCI |
+
+`#89` head `b8ca5fcd` 的 run `45951887087`（`macos-15` ARM64）在 `crates/soxu-git/tests/diff.rs::unix_preserves_raw_linebreak_name_and_refuses_a_replaced_symlink` 的 `fs::write` 报 `EILSEQ`（Illegal byte sequence）：夹具文件名 `line\nbyte\xff` 含非法 UTF-8 字节，Darwin 内核文件系统 API 只接受合法 UTF-8 名字，而该用例语义（原始字节路径无损 + 被替换符号链接被拒绝）只在 Linux 成立；原 `#[cfg(unix)]` 把 Darwin 误纳入编译面。
+
+修复保持最小：仅把该用例改为 `#[cfg(target_os = "linux")]`，沿用仓库具体目标门控惯例（`checkpoint.rs::linux_rejects_links_fifos_nested_repositories_and_preserves_raw_path_bytes`、`repository_create.rs` 的 `#[cfg(target_os = "linux")]`），同步改名为 `linux_preserves_raw_linebreak_name_and_refuses_a_replaced_symlink` 并补平台能力注释；测试体、断言、`Fixture` 夹具与生产实现一字未改，未加 `#[allow]`、未删用例、未屏蔽测试目标或整个文件。Linux 仍编译执行并保留原始字节路径与替换链接拒绝断言，Windows 仍不编译该用例。
+
+**同因未覆盖风险（已上报主控裁决，本轮零改动）**：同一 `soxu-git` 集测里另有两处 `#[cfg(unix)]` 用例同样在磁盘上创建非法 UTF-8 名字——`tests/probe.rs::preserves_non_utf8_and_newline_repository_paths`（目录 `repo\n\xff`、文件 `file\n\xfe`）与 `tests/worktrees.rs::native_unix_newline_and_non_utf8_worktree_paths_remain_lossless`（目录 `raw-\xff`）。CI 的 `cargo test --workspace --locked` 不带 `--no-fail-fast`，`diff` 目标失败会中止其后的目标（本机 Linux 实测目标顺序为 `checkpoint` → `diff` → `fixed_diff` → `probe` → `project` → `repository_create` → `status` → `worktree_checkout` → `worktree_lifecycle` → `worktrees`），因此这两处是 `#88` 下一次 Darwin 原生运行的同因失败点。二者不在 `#100` 的 Owned Paths 内，是否并入同一 PR 由主控裁决。
+
 ### 3.2 已合入交付与验收证据边界
+
+- `#100` Darwin 非法字节路径夹具门控的本地验收边界（基线 `7cccd0d`，与 `#88` 并行，只动 `soxu-git` 的 Diff 测试夹具门控，生产实现 / CI / 公共契约零改动）：
+  - **Windows**（Rust `1.99.1`，独立 `CARGO_TARGET_DIR=F:/workplace/Paseo/work/.cargo-target/soxu-100-darwin-raw-path-test`）：`cargo fmt --all -- --check` `exit 0`；`cargo test -p soxu-git --test diff --locked` `15 passed / 0 failed` `exit 0`（13 项无条件 + `#[cfg(windows)]` 的 `rejects_windows_ambiguous_names_before_git` 与 `an_unselected_file_can_be_exclusive_locked_without_blocking_diff`；`#[cfg(target_os = "linux")]` 用例不在 Windows 编译面）；`pwsh -NoProfile -File scripts/check-all.ps1 -BaseRef origin/main` `exit 0`（`141s`）。
+  - **WSL `Ubuntu 26.04`（x86_64）**（独立 `CARGO_TARGET_DIR=/root/.cache/soxu-100-darwin-raw-path-test`，实体 `/root/.rustup/toolchains/1.99.1-x86_64-unknown-linux-gnu/bin` 与实体 `node 26.13.1` `bin` 前置于 `PATH`，未执行 `mise trust`，未在 WSL 内对 Windows `.git` 工作树跑 `git`）：`cargo test --workspace --locked --no-fail-fast --offline` `exit 0`，`40` 个套件全通过、`225 passed / 0 failed`；`tests/diff.rs` 目标 `14 passed`，其中 `linux_preserves_raw_linebreak_name_and_refuses_a_replaced_symlink ... ok`，证明 Linux 仍真实执行原始字节路径与替换符号链接拒绝断言。
+  - **Darwin 交叉（编译面）**：`cargo clippy -p soxu-git --all-targets --target aarch64-apple-darwin --locked -- -D warnings` `exit 0`（`17.11s`，0 error / 0 warning）。该交叉只证明 `soxu-git` 在 `aarch64-apple-darwin` 编译面（含测试目标）零告警，且该用例因 `#[cfg(target_os = "linux")]` 不进入 Darwin 编译面；本机无 Darwin 链接器/SDK，无法交叉链接或运行 Darwin 测试二进制，**不构成** `macos-15` ARM64 原生通过。真实 Darwin 原生回退证据（原 `EILSEQ` + 修复后同目标原生测试继续执行）待 `#88` 合流后的真实 Runner 补齐。
+  - **三处证据互不等价**：Windows `15 passed` 与 Linux `14 passed` 只证明各自编译面与运行面；Darwin 交叉 `exit 0` 只证明编译面干净。三者都不等于 macOS ARM64 原生已运行该集成测试。
+
 
 - `#98` Darwin 原生资产集测临时根修正的本地验收边界（基线 `e6ea5ba8b79ca9a7ad40223bdeb1ac043c2e4141`，与 `#88` 并行，只动测试夹具根与 `#[cfg(test)]` 内的临时根，生产 Guard / 路径检查 / CI / 公共契约零改动）：
   - **Linux 对照口径**（WSL `Ubuntu 26.04`，实体 `/root/.rustup/toolchains/1.99.1-x86_64-unknown-linux-gnu/bin` 与实体 `node 26.13.1` `bin`，未执行 `mise trust`，未在 WSL 内对宿主 `.git` 跑 `git`）：唯一变量是隔离子进程 `TMPDIR`，`/tmp/<x>/alias` 为指向同一普通目录 `/tmp/<x>/real` 的受控 symlink；命令固定为 `cargo test --workspace --locked --no-fail-fast`。基线 `e6ea5ba`：普通目录 `27.41s` `exit 0`，别名 `45.42s` `exit 101`（7 目标失败）；修复后：普通目录 `25s` `exit 0`、40 个套件全通过，别名 `24s` `exit 0`、同样 40 套件全通过、0 失败套件（重复一轮为 `27s` / `25s`，结论一致）。

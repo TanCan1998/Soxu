@@ -36,6 +36,7 @@
 | `L-015` | 管道退出码 | `cargo ... \| tail` 拿到的是 `tail` 的 0；WSL/Linux 验证脚本必 `set -euo pipefail` 或查 `${PIPESTATUS[0]}`，重跑前 `--no-run` 重建并核对二进制 SHA/mtime | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-016` | 测试内子进程等待 | 观察“某子进程是否被派生”时，受测进程 stdin/stdout/stderr 全 `Stdio::null()`，证据只从 trace2 读；等待用 `spawn`+`try_wait`+截止+`kill`+回收窗口，五态可区分（成功/非零退出/超时/观察异常/回收未确认）；禁 `output()` 无界收集 | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-018` | 测试夹具根与路径校验 | 断言“拒绝链接/重解析点”的夹具，其合法根必须先取自真实路径（`canonicalize`），再从该真实根派生资产、启动目录与重验目标；未规范化的系统临时目录会让正向构造先被拒绝、负向断言到不了被测分支。规范化**仅限 Unix**：Windows 的 `\\?\` 前缀会破坏 `cmd mklink /J` 与 Node `cwd` 契约。有意构造的链接/junction/逃逸路径一律原样交给被测函数 | `L2 · Seen 1×` | 本文 / 波次验收 |
+| `L-019` | 平台能力夹具 | 文件名含非法 UTF-8 字节的夹具只在 Linux 成立：Darwin 内核文件系统 API 强制合法 UTF-8，`fs::write`/`create_dir` 返回 `EILSEQ`。此类用例一律 `#[cfg(target_os = "linux")]`，不得用 `cfg(unix)` 广域桶；测试名与 `cfg` 保持同口径，并一次性搜完同 crate 兄弟集测 | `L2 · Seen 1×` | 本文 / 波次验收 |
 
 ---
 
@@ -126,10 +127,15 @@
 - **预防动作**：凡“拒绝链接/重解析点/路径逃逸”的夹具，先创建自己的临时目录，再以 `canonicalize` 取真实路径为根，**全部资产、启动目录、日志与重验目标都从这一个真实根派生**，让正向构造真正成功、负向断言真正落到被测分支。**有意构造**的资产链接、祖先链接、junction、目录替换与 `..` 路径仍原样传给被测函数，不得提前规范化。规范化必须限定在 `#[cfg(unix)]`：Windows 上 `canonicalize` 会附加 `\\?\` 扩展路径前缀，实测会让 `soxu-drivers --test native` 由 `10 passed` 退化为 `4 passed / 6 failed`（Node 夹具 `process.cwd()` 的物理路径与 `SOXU_FIXTURE_CWD` 不再字符串相等，子进程断言退出），并使 `cmd mklink /J` 失效。
 - **验证方式**：`TMPDIR` 指向受控 symlink 的 Linux 全仓 `cargo test --workspace --locked --no-fail-fast` 修复前 `exit 101` / 修复后 `exit 0`，普通目录对照 `exit 0`，两者均 40 个套件全通过；逐目标计数分别回到 `2 / 6 / 16 / 9 / 27 / 28 / 6` 通过，且负向用例仍在。**状态**：活跃（未晋升，待复现计数或脚本防呆）。
 
+### `L-019` 非法 UTF-8 文件名的夹具只在 Linux 成立，用具体目标而非 `unix` 桶
+- **场景与根因**（`Seen 1× (2026-11-27)`）：`#89` head `b8ca5fcd` 的 run `45951887087`（`macos-15` ARM64）在 `crates/soxu-git/tests/diff.rs::unix_preserves_raw_linebreak_name_and_refuses_a_replaced_symlink` 的 `fs::write` 报 `EILSEQ`。夹具文件名 `line\nbyte\xff` 含非法 UTF-8 字节，Linux 允许原始字节路径，Darwin 内核文件系统 API 只接受合法 UTF-8。属“平台能力明确却写成 `cfg(unix)` 广域桶”的类型错误，与 `L-013` 的导入面/分支面问题同族但根因不同（这次是测试**语义**的平台边界，不是 lint 面）。
+- **预防动作**：依赖“文件系统可表示非法字节路径”的用例一律 `#[cfg(target_os = "linux")]`，与仓库既有 `checkpoint.rs::linux_rejects_links_fifos_...`、`repository_create.rs` 同口径；测试名同步改成 `linux_...` 并在注释里写清 Darwin 的 `EILSEQ` 边界。不得为让它“能跑”而删用例、加 `#[allow]`、改被测代码或把夹具改成 lossy。改完必须顺手搜同 crate 兄弟集测（`rg '\\\\xff' crates/*/tests`）：本次即发现 `tests/probe.rs` 与 `tests/worktrees.rs` 各有一处同因 `cfg(unix)` 夹具，因 CI 的 `cargo test --workspace --locked` 不带 `--no-fail-fast`、目标顺序 `diff` 在二者之前而被掩盖。
+- **验证方式**：Linux 全仓 `cargo test --workspace --locked --no-fail-fast --offline` `exit 0` 且该用例在 Linux 执行通过（`14 passed`），Windows 同目标 `15 passed`，Darwin 交叉 `cargo clippy -p soxu-git --all-targets --target aarch64-apple-darwin -- -D warnings` `exit 0`；三者均不得陈述为 macOS 原生通过。**状态**：活跃。
+
 ---
 
 ## 四、已自动化防呆归档区
 
 > 当「活跃规则速查表」中的经验已被仓库脚本或自动化测试完全机器防呆且连续两个波次零复发后，将其迁入本区归档，以保持主控日常上下文精干。
 
-- *暂无已迁出归档项（当前 `L-001` ~ `L-016` 与 `L-018` 处于活跃巡检期；`L-017` 由 `#88` 冻结候选占用，合流后补齐）。*
+- *暂无已迁出归档项（当前 `L-001` ~ `L-016`、`L-018` 与 `L-019` 处于活跃巡检期；`L-017` 由 `#88` 冻结候选占用，合流后补齐）。*
