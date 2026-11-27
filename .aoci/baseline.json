@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-27T13:54:31Z",
+  "updated_at": "2026-11-27T14:59:20Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "b2cfb38e823c1f693bf204c511634f2ad7903dc698a6202d8b936b6d927847a1",
-      "size": 100193,
-      "normalized_sha256": "b2cfb38e823c1f693bf204c511634f2ad7903dc698a6202d8b936b6d927847a1"
+      "sha256": "4c56a612ba7dd9b433ea828c47a42717e16e7c27c145ee4cafaea5b1b0900901",
+      "size": 101109,
+      "normalized_sha256": "4c56a612ba7dd9b433ea828c47a42717e16e7c27c145ee4cafaea5b1b0900901"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1130,6 +1130,12 @@
       "sha256": "cb22e79d9cd32ff94943e5f59770f6d94bc9122be951d86ba76459fc7339e410",
       "size": 2689,
       "normalized_sha256": "cb22e79d9cd32ff94943e5f59770f6d94bc9122be951d86ba76459fc7339e410"
+    },
+    "docs/dev/ci-and-testing-architecture.md": {
+      "role": "index",
+      "sha256": "55e0c9b06261209c34d1f3c7a428ac4ed0c90d3a7b03524eaadeaa7ac5aa47d7",
+      "size": 39799,
+      "normalized_sha256": "55e0c9b06261209c34d1f3c7a428ac4ed0c90d3a7b03524eaadeaa7ac5aa47d7"
     },
     "docs/dev/contributing.md": {
       "role": "index",
