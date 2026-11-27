@@ -40,13 +40,16 @@ import {
   resolveThemeColor,
   type AccentPresetId,
   type CodeFontPresetId,
+  type FoldPreviewMode,
   type LineHeightMode,
   type SoxuPreferences,
   type ThemeMode,
   type TimestampFormatMode,
   type UiFontPresetId,
+  type WindowChromeStyle,
   type WorktreeLocationMode,
 } from "@/lib/preferences";
+import { detectMacPlatform, formatShortcut } from "@/lib/useAdaptiveViewport";
 import { cn } from "@/lib/utils";
 import { CLI_OPTIONS } from "@/mock-data";
 import type { PermissionLevel } from "@/types";
@@ -108,6 +111,7 @@ export function SettingsDialog({
   const activeCodePreset = CODE_FONT_PRESETS.find((x) => x.id === prefs.codeFontPreset) ?? CODE_FONT_PRESETS[0];
   const resolvedMode = resolveThemeColor(prefs.themeMode);
   const activeAccentHex = resolveAccentHex(prefs, resolvedMode);
+  const isMac = detectMacPlatform(prefs.windowChromeStyle);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -125,7 +129,7 @@ export function SettingsDialog({
           <div className="hidden md:flex items-center justify-between px-2 pb-2.5 mb-1 border-b border-[var(--soxu-border-hairline)]">
             <span className="text-xs font-semibold tracking-wide">{t("settings.title")}</span>
             <kbd className="soxu-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--soxu-surface-control)] text-[var(--soxu-text-tertiary)]">
-              Ctrl+,
+              {formatShortcut("Mod+,", isMac)}
             </kbd>
           </div>
           {SECTIONS.map((s) => {
@@ -424,6 +428,42 @@ export function SettingsDialog({
                   <div className="text-[11.5px] text-[var(--soxu-text-tertiary)]">{t("appearance.reduceMotionDesc")}</div>
                 </div>
                 <Switch checked={prefs.reduceMotion} onCheckedChange={(v) => onUpdatePrefs({ reduceMotion: v })} />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium">{t("appearance.windowChromeTitle")}</label>
+                  <Select
+                    value={prefs.windowChromeStyle ?? "auto"}
+                    onValueChange={(v) => onUpdatePrefs({ windowChromeStyle: v as WindowChromeStyle })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">{t("appearance.windowChromeAuto")}</SelectItem>
+                      <SelectItem value="macos">{t("appearance.windowChromeMac")}</SelectItem>
+                      <SelectItem value="windows">{t("appearance.windowChromeWin")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium">{t("appearance.foldPreviewTitle")}</label>
+                  <Select
+                    value={prefs.foldPreviewMode ?? "auto"}
+                    onValueChange={(v) => onUpdatePrefs({ foldPreviewMode: v as FoldPreviewMode })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">{t("appearance.foldPreviewAuto")}</SelectItem>
+                      <SelectItem value="dual-horizontal">{t("appearance.foldPreviewDualH")}</SelectItem>
+                      <SelectItem value="dual-vertical">{t("appearance.foldPreviewDualV")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] px-3.5 py-2.5 flex items-center justify-between gap-3">
@@ -1005,12 +1045,13 @@ export function SettingsDialog({
 
               <div className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] divide-y divide-[var(--soxu-border-hairline)] text-xs">
                 {[
-                  ["打开全局命令搜索面板", "Ctrl+K / Cmd+K"],
-                  ["打开系统设置弹窗", "Ctrl+, / Cmd+,"],
-                  ["折叠或展开左侧栏", "Ctrl+B / Cmd+B"],
-                  ["折叠或展开右侧审阅栏", "Ctrl+J / Cmd+J"],
+                  ["打开全局命令搜索面板", formatShortcut("Mod+K", isMac)],
+                  ["打开系统设置弹窗", formatShortcut("Mod+,", isMac)],
+                  ["折叠或展开左侧栏", formatShortcut("Mod+B", isMac)],
+                  ["折叠或展开右侧审阅栏", formatShortcut("Mod+J", isMac)],
+                  ["切换操作权限档位", formatShortcut("Alt+P", isMac)],
                   ["发送当前指令（换行请用 Shift+Enter）", "Enter"],
-                  ["运行中快速注入热纠偏指令", "Ctrl+Enter"],
+                  ["运行中快速注入热纠偏指令", formatShortcut("Mod+Enter", isMac)],
                 ].map(([label, key]) => (
                   <div key={label} className="px-3.5 py-2.5 flex items-center justify-between">
                     <span className="text-[var(--soxu-text-secondary)]">{label}</span>

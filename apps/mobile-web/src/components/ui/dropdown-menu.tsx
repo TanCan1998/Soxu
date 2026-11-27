@@ -9,14 +9,16 @@ export const DropdownMenuGroup = DropdownMenuPrimitive.Group;
 export function DropdownMenuContent({
   className,
   sideOffset = 6,
+  collisionPadding = 12,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
         sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
         className={cn(
-          "z-[var(--soxu-z-floating)] pointer-events-auto min-w-[12rem] overflow-hidden rounded-xl border border-[var(--soxu-border-strong)] bg-[var(--soxu-surface-floating)] p-1 text-[var(--soxu-text-primary)] animate-in fade-in-0 zoom-in-95 duration-150",
+          "z-[var(--soxu-z-floating)] pointer-events-auto min-w-[12rem] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-[var(--soxu-border-strong)] bg-[var(--soxu-surface-floating)] p-1 text-[var(--soxu-text-primary)] animate-in fade-in-0 zoom-in-95 duration-150",
           className,
         )}
         {...props}

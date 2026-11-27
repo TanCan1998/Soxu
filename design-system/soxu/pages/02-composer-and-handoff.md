@@ -110,3 +110,16 @@
 当 `@codex` / `@pi` 移交触发后，时间线中不单单出现普通文本，而是在**源会话末尾**与**目标会话开头**各插入一张紫罗兰描边（`rgba(168, 85, 247, 0.32)`）双向锚点卡：
 - 源会话端：`⇄ 已将上下文移交至 codex · gpt-6.2-sol（附带 3 轮摘要 + 2 个变更文件）  [跳转至目标会话 ↗]`
 - 目标会话端：`⇄ 承接自 pi · claude-sonnet-5.5 的移交上下文  [展开前序摘要]  [回到源会话 ↙]`
+
+---
+
+## 六、多条任务队列（`MultiQueueBar`）、IME 保护与窄屏 Bottom Sheet 降级
+
+1. **多条可视化队列条（`MultiQueueBar`）**：
+   - 支持展示多条 `QueuedPromptItem` 并提供队列全局 `暂停 / 恢复` 开关；每条排队项独立支持 `提级为热纠偏`、`上移/下移优先级`、`回填编辑器继续修改` 与 `删除`，并在提示框展示适配当前系统的快捷键（如 `Cmd+Return` / `Ctrl+Enter`）；
+   - 若用户处于工作区对话且队列非空，按 `Esc` 优先移出最新排队项。
+2. **输入法组合选词护栏（IME Guard）**：
+   - 主输入框、`CodeDiffView` 行内批注输入框、`QuoteSelectionPopover` 旁路追问输入框及 `UtilityModals` 搜索框统一判断 `isImeComposing(e)`，中文/CJK 输入按 `Enter` 上屏词组时不误触发提交或发送。
+3. **4 段语义构成彩色上下文条 & 窄屏 Bottom Sheet 降级**：
+   - `ContextUsagePanel` 在圆环外层补充 4 段构成分析条（`系统规则` / `对话历史` / `工具输出` / `代码引用`）并保留「压缩冗余对话上下文」按钮；
+   - 在移动端窄屏（`< 640px` 或非 `wide`）点击移交 `@`、操作权限图标、上下文圆环与会话统计胶囊时，自动通过 `onOpenSheet` 以底部抽屉（`HandoffConfigPanel` / `ContextUsagePanel` / `SessionStatsPanel` / 权限列表）承载，彻底消除 `320px–412px` 弹出下拉菜单溢出问题。

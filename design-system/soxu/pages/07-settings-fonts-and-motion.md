@@ -142,4 +142,15 @@ pub fn ease_fast_out(t: f32) -> f32 {
 - `uiFontSize`: `13 | 14 | 15 | 16`（默认 `14`）；
 - `codeFontSize`: `12 | 13 | 14 | 15 | 16`（默认 `13`）；
 - `codeLigatures`: `boolean`（默认 `true`）；
-- `reduceMotion`: `boolean`（默认跟随操作系统媒体查询 `prefers-reduced-motion`）。
+- `reduceMotion`: `boolean`（默认跟随操作系统媒体查询 `prefers-reduced-motion`）；
+- `windowChromeStyle`: `"auto" | "macos" | "windows"`（默认 `"auto"`；控制桌面标题栏是否强制预览 macOS `78px` 红绿灯安全区与 `Cmd` 风格快捷键）；
+- `foldPreviewMode`: `"auto" | "dual-horizontal" | "dual-vertical"`（默认 `"auto"`；除真实 `horizontal-viewport-segments` / `vertical-viewport-segments` 硬件 API 外，支持主动模拟左右双屏或上下半折态并可由 URL `?fold=dual-h` 触发）。
+
+---
+
+## 八、细指针悬停与粗指针触控隔离规则
+
+1. **`HoverExpandDock` 指针类型判别**：
+   - `onPointerEnter` / `onPointerLeave` 仅响应 `e.pointerType === "mouse"`（细指针自动延迟展开/收起）；在触屏与手写笔交互中仅通过显式点击切换 `pinned` 状态并支持外部 `pointerdown` 或按 `Esc` 键关闭且将焦点还原至触发按钮。
+2. **表单与弹窗移动端零缩放约束**：
+   - 命令面板、Diff 行批注与各种 Bottom Sheet 输入框在移动窄屏采用 `16px` (`text-base`) 字号防 iOS Safari 意外放大；`UtilityModals` 等命令行搜索面板在 `isCoarsePointer` 触屏下自动隐去多余键盘提示徽标并靠顶对齐（`top-[12dvh]`）为虚拟键盘预留高度。

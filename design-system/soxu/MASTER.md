@@ -140,18 +140,28 @@ Soxu 服务于高频并行操控多个本地编码 Agent（`claude`、`codex`、
 | `sizing.permissionDetailMaxHeight` | `96px` | 权限审批卡片命令详情区最大滚动高度 |
 | `sizing.cmdPaletteWidth` / `MaxHeight` | `640px` / `440px` | 全局 `Cmd+K` 命令面板尺寸（搜索输入区 `52px`） |
 | `sizing.turnNavRailWidth` | `20px` | 对话区右侧边缘轮次迷你刻线导航轨宽度 |
+| `sizing.compactRailWidth` | `52px` | 手机横屏 / 半折悬停态左侧紧凑功能轨宽度 |
+| `sizing.dockPillHeight` | `40px` | 移动端上滑收起输入舱为胶囊的高度 |
+| `sizing.sinkSidebarMaxWidth` | `316px` | 移动端 `SinkLayout` 底层抽屉最大展开宽度 |
+| `sizing.touchHitMin` / `Primary` | `44px` / `48px` | 粗指针触屏最小扩展热区与主要提交/审批动作高度 |
+| `layout.breakpointUltraCompact` | `400px` | 超窄手机与 iPad 1/3 分屏适配阈值 |
+| `layout.shortViewportMax` | `500px` | 横屏/矮视口切换左侧紧凑轨与单行输入栏阈值 |
+| `layout.macosTrafficLightsInset` | `78px` | macOS 桌面窗口左上角红绿灯安全留白宽度 |
 
 ### 6.2 Z-Index 层叠秩序（`zIndex`）
 `base(0)` → `sticky(10)`（移动顶/底浮动舱） → `rail(15)`（轮次导航轨） → `header(20)`（顶栏） → `popover(40)`（内联工具坞浮层） → `drawerScrim(50)`（抽屉模糊遮罩） → `drawer(55)`（移动 Bottom Sheet 与左右侧滑抽屉） → `modalScrim(60)` → `modal(70)`（扫码配对/Checkpoint/提交弹窗） → `palette(80)`（`Cmd+K` 命令面板） → `floating(95)`（弹窗/抽屉内穿透下拉与选择器） → `toast(100)`（全局轻提示）。
 
 ---
 
-## 七、全端通用边界态规范（Boundary States）
+## 七、全端通用边界态与跨端交互守则（Boundary & Input Rules）
 
 1. **Empty State（首次空画布 / 无改动工作树）**：居中卡片限宽 `440px`，配 `36px` 线性矢量徽标、一句话明确说明及 **最多 1 个主 CTA + 3 个可点击 Starter Prompt 示例芯片**；严禁堆砌空白说明墙。
 2. **Streaming & Skeleton（首次冷启动 / 会话详情回源）**：采用中性灰阶 `#171717` → `#212121` 微弱脉冲占位条（动画遵从 `prefers-reduced-motion`），占位行数严格匹配真实列表行高（`32px` 侧栏、`72px` 消息块），避免加载完成后发生剧烈布局跳变（CLS ≈ 0）。
-3. **Offline / Reconnecting（Daemon 断线与增量游标追平）**：保留桌面与移动端屏幕上**所有已渲染的对话 DOM 与未发送草稿**（绝不整页白屏跳转报错），仅在顶栏显示非阻塞状态微条：`⟳ 正在重连 Daemon (127.0.0.1:7698)...`，重连后自动携 `afterSeq` 拉取缺口并发出轻提示。
+3. **Offline / Reconnecting（Daemon 断线与增量游标追平）**：保留桌面与移动端屏幕上**所有已渲染的对话 DOM 与未发送草稿**（绝不整页白屏跳转报错），仅在顶栏显示非阻塞状态微条：`正在重连 Daemon (127.0.0.1:7698)...`，重连后自动携 `afterSeq` 拉取缺口并发出轻提示。
 4. **Actionable Error（可执行错误提示）**：绝不把裸 JSON / `0x80070005` 甩给用户；每个错误框（`dangerSoft` 底 + `dangerBorder` 边）必须包含三要素：**发生了什么（中文） + 影响范围 + 一键修复或拷贝脱敏诊断详情按钮**。
+5. **中文输入法组合护栏（IME Composition Safety）**：所有支持 `Enter` 提交的输入组件（主输入舱、Diff 内联批注、选区旁路追问、命令面板搜索）必须在 `onKeyDown` 首位检查 `isImeComposing(e)`（`nativeEvent.isComposing || keyCode === 229`），杜绝选词上屏误发。
+6. **指针与触屏热区分化（`.soxu-hit-44` 与 `.soxu-reveal-action`）**：小尺寸辅助按键通过 `.soxu-hit-44` 在 `(pointer: coarse)` 下以透明伪元素将触控命中框扩至至少 `44×44px`；行内显隐操作按钮采用 `.soxu-reveal-action`（细指针悬停/聚焦/选中时显现，触屏固定 `opacity: 0.88` 永不形成交互死角）。
+7. **跨平台快捷键呈现（`formatShortcut`）**：依据当前操作系统或外观窗口预览自动映射 `Mod` / `Alt` / `Shift` 提示为 `Cmd` 组合（`⌘` / `⇧` / `⌥`）或 `Ctrl+` 组合；用户 Chat 气泡统一绑定 `--soxu-surface-raised`（严禁引用未定义变量导致透明气泡）。
 
 ---
 
@@ -159,10 +169,10 @@ Soxu 服务于高频并行操控多个本地编码 Agent（`claude`、`codex`、
 
 在进行具体模块开发前，Agent 必须同时阅读本文件与对应的分页面规格书：
 
-1. [`pages/01-desktop-workbench.md`](pages/01-desktop-workbench.md) —— GPUI 桌面四栏工作台布局、**组件像素解剖表**、**轮次迷你导航轨**、工作区标签与恢复卡、焦点栈与快捷键表
-2. [`pages/02-composer-and-handoff.md`](pages/02-composer-and-handoff.md) —— 三态输入舱（`Idle` / `Queue` / `Steer` / `Interrupt`）、上下文附件芯片、模型切换 **`lost-controls` 回退机制**与 `@agent` 双向移交锚点
-3. [`pages/03-timeline-tools-and-checkpoints.md`](pages/03-timeline-tools-and-checkpoints.md) —— 对话流角色排版、折叠思考窗、5 类结构化工具卡、**`PendingUserInput` 结构化提问卡**、常规 vs 高危红线审批对比及 Git 检查点
-4. [`pages/04-magpie-and-cli-inspector.md`](pages/04-magpie-and-cli-inspector.md) —— Magpie 双态拓扑、7 大原生 CLI 徽标与能力矩阵、**Worktree 启动环境变量预览器**与本地历史会话无损导入流
-5. [`pages/05-mobile-remote-pwa.md`](pages/05-mobile-remote-pwa.md) —— Daemon 内嵌移动遥控 PWA：**13 组真机窗口矩阵**、Bottom Sheet 规范、`#offer=` 扫码与手填双路径、游标增量追平与大拇指审批流
-6. [`pages/06-modals-onboarding-and-automation.md`](pages/06-modals-onboarding-and-automation.md) —— **首次 3 步 Onboarding 向导、`Cmd+K` 全局命令面板、添加项目三合一弹窗、Git Emoji AI 提交预览弹窗、Schedules & Heartbeats 调度中心**
-7. [`pages/07-settings-fonts-and-motion.md`](pages/07-settings-fonts-and-motion.md) —— **`shadcn/ui` 极简悬停自动展开准则、7 分区独立设置界面、开源双字体独立/跟随架构、纯图标主题切换过渡与 GPUI 1:1 可移植动效矩阵**
+1. [`pages/01-desktop-workbench.md`](pages/01-desktop-workbench.md) —— GPUI 桌面四栏工作台布局、**收件箱一触分诊台与置顶管理**、**多文件可批注 Diff 与右栏全宽审阅模式**、**轮次迷你导航轨**、分隔条键盘无障碍与快捷键表
+2. [`pages/02-composer-and-handoff.md`](pages/02-composer-and-handoff.md) —— 三态输入舱、**`MultiQueueBar` 多条可视化队列**、4 段构成彩色窗口分析、IME 保护、`lost-controls` 回退、窄屏 Bottom Sheet 降级与 `@agent` 移交
+3. [`pages/03-timeline-tools-and-checkpoints.md`](pages/03-timeline-tools-and-checkpoints.md) —— 对话流角色排版、**`LiveSteps` 实时步骤条**、**Oryn 风格 `ToolCallCard`（22px 图标块 + 意图读数）**、**Artifact 产物卡**、**选区引用与旁路解释卡**、**分叉会话**、结构化提问与审批对比
+4. [`pages/04-magpie-and-cli-inspector.md`](pages/04-magpie-and-cli-inspector.md) —— Magpie 双态拓扑、7 大原生 CLI 徽标与能力矩阵、Worktree 启动环境变量预览器与本地历史会话无损导入流
+5. [`pages/05-mobile-remote-pwa.md`](pages/05-mobile-remote-pwa.md) —— Daemon 内嵌移动遥控 PWA：**13 组真机视口 + 折叠屏双段布局**、**`SinkLayout` 下沉侧栏与 52px 底层胶囊**、**40px 上滑 `DockPill` 输入胶囊**、手势下滑关闭 Bottom Sheet 与大拇指审批流
+6. [`pages/06-modals-onboarding-and-automation.md`](pages/06-modals-onboarding-and-automation.md) —— 首次 3 步 Onboarding 向导、`Cmd+K` 全局命令面板（16px 防缩放、触屏隐藏多余键位）、添加项目弹窗、Git Emoji 提交预览与调度中心
+7. [`pages/07-settings-fonts-and-motion.md`](pages/07-settings-fonts-and-motion.md) —— `HoverExpandDock` 细/粗指针分化、7 分区设置中心、**macOS 红绿灯与折叠双屏预览切换**、双字体体系与 GPUI 动效对照矩阵

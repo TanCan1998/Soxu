@@ -1,18 +1,21 @@
 import {
   Archive,
   ArchiveRestore,
+  ArrowDown,
   ArrowUp,
   Bolt,
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clock,
-  Cpu,
-  FileCode2,
+  Eye,
+  FileText,
   Folder,
   FolderOpen,
   GitBranch,
   History,
+  Inbox,
   Layers,
   MessageSquare,
   PanelLeft,
@@ -26,32 +29,37 @@ import {
   SlidersHorizontal,
   Sparkles,
   Square,
-  Terminal,
+  Star,
   X,
-  Zap,
 } from "lucide-react";
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentIcon } from "@/components/AgentIcon";
-import { CodeDiffView, CodeSnippetView, type DiffRowItem } from "@/components/CodeBlockView";
+import { CodeDiffView, CodeSnippetView } from "@/components/CodeBlockView";
 import {
   ComposerChipBar,
   ComposerHandoffMenu,
   ComposerPermissionButton,
   ComposerPlusMenu,
   ComposerTurnBehaviorGroup,
+  HandoffConfigPanel,
   PermissionIcon,
 } from "@/components/ComposerActionMenus";
-import { ContextUsageRing } from "@/components/ContextUsageRing";
+import { ContextUsagePanel, ContextUsageRing } from "@/components/ContextUsageRing";
 import { HoverExpandDock } from "@/components/HoverExpandDock";
-import { SessionStatsPopover } from "@/components/SessionStatsPopover";
+import { InboxTriageView } from "@/components/InboxTriageView";
+import { MultiQueueBar } from "@/components/MultiQueueBar";
+import { QuoteSelectionPopover } from "@/components/QuoteSelectionPopover";
+import { SessionStatsPanel, SessionStatsPopover } from "@/components/SessionStatsPopover";
 import { SettingsDialog, type SettingsSectionId } from "@/components/SettingsDialog";
+import { SinkLayout } from "@/components/SinkLayout";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { ToolCallCard } from "@/components/ToolCallCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   THINKING_LABELS,
   getAgentModels,
@@ -67,57 +75,44 @@ import {
   toggleThemeWithTransition,
   type SoxuPreferences,
 } from "@/lib/preferences";
+import { formatShortcut, isImeComposing, useAdaptiveViewport } from "@/lib/useAdaptiveViewport";
 import { cn } from "@/lib/utils";
 import "./index.css";
 import {
   CLI_OPTIONS,
   INITIAL_APPROVALS,
+  INITIAL_ARTIFACT,
   INITIAL_ASK,
+  INITIAL_DIFF_FILES,
+  INITIAL_LIVE_STEPS,
   INITIAL_QUICK_CHATS,
   INITIAL_SCHEDULES,
   INITIAL_SCRIPTS,
   INITIAL_TURNS,
   INITIAL_WORKSPACES,
+  MOBILE_QUICK_CHIPS,
   NATIVE_HISTORY,
 } from "./mock-data";
 import type {
   ApprovalItem,
+  ArtifactItem,
   AskQuestionState,
   ComposerChip,
   HandoffSelection,
+  LiveStepItem,
   MobileTab,
   PermissionLevel,
+  QueuedPromptItem,
   QuickChatItem,
   ScheduleItem,
   ScriptItem,
   SessionTelemetryStats,
   SheetKind,
-  SizeClass,
-  ToolCardItem,
   TurnBehavior,
   TurnMessage,
   WorkspaceBucket,
   WorkspaceItem,
 } from "./types";
-
-function resolveSizeClass(width: number): SizeClass {
-  if (width >= 1024) return "wide";
-  if (width >= 640) return "regular";
-  return "compact";
-}
-
-function toolIcon(kind: ToolCardItem["kind"]) {
-  switch (kind) {
-    case "read":
-      return <Search className="h-3.5 w-3.5" strokeWidth={1.75} />;
-    case "edit":
-      return <FileCode2 className="h-3.5 w-3.5" strokeWidth={1.75} />;
-    case "bash":
-      return <Terminal className="h-3.5 w-3.5" strokeWidth={1.75} />;
-    case "mcp":
-      return <Cpu className="h-3.5 w-3.5" strokeWidth={1.75} />;
-  }
-}
 
 function bucketMeta(bucket: WorkspaceBucket): {
   label: string;
@@ -151,16 +146,6 @@ function parseLinesToDiffRows(lines: string[]) {
   });
 }
 
-const INSPECTOR_DIFF_ROWS: DiffRowItem[] = [
-  { lineNum: 22, kind: "ctx", code: "pub enum NativeCliKind { Claude, Codex, Pi, OpenCode, Antigravity, Copilot, Qwen }" },
-  { kind: "del", code: "// 旧版仅在运行时返回可执行文件名" },
-  { lineNum: 23, kind: "add", code: "/// 返回驱动是否支持活跃回合中途热纠偏" },
-  { lineNum: 24, kind: "add", code: "#[inline]" },
-  { lineNum: 25, kind: "add", code: "pub const fn supports_live_steer(self) -> bool {" },
-  { lineNum: 26, kind: "add", code: "  matches!(self, Self::Pi | Self::Codex | Self::Claude)" },
-  { lineNum: 27, kind: "add", code: "}" },
-];
-
 function MobileApp() {
   const [prefs, setPrefs] = useState<SoxuPreferences>(loadPreferences);
   return (
@@ -180,10 +165,21 @@ function MobileAppInner({
   const { t } = useI18n();
   const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(() => applyPreferencesToDom(prefs));
 
-  const [sizeClass, setSizeClass] = useState<SizeClass>(() =>
-    typeof window !== "undefined" ? resolveSizeClass(window.innerWidth) : "compact",
-  );
+  const vp = useAdaptiveViewport(prefs);
+  const sizeClass = vp.sizeClass;
+  const isFoldDualH = vp.foldPosture === "dual-horizontal";
+  const isFoldDualV = vp.foldPosture === "dual-vertical" && !isFoldDualH;
+  const isCompactSink = sizeClass === "compact" && !vp.isShortViewport && !isFoldDualH && !isFoldDualV;
+  const showCompactRail = (vp.isShortViewport || isFoldDualV) && !isFoldDualH;
+
+  const leftTriggerRef = useRef<HTMLButtonElement>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
+  const transcriptContentRef = useRef<HTMLDivElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const composerSwipeStartYRef = useRef<number | null>(null);
+
   const [activeTab, setActiveTab] = useState<MobileTab>("session");
+  const [inboxSubMode, setInboxSubMode] = useState<"triage" | "approvals">("triage");
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(INITIAL_WORKSPACES);
   const [quickChats, setQuickChats] = useState<QuickChatItem[]>(INITIAL_QUICK_CHATS);
   const [targetKind, setTargetKind] = useState<"workspace" | "quick">("workspace");
@@ -197,6 +193,9 @@ function MobileAppInner({
   const [approvalSubTab, setApprovalSubTab] = useState<"pending" | "history">("pending");
   const [askQuestion, setAskQuestion] = useState<AskQuestionState>(INITIAL_ASK);
   const [turns, setTurns] = useState<TurnMessage[]>(INITIAL_TURNS);
+  const [liveSteps, setLiveSteps] = useState<LiveStepItem[]>(INITIAL_LIVE_STEPS);
+  const [stepsOpen, setStepsOpen] = useState(true);
+  const [activeArtifact, setActiveArtifact] = useState<ArtifactItem>(INITIAL_ARTIFACT);
   const [scripts, setScripts] = useState<ScriptItem[]>(INITIAL_SCRIPTS);
   const [schedules, setSchedules] = useState<ScheduleItem[]>(INITIAL_SCHEDULES);
   const [magpieMode, setMagpieMode] = useState<"magpie_managed" | "standalone_native">("magpie_managed");
@@ -210,7 +209,10 @@ function MobileAppInner({
   const [thinking, setThinking] = useState<string>("medium");
   const [permLevel, setPermLevel] = useState<PermissionLevel>(prefs.defaultPermMode);
   const [behavior, setBehavior] = useState<TurnBehavior>("steer");
-  const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
+  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPromptItem[]>([]);
+  const [queuePaused, setQueuePaused] = useState<boolean>(false);
+  const [composerCollapsed, setComposerCollapsed] = useState<boolean>(false);
+  const [showScrollBottom, setShowScrollBottom] = useState<boolean>(false);
   const [draft, setDraft] = useState<string>("");
   const [composerChips, setComposerChips] = useState<ComposerChip[]>([
     { id: "mob-init-chip", kind: "file", label: "crates/soxu-drivers/src/lib.rs:22-27" },
@@ -241,7 +243,10 @@ function MobileAppInner({
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
-  const [rightInspectorTab, setRightInspectorTab] = useState<"diff" | "scripts">("diff");
+  const [rightInspectorTab, setRightInspectorTab] = useState<"diff" | "artifact" | "scripts">("diff");
+  const [selectedDiffFilePath, setSelectedDiffFilePath] = useState<string>(INITIAL_DIFF_FILES[0].path);
+  const [diffFilter, setDiffFilter] = useState<string>("");
+  const [diffBase, setDiffBase] = useState<"uncommitted" | "main" | "checkpoint">("uncommitted");
   const [searchQuery, setSearchQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("appearance");
@@ -256,24 +261,24 @@ function MobileAppInner({
   }, [prefs]);
 
   useEffect(() => {
-    const onResize = () => {
-      const next = resolveSizeClass(window.innerWidth);
-      setSizeClass(next);
-      if (next === "wide") {
-        setLeftDrawerOpen(false);
-      }
-    };
+    if (sizeClass === "wide" || isFoldDualH) {
+      setLeftDrawerOpen(false);
+    }
+  }, [sizeClass, isFoldDualH]);
+
+  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === ",") {
         e.preventDefault();
         setSettingsSection("appearance");
         setSettingsOpen((v) => !v);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSheet((prev) => (prev === "search" ? null : "search"));
       }
     };
-    window.addEventListener("resize", onResize);
     window.addEventListener("keydown", onKeyDown);
     return () => {
-      window.removeEventListener("resize", onResize);
       window.removeEventListener("keydown", onKeyDown);
     };
   }, []);
@@ -331,9 +336,22 @@ function MobileAppInner({
   const isRunning = targetKind === "workspace" && activeWorkspace.bucket === "running";
 
   const activeWorkspaces = workspaces.filter((w) => !w.archived);
+  const pinnedWorkspaces = activeWorkspaces.filter((w) => w.pinned);
   const activeQuickChats = quickChats.filter((q) => !q.archived);
   const filteredWorkspaces =
     bucketFilter === "all" ? activeWorkspaces : activeWorkspaces.filter((w) => w.bucket === bucketFilter);
+  const inboxAttentionCount =
+    pendingApprovals.length +
+    activeWorkspaces.filter((w) => w.bucket === "needs_input" || w.bucket === "failed" || w.bucket === "attention").length;
+
+  const filteredDiffFiles = useMemo(() => {
+    const q = diffFilter.trim().toLowerCase();
+    if (!q) return INITIAL_DIFF_FILES;
+    return INITIAL_DIFF_FILES.filter((f) => f.path.toLowerCase().includes(q));
+  }, [diffFilter]);
+
+  const activeDiffFile =
+    filteredDiffFiles.find((f) => f.path === selectedDiffFilePath) ?? filteredDiffFiles[0] ?? INITIAL_DIFF_FILES[0];
 
   const projectGroups = Array.from(
     filteredWorkspaces.reduce((map, w) => {
@@ -437,10 +455,117 @@ function MobileAppInner({
     setComposerChips((prev) => prev.filter((c) => c.id !== chipId));
   }
 
-  function handleSubmitPrompt(overrideBehavior?: TurnBehavior) {
+  function scrollToBottom(smooth = true) {
+    const el = transcriptScrollRef.current;
+    if (!el) return;
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: smooth && !prefs.reduceMotion ? "smooth" : "auto",
+    });
+  }
+
+  function handleScrollTranscript(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollBottom(distanceFromBottom > 80);
+  }
+
+  function handleTogglePinWorkspace(workspaceId: string) {
+    setWorkspaces((prev) =>
+      prev.map((w) => {
+        if (w.id !== workspaceId) return w;
+        const nextPinned = !w.pinned;
+        flashToast(nextPinned ? `已置顶 ${w.branch}` : `已取消置顶 ${w.branch}`);
+        return { ...w, pinned: nextPinned };
+      }),
+    );
+  }
+
+  function handleMarkAllAttentionRead() {
+    setWorkspaces((prev) => prev.map((w) => (w.bucket === "attention" ? { ...w, bucket: "done" } : w)));
+    flashToast("已将已完成未读工作区全部标记为已读");
+  }
+
+  function handleBranchFromTurn(turn: TurnMessage) {
+    const id = `wks-fork-${Date.now().toString().slice(-4)}`;
+    const branch = `feat/fork-${turn.id.replace(/[^a-z0-9]/gi, "").slice(-6)}`;
+    const forked: WorkspaceItem = {
+      id,
+      project: activeWorkspace.project,
+      projectPath: activeWorkspace.projectPath,
+      branch,
+      isolation: "worktree",
+      agent: cli,
+      model,
+      bucket: "attention",
+      summary: `自回合「${turn.text.slice(0, 24)}...」分叉的新隔离工作树`,
+      activeIntent: "延续分叉前上下文",
+      diffStat: "+0 -0",
+    };
+    setWorkspaces((prev) => [forked, ...prev]);
+    setSelectedWorkspaceId(id);
+    setTargetKind("workspace");
+    flashToast(`已从该回合分叉新会话：${branch}`);
+  }
+
+  function handleSubmitDiffLineComment(filePath: string, lineNum: number, codeLine: string, comment: string) {
+    addComposerChip({
+      kind: "review",
+      label: `${filePath}:${lineNum} ${comment}`,
+      detail: `${codeLine}\n评审意见：${comment}`,
+    });
+    setComposerCollapsed(false);
+    setRightDrawerOpen(false);
+    flashToast(`已附着第 ${lineNum} 行评审批注至输入舱`);
+    window.setTimeout(() => composerInputRef.current?.focus(), 60);
+  }
+
+  function handlePromoteSteerItem(item: QueuedPromptItem) {
+    const nextSeq = seqCursor + 2;
+    setSeqCursor(nextSeq);
+    setTurns((prev) => [
+      ...prev,
+      { id: `turn-q-${nextSeq}`, role: "user", author: "你", text: item.text, badge: "提级为热纠偏" },
+      {
+        id: `turn-qa-${nextSeq + 1}`,
+        role: "assistant",
+        author: `${cli} · ${model}`,
+        text: `已提级为热纠偏，优先处理排队指令：「${item.text}」。`,
+      },
+    ]);
+    setQueuedPrompts((prev) => prev.filter((q) => q.id !== item.id));
+    flashToast("已将排队指令提级为热纠偏注入当前回合");
+  }
+
+  function handleEditQueueItem(item: QueuedPromptItem) {
+    setDraft(item.text);
+    setQueuedPrompts((prev) => prev.filter((q) => q.id !== item.id));
+    setComposerCollapsed(false);
+    window.setTimeout(() => composerInputRef.current?.focus(), 40);
+  }
+
+  function handleMoveQueueItem(id: string, dir: -1 | 1) {
+    setQueuedPrompts((prev) => {
+      const idx = prev.findIndex((q) => q.id === id);
+      if (idx < 0) return prev;
+      const target = idx + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const copy = [...prev];
+      const [moved] = copy.splice(idx, 1);
+      copy.splice(target, 0, moved);
+      return copy;
+    });
+  }
+
+  function handleRemoveQueueItem(id: string) {
+    setQueuedPrompts((prev) => prev.filter((q) => q.id !== id));
+  }
+
+  function handleSubmitPrompt(overrideBehavior?: TurnBehavior, overrideText?: string) {
     const activeBehavior = overrideBehavior ?? behavior;
-    const rawText = draft.trim();
-    const attachedChips = composerChips;
+    const isDirectChip = typeof overrideText === "string";
+    const rawText = isDirectChip ? overrideText.trim() : draft.trim();
+    const attachedChips = isDirectChip ? [] : composerChips;
     if (!rawText && attachedChips.length === 0) return;
 
     const activeHandoff = attachedChips.find((c) => c.kind === "handoff" && c.targetAgent);
@@ -504,16 +629,29 @@ function MobileAppInner({
         ),
       );
       setContextTokens((cur) => cur + Math.max(1200, text.length * 40));
-      setComposerChips([]);
-      setDraft("");
+      if (!isDirectChip) {
+        setComposerChips([]);
+        setDraft("");
+      }
+      window.setTimeout(() => scrollToBottom(true), 40);
       return;
     }
 
     if (!activeHandoff) {
       if (activeBehavior === "queue") {
-        setQueuedPrompt(text);
-        setComposerChips([]);
-        setDraft("");
+        setQueuedPrompts((prev) => [
+          ...prev,
+          {
+            id: `mob-q-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+            text,
+            createdAt: "刚刚",
+            mode: "queue",
+          },
+        ]);
+        if (!isDirectChip) {
+          setComposerChips([]);
+          setDraft("");
+        }
         flashToast("已加入指令队列，当前回合结束时顺延发送");
         return;
       }
@@ -550,8 +688,11 @@ function MobileAppInner({
     };
     setTurns((prev) => [...prev, userTurn, replyTurn]);
     setContextTokens((cur) => cur + Math.max(1800, text.length * 45));
-    setComposerChips([]);
-    setDraft("");
+    if (!isDirectChip) {
+      setComposerChips([]);
+      setDraft("");
+    }
+    window.setTimeout(() => scrollToBottom(true), 40);
   }
 
   function handleAnswerAsk(optionId: string) {
@@ -560,24 +701,6 @@ function MobileAppInner({
     setAskQuestion((prev) => ({ ...prev, selectedId: optionId, submitted: true }));
     setSeqCursor((s) => s + 1);
     flashToast(`已回传确认结果：「${picked.label}」`);
-  }
-
-  function handleHandoff(targetCli: string) {
-    setSheet(null);
-    handleSelectCli(targetCli);
-    const nextSeq = seqCursor + 2;
-    setSeqCursor(nextSeq);
-    setTurns((prev) => [
-      ...prev,
-      {
-        id: `turn-handoff-${nextSeq}`,
-        role: "assistant",
-        author: `${targetCli} · 上下文移交`,
-        badge: `@${targetCli} 已接管`,
-        text: `已将最近 3 轮摘要、未提交变更文件列表与游标 #${nextSeq} 移交至 @${targetCli} 继续处理。`,
-      },
-    ]);
-    flashToast(`上下文已移交至 @${targetCli}`);
   }
 
   function handleApplyRewind(label: string) {
@@ -857,12 +980,102 @@ function MobileAppInner({
   const WorkspaceRail = (
     <aside
       className={cn(
-        "flex flex-col gap-4 p-3.5 shrink-0",
+        "flex flex-col gap-3.5 p-3.5 shrink-0",
         sizeClass === "wide"
-          ? "w-[320px] border-r border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-sidebar)]"
+          ? "w-[300px] border-r border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-sidebar)]"
           : "w-full",
       )}
     >
+      {/* 0. 置顶收件箱分诊台入口 */}
+      <button
+        type="button"
+        onClick={() => {
+          setActiveTab("inbox");
+          setLeftDrawerOpen(false);
+        }}
+        className={cn(
+          "w-full min-h-[38px] rounded-xl px-3 py-2 flex items-center justify-between gap-2 text-xs font-medium border cursor-pointer transition-colors",
+          activeTab === "inbox" || activeTab === "approvals"
+            ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)]"
+            : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)]",
+        )}
+      >
+        <span className="inline-flex items-center gap-2 min-w-0">
+          <Inbox className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)] shrink-0" strokeWidth={1.75} />
+          <span className="truncate">{t("sidebar.inbox")}</span>
+        </span>
+        {inboxAttentionCount > 0 && (
+          <Badge variant="warning" className="soxu-tabular">
+            {inboxAttentionCount}
+          </Badge>
+        )}
+      </button>
+
+      {/* 0.5 已置顶重要工作区 */}
+      {pinnedWorkspaces.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between px-0.5">
+            <span className="text-[11px] font-semibold text-[var(--soxu-text-tertiary)] flex items-center gap-1">
+              <Star className="h-3 w-3 text-[var(--soxu-semantic-warning)] fill-current" strokeWidth={1.75} />
+              <span>{t("sidebar.pinned")}</span>
+            </span>
+          </div>
+          {pinnedWorkspaces.map((w) => {
+            const active = targetKind === "workspace" && w.id === selectedWorkspaceId && activeTab === "session";
+            const meta = bucketMeta(w.bucket);
+            return (
+              <div
+                key={`pin-${w.id}`}
+                role="button"
+                tabIndex={0}
+                data-group-active={active ? "true" : undefined}
+                onClick={() => {
+                  setTargetKind("workspace");
+                  setSelectedWorkspaceId(w.id);
+                  setLeftDrawerOpen(false);
+                  setActiveTab("session");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setTargetKind("workspace");
+                    setSelectedWorkspaceId(w.id);
+                    setActiveTab("session");
+                  }
+                }}
+                className={cn(
+                  "group rounded-xl px-2.5 py-2 flex items-center justify-between gap-2 border cursor-pointer transition-colors",
+                  active
+                    ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)]"
+                    : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-subtle)]",
+                )}
+              >
+                <div className="min-w-0 flex items-center gap-2">
+                  <span className={cn("h-2 w-2 rounded-full shrink-0", meta.dotClass)} />
+                  <div className="min-w-0">
+                    <div className="soxu-mono text-[11.5px] font-semibold truncate">{w.branch}</div>
+                    {w.activeIntent && (
+                      <div className="text-[10.5px] text-[var(--soxu-semantic-running)] truncate">{w.activeIntent}</div>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label={t("sidebar.unpinAction")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTogglePinWorkspace(w.id);
+                  }}
+                  className="soxu-hit-44 soxu-reveal-action p-1 text-[var(--soxu-semantic-warning)] bg-transparent border-0 cursor-pointer shrink-0"
+                >
+                  <Star className="h-3 w-3 fill-current" strokeWidth={1.75} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* 1. 无项目快速对话区 */}
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
@@ -881,16 +1094,17 @@ function MobileAppInner({
         </div>
         <div className="flex flex-col gap-1.5">
           {activeQuickChats.map((qc) => {
-            const active = targetKind === "quick" && selectedQuickChatId === qc.id;
+            const active = targetKind === "quick" && selectedQuickChatId === qc.id && activeTab === "session";
             const meta = bucketMeta(qc.bucket);
             return (
               <div
                 key={qc.id}
+                data-group-active={active ? "true" : undefined}
                 onClick={() => {
                   setTargetKind("quick");
                   setSelectedQuickChatId(qc.id);
                   setLeftDrawerOpen(false);
-                  if (sizeClass !== "wide") setActiveTab("session");
+                  setActiveTab("session");
                 }}
                 role="button"
                 tabIndex={0}
@@ -899,10 +1113,11 @@ function MobileAppInner({
                     e.preventDefault();
                     setTargetKind("quick");
                     setSelectedQuickChatId(qc.id);
+                    setActiveTab("session");
                   }
                 }}
                 className={cn(
-                  "rounded-xl px-3 py-2.5 flex items-center justify-between gap-2 border cursor-pointer transition-colors",
+                  "group rounded-xl px-3 py-2.5 flex items-center justify-between gap-2 border cursor-pointer transition-colors",
                   active
                     ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)]"
                     : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-subtle)]",
@@ -921,7 +1136,7 @@ function MobileAppInner({
                     e.stopPropagation();
                     archiveItem("quick", qc.id, qc.title);
                   }}
-                  className="p-1 text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] cursor-pointer shrink-0"
+                  className="soxu-hit-44 soxu-reveal-action p-1 text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] bg-transparent border-0 cursor-pointer shrink-0"
                 >
                   <Archive className="h-3.5 w-3.5" strokeWidth={1.75} />
                 </button>
@@ -996,7 +1211,7 @@ function MobileAppInner({
                 <button
                   type="button"
                   onClick={() => setOpenProjects((p) => ({ ...p, [projName]: !expanded }))}
-                  className="flex items-center justify-between px-1.5 py-1 text-xs font-semibold text-[var(--soxu-text-primary)] cursor-pointer"
+                  className="flex items-center justify-between px-1.5 py-1 text-xs font-semibold text-[var(--soxu-text-primary)] bg-transparent border-0 cursor-pointer"
                 >
                   <span className="flex items-center gap-1.5 truncate">
                     <ChevronRight
@@ -1014,28 +1229,30 @@ function MobileAppInner({
                 {expanded && (
                   <div className="ml-3 pl-2.5 border-l border-[var(--soxu-border-hairline)] flex flex-col gap-1.5">
                     {group.items.map((w) => {
-                      const active = targetKind === "workspace" && w.id === selectedWorkspaceId;
+                      const active = targetKind === "workspace" && w.id === selectedWorkspaceId && activeTab === "session";
                       const meta = bucketMeta(w.bucket);
                       return (
                         <div
                           key={w.id}
                           role="button"
                           tabIndex={0}
+                          data-group-active={active ? "true" : undefined}
                           onClick={() => {
                             setTargetKind("workspace");
                             setSelectedWorkspaceId(w.id);
                             setLeftDrawerOpen(false);
-                            if (sizeClass !== "wide") setActiveTab("session");
+                            setActiveTab("session");
                           }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" || e.key === " ") {
                               e.preventDefault();
                               setTargetKind("workspace");
                               setSelectedWorkspaceId(w.id);
+                              setActiveTab("session");
                             }
                           }}
                           className={cn(
-                            "w-full text-left rounded-xl p-2.5 flex flex-col gap-1 border cursor-pointer transition-colors",
+                            "group w-full text-left rounded-xl p-2.5 flex flex-col gap-1 border cursor-pointer transition-colors",
                             active
                               ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)]"
                               : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-subtle)]",
@@ -1046,8 +1263,22 @@ function MobileAppInner({
                               <span className={cn("h-2 w-2 rounded-full shrink-0", meta.dotClass)} />
                               <span className="soxu-mono text-xs font-semibold truncate">{w.branch}</span>
                             </span>
-                            <div className="flex items-center gap-1 shrink-0">
+                            <div className="flex items-center gap-0.5 shrink-0">
                               {w.bucket !== "done" && <Badge variant={meta.variant}>{meta.label}</Badge>}
+                              <button
+                                type="button"
+                                aria-label={w.pinned ? t("sidebar.unpinAction") : t("sidebar.pinAction")}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTogglePinWorkspace(w.id);
+                                }}
+                                className={cn(
+                                  "soxu-hit-44 soxu-reveal-action p-1 bg-transparent border-0 cursor-pointer",
+                                  w.pinned ? "opacity-100 text-[var(--soxu-semantic-warning)]" : "text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)]",
+                                )}
+                              >
+                                <Star className={cn("h-3 w-3", w.pinned && "fill-current")} strokeWidth={1.75} />
+                              </button>
                               <button
                                 type="button"
                                 aria-label={`归档 ${w.branch}`}
@@ -1055,13 +1286,17 @@ function MobileAppInner({
                                   e.stopPropagation();
                                   archiveItem("workspace", w.id, `${w.project} / ${w.branch}`);
                                 }}
-                                className="p-1 text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] cursor-pointer"
+                                className="soxu-hit-44 soxu-reveal-action p-1 text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] bg-transparent border-0 cursor-pointer"
                               >
                                 <Archive className="h-3 w-3" strokeWidth={1.75} />
                               </button>
                             </div>
                           </div>
-                          <div className="text-[11.5px] text-[var(--soxu-text-secondary)] truncate">{w.summary}</div>
+                          {w.activeIntent ? (
+                            <div className="text-[11px] text-[var(--soxu-semantic-running)] truncate">{w.activeIntent}</div>
+                          ) : (
+                            <div className="text-[11.5px] text-[var(--soxu-text-secondary)] truncate">{w.summary}</div>
+                          )}
                           <div className="flex items-center justify-between text-[11px] text-[var(--soxu-text-tertiary)] soxu-mono">
                             <span className="inline-flex items-center gap-1.5">
                               <span>{w.isolation === "worktree" ? "工作树" : "主目录"}</span>
@@ -1087,7 +1322,7 @@ function MobileAppInner({
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="w-full px-1 py-1 flex items-center justify-between text-xs text-[var(--soxu-text-tertiary)] cursor-pointer"
+            className="w-full px-1 py-1 flex items-center justify-between text-xs text-[var(--soxu-text-tertiary)] bg-transparent border-0 cursor-pointer"
           >
             <span className="flex items-center gap-1.5">
               <Archive className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -1106,7 +1341,7 @@ function MobileAppInner({
               <button
                 type="button"
                 onClick={() => restoreItem(ae.kind, ae.id)}
-                className="text-[11px] text-[var(--soxu-semantic-accent)] inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                className="text-[11px] text-[var(--soxu-semantic-accent)] inline-flex items-center gap-1 shrink-0 bg-transparent border-0 cursor-pointer"
               >
                 <ArchiveRestore className="h-3 w-3" strokeWidth={1.75} />
                 <span>恢复</span>
@@ -1199,655 +1434,1279 @@ function MobileAppInner({
       ? scripts.find((s) => s.name === sheet.name)
       : null;
 
-  return (
-    <TooltipProvider delayDuration={220}>
-      <div className="min-h-dvh flex flex-col bg-[var(--soxu-surface-canvas)] text-[var(--soxu-text-primary)]">
-        {/* 顶部极简毛玻璃栏：三轨分栏确保搜索框恒定居中、按钮不重叠；Soxu 前方绝无圆点 */}
-        <header
-          className="sticky top-0 soxu-safe-top px-2.5 sm:px-4 pb-2 backdrop-blur-md border-b border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-header-glass)]"
-          style={{ zIndex: "var(--soxu-z-header)" }}
-        >
-          <div className="max-w-[1280px] mx-auto grid grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-[minmax(max-content,1fr)_minmax(140px,320px)_minmax(max-content,1fr)] items-center gap-1.5 sm:gap-2.5">
-            <div className="flex items-center gap-1 sm:gap-2 min-w-0 justify-self-start">
-              {sizeClass !== "wide" && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => setLeftDrawerOpen(true)}
-                  aria-label={t("header.openLeftDrawer")}
-                  className="shrink-0"
-                >
-                  <PanelLeft className="h-4 w-4" strokeWidth={1.75} />
-                </Button>
-              )}
-
-              <span className="px-1 text-xs sm:text-[13px] font-semibold tracking-tight text-[var(--soxu-text-primary)] shrink-0">
-                {t("brand.name")}
-              </span>
-
-              <button
-                type="button"
-                onClick={simulateSeqCatchup}
-                className="hidden md:flex flex-col text-left min-w-0 bg-transparent border-0 p-0 cursor-pointer"
-                title="点击模拟断线重连后游标增量追平"
-              >
-                <div className="text-[11px] soxu-mono soxu-tabular text-[var(--soxu-text-tertiary)] truncate">
-                  {daemonOnline ? t("mobile.daemonOnline") : t("mobile.remoteClient")} · {t("mobile.cursorPrefix", { seq: seqCursor })}
-                </div>
-                <div className="text-[11.5px] soxu-mono text-[var(--soxu-text-secondary)] truncate max-w-[200px]">
-                  {targetKind === "quick" ? `${t("header.quickChat")} / ${activeQuickChat.title}` : `${activeWorkspace.project} / ${activeWorkspace.branch}`}
-                </div>
-              </button>
-            </div>
-
-            {/* 始终水平居中且防重叠的快速检索触发条 */}
-            <button
-              type="button"
-              onClick={() => setSheet("search")}
-              className="h-8 w-full max-w-[320px] min-w-0 justify-self-center rounded-full border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] px-2.5 flex items-center gap-1.5 text-xs text-[var(--soxu-text-tertiary)] hover:border-[var(--soxu-border-strong)] hover:text-[var(--soxu-text-secondary)] transition-colors cursor-pointer"
-              aria-label={t("header.searchCompact")}
-            >
-              <Search className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-              <span className="truncate">{t("header.searchCompact")}</span>
-            </button>
-
-            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0 justify-self-end">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setSheet("pair")}
-                aria-label={t("header.pair")}
-                title={t("header.pair")}
-                className="rounded-full"
-              >
-                <QrCode className="h-4 w-4" strokeWidth={1.75} />
-              </Button>
-
-              <HoverExpandDock
-                triggerIcon={<SlidersHorizontal className="h-4 w-4" strokeWidth={1.75} />}
-                triggerLabel={t("header.moreTools")}
-                expandDirection="left"
-              >
-                <Button variant="ghost" size="icon-sm" onClick={() => setSheet("history")} title={t("sidebar.importHistory")}>
-                  <History className="h-3.5 w-3.5" strokeWidth={1.75} />
-                </Button>
-                <Button variant="ghost" size="icon-sm" onClick={() => setSheet("new-worktree")} title={t("sidebar.worktree")}>
-                  <GitBranch className="h-3.5 w-3.5" strokeWidth={1.75} />
-                </Button>
-                <Button variant="ghost" size="icon-sm" onClick={() => setSheet("new-quick-chat")} title={t("sidebar.newQuickChat")}>
-                  <MessageSquare className="h-3.5 w-3.5" strokeWidth={1.75} />
-                </Button>
-              </HoverExpandDock>
-
-              <ThemeToggle resolvedTheme={resolvedTheme} onToggle={handleToggleTheme} />
-
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => {
-                  setSettingsSection("appearance");
-                  setSettingsOpen(true);
-                }}
-                aria-label={t("header.settings")}
-                title={`${t("header.settings")} (Ctrl+,)`}
-                className="rounded-full"
-              >
-                <Settings className="h-4 w-4" strokeWidth={1.75} />
-              </Button>
-
-              <Button
-                variant={rightDrawerOpen ? "secondary" : "ghost"}
-                size="icon-sm"
-                onClick={() => setRightDrawerOpen(true)}
-                aria-label={t("header.openRightDrawer")}
-                title={t("header.openRightDrawer")}
-                className="rounded-full"
-              >
-                <PanelRight className="h-4 w-4" strokeWidth={1.75} />
-              </Button>
-            </div>
-          </div>
-
-          {toastMsg && (
-            <div className="max-w-[760px] mx-auto mt-2 px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 bg-[var(--soxu-semantic-accent-soft)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-semantic-accent)]">
-              <Bolt className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-              <span className="truncate">{toastMsg}</span>
-            </div>
-          )}
-        </header>
-
-        {/* 主工作区 */}
-        <div className="flex-1 flex max-w-[1280px] w-full mx-auto">
-          {sizeClass === "wide" && WorkspaceRail}
-
-          <main className="flex-1 flex flex-col justify-between min-w-0">
-            <div
-              className="w-full mx-auto px-4 py-4 flex flex-col gap-4"
-              style={{ maxWidth: "var(--soxu-layout-transcript-max-width)" }}
-            >
-              {pendingApprovals.length > 0 && activeTab !== "approvals" && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("approvals")}
-                  className="w-full rounded-xl px-3.5 py-2.5 text-left flex items-center justify-between gap-2 bg-[var(--soxu-semantic-warning-soft)] border border-[var(--soxu-semantic-warning-border)] text-[var(--soxu-semantic-warning)] cursor-pointer"
-                >
-                  <span className="text-xs font-medium flex items-center gap-2 min-w-0">
-                    <Shield className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                    <span className="truncate">有 {pendingApprovals.length} 项高风险或工具操作等待远程批准</span>
-                  </span>
-                  <span className="text-xs font-semibold shrink-0">去处理</span>
-                </button>
-              )}
-
-              {sizeClass !== "wide" && activeTab === "workspaces" && WorkspaceRail}
-
-              {activeTab === "approvals" && (
-                <section className="flex flex-col gap-3">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant={approvalSubTab === "pending" ? "default" : "secondary"}
-                      size="sm"
-                      onClick={() => setApprovalSubTab("pending")}
-                    >
-                      待人工确认 ({pendingApprovals.length})
-                    </Button>
-                    <Button
-                      variant={approvalSubTab === "history" ? "default" : "secondary"}
-                      size="sm"
-                      onClick={() => setApprovalSubTab("history")}
-                    >
-                      已处理记录 ({resolvedApprovals.length})
-                    </Button>
-                  </div>
-                  {(approvalSubTab === "pending" ? pendingApprovals : resolvedApprovals).length === 0 ? (
-                    <div className="rounded-2xl p-6 text-center text-xs text-[var(--soxu-text-tertiary)] bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-subtle)]">
-                      当前分类暂无审批记录
-                    </div>
-                  ) : (
-                    (approvalSubTab === "pending" ? pendingApprovals : resolvedApprovals).map((a) => renderApprovalCard(a))
-                  )}
-                </section>
-              )}
-
-              {activeTab === "scripts" && ScriptsAndSchedulesView}
-
-              {(activeTab === "session" || (sizeClass === "wide" && activeTab === "workspaces")) && (
-                <>
-                  {targetKind === "quick" && activeQuickChat ? (
-                    <div className="flex flex-col gap-4">
-                      <div className="rounded-xl px-3.5 py-2.5 text-xs bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-secondary)] flex items-center justify-between">
-                        <span>无项目自由对话 · {activeQuickChat.title}</span>
-                        <Badge variant="neutral">轻量模式</Badge>
-                      </div>
-                      {activeQuickChat.messages.length === 0 ? (
-                        <div className="py-10 text-center text-xs text-[var(--soxu-text-tertiary)]">
-                          在下方输入内容开始无项目自由对话
-                        </div>
-                      ) : (
-                        activeQuickChat.messages.map((m) =>
-                          m.role === "user" ? (
-                            <div key={m.id} className="flex flex-col items-end gap-1.5">
-                              {m.chips && m.chips.length > 0 && <ComposerChipBar chips={m.chips} className="justify-end" />}
-                              <div className="max-w-[85%] rounded-[18px] px-4 py-2.5 text-sm leading-relaxed bg-[var(--soxu-surface-user-bubble)] text-[var(--soxu-text-primary)]">
-                                {m.text}
-                              </div>
-                            </div>
-                          ) : (
-                            <article key={m.id} className="flex flex-col gap-2">
-                              <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--soxu-text-secondary)]">
-                                <AgentIcon agent={m.author} className="h-3.5 w-3.5 shrink-0" />
-                                <span>{m.author}</span>
-                                {m.badge && <Badge variant="handoff">{m.badge}</Badge>}
-                              </div>
-                              <p className="text-sm m-0 leading-relaxed text-[var(--soxu-text-primary)]">{m.text}</p>
-                            </article>
-                          ),
-                        )
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      {/* 会话信息微条 */}
-                      <div className="flex items-center justify-between gap-2 text-xs text-[var(--soxu-text-tertiary)] pb-1 border-b border-[var(--soxu-border-hairline)]">
-                        <span className="truncate">
-                          {activeWorkspace.project} · {activeWorkspace.summary}
-                        </span>
-                        <span className="soxu-mono soxu-tabular shrink-0">{activeWorkspace.diffStat}</span>
-                      </div>
-
-                      {/* 对话回合流 */}
-                      <div className="flex flex-col gap-4">
-                        {turns.map((turn) => {
-                          if (turn.role === "user") {
-                            return (
-                              <div key={turn.id} className="flex flex-col items-end gap-1.5">
-                                {turn.badge && <Badge variant="handoff">{turn.badge}</Badge>}
-                                {turn.chips && turn.chips.length > 0 && (
-                                  <ComposerChipBar chips={turn.chips} className="justify-end" />
-                                )}
-                                <div className="max-w-[85%] rounded-[18px] px-4 py-2.5 text-sm leading-relaxed bg-[var(--soxu-surface-user-bubble)] text-[var(--soxu-text-primary)]">
-                                  {turn.text}
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          const reasonOpen = Boolean(openReasons[turn.id]);
-                          return (
-                            <article key={turn.id} className="flex flex-col gap-2.5">
-                              <div className="flex items-center gap-2 text-xs text-[var(--soxu-text-tertiary)]">
-                                <AgentIcon agent={turn.author} className="h-4 w-4 shrink-0" />
-                                <span className="font-semibold text-[var(--soxu-text-secondary)]">{turn.author}</span>
-                                {turn.badge && <Badge variant="handoff">{turn.badge}</Badge>}
-                              </div>
-
-                              {turn.reasoningSteps && turn.reasoningSteps.length > 0 && (
-                                <Collapsible
-                                  open={reasonOpen}
-                                  onOpenChange={(o) => setOpenReasons((p) => ({ ...p, [turn.id]: o }))}
-                                  className="rounded-xl bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-hairline)]"
-                                >
-                                  <CollapsibleTrigger asChild>
-                                    <button
-                                      type="button"
-                                      className="w-full px-3 py-2 flex items-center justify-between gap-2 text-xs text-[var(--soxu-text-secondary)] bg-transparent border-0 cursor-pointer"
-                                    >
-                                      <span className="flex items-center gap-1.5 truncate">
-                                        <Sparkles className="h-3.5 w-3.5 text-[var(--soxu-semantic-handoff)] shrink-0" strokeWidth={1.75} />
-                                        <span className="truncate">思考过程 · {turn.reasoningSec ?? "已完成"}</span>
-                                      </span>
-                                      <ChevronRight
-                                        className={cn("h-3.5 w-3.5 shrink-0 transition-transform duration-150", reasonOpen && "rotate-90")}
-                                        strokeWidth={1.75}
-                                      />
-                                    </button>
-                                  </CollapsibleTrigger>
-                                  <CollapsibleContent className="soxu-collapsible overflow-hidden">
-                                    <div className="px-3 pb-2.5 text-xs text-[var(--soxu-text-tertiary)] leading-relaxed flex flex-col gap-1">
-                                      {turn.reasoningSteps.map((step) => (
-                                        <div key={step}>{step}</div>
-                                      ))}
-                                    </div>
-                                  </CollapsibleContent>
-                                </Collapsible>
-                              )}
-
-                              <p className="text-sm m-0 leading-relaxed text-[var(--soxu-text-primary)]">{turn.text}</p>
-
-                              {turn.tools?.map((tl) => {
-                                const isOpen = Boolean(openTools[tl.id]);
-                                return (
-                                  <Collapsible
-                                    key={tl.id}
-                                    open={isOpen}
-                                    onOpenChange={(o) => setOpenTools((p) => ({ ...p, [tl.id]: o }))}
-                                    className="rounded-xl overflow-hidden bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-subtle)]"
-                                  >
-                                    <CollapsibleTrigger asChild>
-                                      <button
-                                        type="button"
-                                        className="w-full px-3 py-2 flex items-center justify-between gap-2 text-xs bg-transparent border-0 cursor-pointer"
-                                      >
-                                        <span className="flex items-center gap-2 min-w-0 text-[var(--soxu-text-secondary)]">
-                                          {toolIcon(tl.kind)}
-                                          <span className="soxu-mono truncate">{tl.title}</span>
-                                        </span>
-                                        <span className="flex items-center gap-2 shrink-0 text-[var(--soxu-text-tertiary)]">
-                                          <span>{tl.status}</span>
-                                          <ChevronRight
-                                            className={cn("h-3.5 w-3.5 transition-transform duration-150", isOpen && "rotate-90")}
-                                            strokeWidth={1.75}
-                                          />
-                                        </span>
-                                      </button>
-                                    </CollapsibleTrigger>
-                                    <CollapsibleContent className="soxu-collapsible overflow-hidden p-2 border-t border-[var(--soxu-border-hairline)]">
-                                      {tl.kind === "edit" ? (
-                                        <CodeDiffView
-                                          rows={parseLinesToDiffRows(tl.lines)}
-                                          layout="unified"
-                                          showLineNumbers={prefs.showLineNumbers}
-                                          wrap={prefs.codeWordWrap}
-                                        />
-                                      ) : (
-                                        <CodeSnippetView
-                                          lines={tl.lines}
-                                          startLine={1}
-                                          showLineNumbers={prefs.showLineNumbers}
-                                          wrap={prefs.codeWordWrap}
-                                        />
-                                      )}
-                                    </CollapsibleContent>
-                                  </Collapsible>
-                                );
-                              })}
-
-                              {turn.checkpoint && (
-                                <div className="rounded-xl px-3 py-2 flex items-center justify-between gap-2 text-xs bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)]">
-                                  <span className="flex items-center gap-2 min-w-0 text-[var(--soxu-text-secondary)]">
-                                    <RotateCcw className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-                                    <span className="truncate">
-                                      检查点 {turn.checkpoint.id} ({turn.checkpoint.sha}) · {turn.checkpoint.stat}
-                                    </span>
-                                  </span>
-                                  <Button variant="outline" size="sm" onClick={() => setSheet("rewind")}>
-                                    安全回退
-                                  </Button>
-                                </div>
-                              )}
-                            </article>
-                          );
-                        })}
-
-                        {/* 结构化确认提问卡 */}
-                        <div className="rounded-2xl p-4 flex flex-col gap-3 bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-strong)]">
-                          <div className="flex items-center justify-between gap-2">
-                            <Badge variant="accent">结构化确认提问</Badge>
-                            <span className="text-[11px] text-[var(--soxu-text-tertiary)]">
-                              {askQuestion.submitted ? "已回传决策" : "等待选择确认"}
-                            </span>
-                          </div>
-                          <div className="text-sm font-medium leading-relaxed">{askQuestion.prompt}</div>
-                          <div className="flex flex-col gap-2">
-                            {askQuestion.options.map((opt) => {
-                              const picked = askQuestion.selectedId === opt.id;
-                              return (
-                                <button
-                                  key={opt.id}
-                                  type="button"
-                                  onClick={() => handleAnswerAsk(opt.id)}
-                                  className={cn(
-                                    "w-full rounded-xl px-3.5 py-2.5 text-left text-xs flex items-center justify-between gap-2 border cursor-pointer transition-colors",
-                                    picked
-                                      ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)] font-semibold"
-                                      : "bg-[var(--soxu-surface-card-muted)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-secondary)]",
-                                  )}
-                                >
-                                  <span className="flex items-center gap-2 min-w-0">
-                                    <span className="truncate">{opt.label}</span>
-                                    {opt.recommended && <Badge variant="accent">推荐</Badge>}
-                                  </span>
-                                  {picked && <Check className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)] shrink-0" strokeWidth={2} />}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {pendingApprovals.map((item) => renderApprovalCard(item))}
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* 底部悬浮输入舱：外层同为 px-4 与相同 maxWidth，与上方内容宽度完全一致 */}
-            {activeTab === "session" && (
-              <div className="sticky bottom-0 px-4 pb-2.5 pt-2 bg-gradient-to-t from-[var(--soxu-surface-canvas)] via-[var(--soxu-surface-canvas)] to-transparent">
-                <div
-                  className="w-full mx-auto rounded-[22px] p-2.5 border border-[var(--soxu-border-strong)] bg-[var(--soxu-surface-composer)] flex flex-col gap-2"
-                  style={{ maxWidth: "var(--soxu-layout-transcript-max-width)" }}
-                >
-                  {lostControlNote && (
-                    <div className="px-2.5 py-1 rounded-lg text-[11px] bg-[var(--soxu-semantic-warning-soft)] text-[var(--soxu-semantic-warning)]">
-                      {lostControlNote}
-                    </div>
-                  )}
-
-                  {queuedPrompt && (
-                    <div className="px-2.5 py-1 rounded-lg text-[11px] flex items-center justify-between gap-2 bg-[var(--soxu-surface-card)] text-[var(--soxu-text-secondary)]">
-                      <span className="truncate">排队中：{queuedPrompt}</span>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {activeProfile.supportsLiveSteer && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                aria-label={t("composer.promoteSteer")}
-                                className="h-6 w-6 rounded-full inline-flex items-center justify-center text-[var(--soxu-semantic-running)] hover:bg-[var(--soxu-semantic-running-soft)] bg-transparent border-0 cursor-pointer"
-                                onClick={() => {
-                                  const nextSeq = seqCursor + 1;
-                                  setSeqCursor(nextSeq);
-                                  setTurns((prev) => [
-                                    ...prev,
-                                    { id: `turn-q-${nextSeq}`, role: "user", author: "你", text: queuedPrompt, badge: "提级为热纠偏" },
-                                  ]);
-                                  setQueuedPrompt(null);
-                                }}
-                              >
-                                <Zap className="h-3.5 w-3.5" strokeWidth={1.75} />
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-[240px]">
-                              <div className="flex items-center justify-between gap-2 font-medium">
-                                <span>{t("composer.promoteSteer")}</span>
-                                <kbd className="rounded bg-[var(--soxu-surface-control)] px-1 py-0.5 text-[10px] soxu-mono text-[var(--soxu-text-secondary)]">
-                                  Ctrl+Enter
-                                </kbd>
-                              </div>
-                              <div className="mt-0.5 text-[10.5px] text-[var(--soxu-text-tertiary)]">
-                                {t("composer.promoteSteerDesc")}
-                              </div>
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              aria-label={t("composer.cancelQueue")}
-                              className="h-6 w-6 rounded-full inline-flex items-center justify-center text-[var(--soxu-semantic-danger)] hover:bg-[var(--soxu-semantic-danger-soft)] bg-transparent border-0 cursor-pointer"
-                              onClick={() => setQueuedPrompt(null)}
-                            >
-                              <X className="h-3 w-3" strokeWidth={1.75} />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top">
-                            <div className="flex items-center gap-2">
-                              <span>{t("composer.cancelQueue")}</span>
-                              <kbd className="rounded bg-[var(--soxu-surface-control)] px-1 py-0.5 text-[10px] soxu-mono text-[var(--soxu-text-secondary)]">
-                                Esc
-                              </kbd>
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-                  )}
-
-                  <ComposerChipBar chips={composerChips} onRemove={removeComposerChip} />
-
-                  <textarea
-                    rows={2}
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape" && queuedPrompt) {
-                        e.preventDefault();
-                        setQueuedPrompt(null);
-                      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
-                        e.preventDefault();
-                        setBehavior("queue");
-                        handleSubmitPrompt("queue");
-                      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                        e.preventDefault();
-                        const targetMode: TurnBehavior = activeProfile.supportsLiveSteer ? "steer" : "queue";
-                        setBehavior(targetMode);
-                        handleSubmitPrompt(targetMode);
-                      } else if (e.key === "Enter" && e.altKey) {
-                        e.preventDefault();
-                        setBehavior("interrupt");
-                        handleSubmitPrompt("interrupt");
-                      } else if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSubmitPrompt();
-                      }
-                    }}
-                    placeholder={
-                      targetKind === "quick"
-                        ? "输入问题随时开展无项目对话..."
-                        : isRunning
-                          ? `运行中（${behavior === "steer" ? "热纠偏" : behavior === "queue" ? "排队" : "打断重发"}）...`
-                          : "输入指令、@代理 移交上下文，或粘贴任务要求..."
-                    }
-                    className="w-full resize-none bg-transparent border-0 outline-none px-1.5 py-1 text-base text-[var(--soxu-text-primary)] placeholder:text-[var(--soxu-text-ghost)]"
-                  />
-
-                  <div className="flex flex-wrap items-center justify-between gap-1.5">
-                    {/* 操作权限与代理/模型完全常驻不折叠，左侧保留 + 更多操作及可选代理移交 */}
-                    <div className="flex flex-wrap items-center gap-1 min-w-0">
-                      <ComposerPlusMenu
-                        hasWorkspace={targetKind === "workspace"}
-                        onAddChip={addComposerChip}
-                      />
-
-                      <Button variant="ghost" size="sm" onClick={() => setSheet("cli")} className="h-7 px-2 text-[11.5px] soxu-mono">
-                        <AgentIcon agent={cli} className="h-3.5 w-3.5 shrink-0" />
-                        <span>{cli}</span>
-                        <ChevronDown className="h-3 w-3" strokeWidth={1.75} />
-                      </Button>
-
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setSheet("model")}
-                        className="h-7 px-2 text-[11.5px] soxu-mono truncate max-w-[120px]"
-                      >
-                        {model.replace("group/", "").replace("auto/", "")}
-                      </Button>
-
-                      {activeProfile.supportsThinking && (
-                        <Button variant="ghost" size="sm" onClick={() => setSheet("thinking")} className="h-7 px-2 text-[11.5px]">
-                          <span>{THINKING_LABELS[thinking] ?? thinking}</span>
-                        </Button>
-                      )}
-
-                      {/* 常驻操作权限纯图标切换按钮（绝不折叠） */}
-                      <ComposerPermissionButton
-                        agentId={cli}
-                        permLevel={permLevel}
-                        onSelectPerm={(nextId, label) => {
-                          setPermLevel(nextId);
-                          flashToast(`操作权限已调整为「${label}」`);
-                        }}
-                        onOpenSheet={sizeClass !== "wide" ? () => setSheet("perm") : undefined}
-                      />
-
-                      <ComposerHandoffMenu
-                        currentCli={cli}
-                        currentModel={model}
-                        currentThinking={thinking}
-                        selectedHandoff={selectedHandoff}
-                        onSelectHandoff={(chipDraft) => {
-                          addComposerChip(chipDraft);
-                          flashToast(`已配置移交至 ${chipDraft.label}`);
-                        }}
-                        onClearHandoff={() => {
-                          if (handoffChip) {
-                            removeComposerChip(handoffChip.id);
-                            flashToast("已取消移交配置");
-                          }
-                        }}
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-1 shrink-0 ml-auto">
-                      <ContextUsageRing
-                        model={model}
-                        usedTokens={contextTokens}
-                        onCompact={() => {
-                          setContextTokens((c) => Math.round(c * 0.42));
-                          flashToast("已完成上下文摘要压缩");
-                        }}
-                      />
-
-                      <SessionStatsPopover stats={sessionStats} />
-
-                      {targetKind === "workspace" && (
-                        <ComposerTurnBehaviorGroup
-                          mode={behavior}
-                          supportsLiveSteer={activeProfile.supportsLiveSteer}
-                          onChange={setBehavior}
-                        />
-                      )}
-                      {isRunning && !draft.trim() && composerChips.length === 0 ? (
-                        <Button
-                          variant="destructive"
-                          size="icon"
-                          onClick={() => {
-                            setWorkspaces((prev) =>
-                              prev.map((w) => (w.id === activeWorkspace.id ? { ...w, bucket: "done" } : w)),
-                            );
-                            flashToast("已发送停止信号");
-                          }}
-                          aria-label="停止生成"
-                        >
-                          <Square className="h-3.5 w-3.5 fill-current" strokeWidth={1.75} />
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="default"
-                          size="icon"
-                          disabled={!draft.trim() && composerChips.length === 0}
-                          onClick={() => handleSubmitPrompt()}
-                          aria-label="发送指令"
-                        >
-                          <ArrowUp className="h-4 w-4" strokeWidth={2} />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </main>
-        </div>
-
-        {/* 移动端底部四页签导航 */}
-        {sizeClass !== "wide" && (
-          <nav
-            aria-label="主导航"
-            className="sticky bottom-0 soxu-safe-bottom border-t border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-header-glass)] backdrop-blur-md grid grid-cols-4"
-            style={{ zIndex: "var(--soxu-z-header)" }}
-          >
+  function renderRightInspectorBody(showCloseButton = false) {
+    return (
+      <div className="flex-1 min-h-0 flex flex-col bg-[var(--soxu-surface-sidebar)]">
+        <div className="px-3.5 py-2.5 border-b border-[var(--soxu-border-hairline)] flex items-center justify-between gap-2 shrink-0">
+          <div className="inline-flex rounded-lg bg-[var(--soxu-surface-inset)] p-0.5 border border-[var(--soxu-border-hairline)]">
             {(
               [
-                { id: "session", label: t("mobile.navSession"), icon: MessageSquare },
-                { id: "workspaces", label: t("mobile.navWorkspaces"), icon: Folder },
-                { id: "approvals", label: t("mobile.navApprovals"), icon: Shield, count: pendingApprovals.length },
-                { id: "scripts", label: t("mobile.navScripts"), icon: Layers },
+                { id: "diff", label: t("inspector.diff") },
+                { id: "artifact", label: t("inspector.artifact") },
+                { id: "scripts", label: t("inspector.scripts") },
               ] as const
-            ).map((nav) => {
-              const Icon = nav.icon;
-              const active = activeTab === nav.id;
-              return (
-                <button
-                  key={nav.id}
-                  type="button"
-                  onClick={() => setActiveTab(nav.id)}
-                  className={cn(
-                    "py-2 flex flex-col items-center justify-center gap-0.5 text-[11px] bg-transparent border-0 cursor-pointer relative transition-colors",
-                    active ? "text-[var(--soxu-text-primary)] font-semibold" : "text-[var(--soxu-text-tertiary)]",
-                  )}
-                >
-                  <div className="relative">
-                    <Icon className="h-4 w-4" strokeWidth={1.75} />
-                    {"count" in nav && nav.count > 0 && (
-                      <span className="absolute -top-1 -right-2 min-w-[14px] h-[14px] px-1 rounded-full text-[9.5px] leading-[14px] text-center bg-[var(--soxu-semantic-warning)] text-black font-bold">
-                        {nav.count}
-                      </span>
-                    )}
+            ).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setRightInspectorTab(item.id)}
+                className={cn(
+                  "px-2.5 py-1 rounded-md text-xs border-0 bg-transparent cursor-pointer transition-colors",
+                  rightInspectorTab === item.id
+                    ? "bg-[var(--soxu-surface-raised)] text-[var(--soxu-text-primary)] font-medium"
+                    : "text-[var(--soxu-text-tertiary)]",
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {showCloseButton && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setRightDrawerOpen(false)}
+              aria-label={t("header.toggleRight")}
+            >
+              <X className="h-4 w-4" strokeWidth={1.75} />
+            </Button>
+          )}
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto p-3.5 flex flex-col gap-3 soxu-scroll">
+          {rightInspectorTab === "diff" && (
+            <>
+              <div className="flex flex-col gap-2">
+                <div className="relative">
+                  <Search
+                    className="h-3.5 w-3.5 text-[var(--soxu-text-tertiary)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                    strokeWidth={1.75}
+                  />
+                  <input
+                    type="text"
+                    value={diffFilter}
+                    onChange={(e) => setDiffFilter(e.target.value)}
+                    placeholder={t("inspector.filterPlaceholder")}
+                    className="w-full rounded-xl pl-8 pr-3 py-1.5 text-base sm:text-xs bg-[var(--soxu-surface-composer)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)] placeholder:text-[var(--soxu-text-ghost)] outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 overflow-x-auto soxu-no-scrollbar">
+                  {(
+                    [
+                      { id: "uncommitted", label: t("inspector.baseUncommitted") },
+                      { id: "main", label: t("inspector.baseMain") },
+                      { id: "checkpoint", label: t("inspector.baseCheckpoint") },
+                    ] as const
+                  ).map((b) => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => setDiffBase(b.id)}
+                      className={cn(
+                        "px-2 py-1 rounded-lg text-[11px] whitespace-nowrap border cursor-pointer transition-colors",
+                        diffBase === b.id
+                          ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)] font-medium"
+                          : "bg-transparent border-[var(--soxu-border-hairline)] text-[var(--soxu-text-tertiary)]",
+                      )}
+                    >
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  {filteredDiffFiles.map((file) => {
+                    const selected = file.path === activeDiffFile.path;
+                    return (
+                      <button
+                        key={file.path}
+                        type="button"
+                        onClick={() => setSelectedDiffFilePath(file.path)}
+                        className={cn(
+                          "w-full rounded-lg px-2.5 py-1.5 text-left text-[11.5px] flex items-center justify-between gap-2 border cursor-pointer transition-colors",
+                          selected
+                            ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)]"
+                            : "bg-[var(--soxu-surface-card-muted)] border-[var(--soxu-border-hairline)] text-[var(--soxu-text-secondary)]",
+                        )}
+                      >
+                        <span className="inline-flex items-center gap-1.5 min-w-0">
+                          <Badge variant={file.status === "A" ? "running" : "neutral"}>{file.status}</Badge>
+                          <span className="soxu-mono truncate">{file.path}</span>
+                        </span>
+                        <span className="soxu-mono soxu-tabular text-[10.5px] shrink-0">
+                          <span className="text-[var(--soxu-semantic-success)]">+{file.added}</span>{" "}
+                          <span className="text-[var(--soxu-semantic-danger)]">-{file.deleted}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] truncate">
+                {activeDiffFile.path} · {t("inspector.baseBranchLabel", { branch: diffBase === "main" ? "origin/main" : diffBase === "checkpoint" ? "#04" : prefs.defaultBranch })}
+              </div>
+              <CodeDiffView
+                filePath={activeDiffFile.path}
+                rows={activeDiffFile.rows}
+                layout="unified"
+                showLineNumbers={prefs.showLineNumbers}
+                wrap={prefs.codeWordWrap}
+                onSubmitLineComment={handleSubmitDiffLineComment}
+              />
+            </>
+          )}
+
+          {rightInspectorTab === "artifact" && (
+            <div className="rounded-2xl p-4 bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-subtle)] flex flex-col gap-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold leading-snug">{activeArtifact.title}</div>
+                  <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] truncate mt-0.5">
+                    {activeArtifact.path}
                   </div>
-                  <span>{nav.label}</span>
-                </button>
-              );
-            })}
-          </nav>
+                </div>
+                <Badge variant={activeArtifact.status === "approved" ? "running" : "warning"}>
+                  {activeArtifact.status === "approved" ? t("artifact.approved") : "待审阅"}
+                </Badge>
+              </div>
+              <p className="text-xs text-[var(--soxu-text-secondary)] m-0 leading-relaxed">{activeArtifact.summary}</p>
+              <CodeSnippetView
+                lines={activeArtifact.content}
+                startLine={1}
+                showLineNumbers={prefs.showLineNumbers}
+                wrap
+              />
+              {activeArtifact.status !== "approved" && (
+                <Button
+                  variant="default"
+                  size="lg"
+                  onClick={() => {
+                    setActiveArtifact((prev) => ({ ...prev, status: "approved" }));
+                    setLiveSteps((prev) =>
+                      prev.map((st, idx) => (idx <= 2 ? { ...st, status: "done" } : idx === 3 ? { ...st, status: "in_progress" } : st)),
+                    );
+                    flashToast("已批准实施产物文档并推进后续步骤");
+                  }}
+                >
+                  <Check className="h-4 w-4" strokeWidth={2} />
+                  <span>{t("artifact.approve")}</span>
+                </Button>
+              )}
+            </div>
+          )}
+
+          {rightInspectorTab === "scripts" && ScriptsAndSchedulesView}
+        </div>
+      </div>
+    );
+  }
+
+  const activeScopeTitle =
+    targetKind === "quick"
+      ? activeQuickChat.title
+      : `${activeWorkspace.project} / ${activeWorkspace.branch}`;
+
+  const compactLeftHeader = vp.isUltraNarrow || isFoldDualH;
+
+  const HeaderBar = (
+    <header
+      className={cn(
+        "sticky top-0 shrink-0 soxu-safe-top soxu-safe-x backdrop-blur-md border-b border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-header-glass)] overflow-hidden",
+        vp.isShortViewport ? "py-1.5" : "pb-2",
+      )}
+      style={{ zIndex: "var(--soxu-z-header)" }}
+    >
+      <div
+        className={cn(
+          "max-w-[1280px] mx-auto grid items-center gap-1",
+          compactLeftHeader
+            ? "grid-cols-[auto_minmax(0,1fr)_auto]"
+            : "sm:gap-2.5 grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-[minmax(max-content,1fr)_minmax(140px,320px)_minmax(max-content,1fr)]",
+        )}
+      >
+        <div className="flex items-center gap-1 sm:gap-2 min-w-0 justify-self-start">
+          {sizeClass !== "wide" && !showCompactRail && (
+            <Button
+              ref={leftTriggerRef}
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setLeftDrawerOpen((v) => !v)}
+              aria-label={t("header.openLeftDrawer")}
+              className="shrink-0"
+            >
+              <PanelLeft className="h-4 w-4" strokeWidth={1.75} />
+            </Button>
+          )}
+
+          <span className="px-1 text-xs sm:text-[13px] font-semibold tracking-tight text-[var(--soxu-text-primary)] shrink-0">
+            {t("brand.name")}
+          </span>
+
+          <button
+            type="button"
+            onClick={simulateSeqCatchup}
+            className={cn(
+              "flex-col text-left min-w-0 bg-transparent border-0 p-0 cursor-pointer",
+              isFoldDualH ? "hidden" : "hidden md:flex",
+            )}
+            title="点击模拟断线重连后游标增量追平"
+          >
+            <div className="text-[11px] soxu-mono soxu-tabular text-[var(--soxu-text-tertiary)] truncate">
+              {daemonOnline ? t("mobile.daemonOnline") : t("mobile.remoteClient")} · {t("mobile.cursorPrefix", { seq: seqCursor })}
+            </div>
+            <div className="text-[11.5px] soxu-mono text-[var(--soxu-text-secondary)] truncate max-w-[200px]">
+              {activeScopeTitle}
+            </div>
+          </button>
+        </div>
+
+        {/* 始终水平居中且防重叠的快速检索触发条 */}
+        <button
+          type="button"
+          onClick={() => setSheet("search")}
+          className={cn(
+            "h-8 w-full max-w-[320px] min-w-0 justify-self-center rounded-full border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] px-2.5 flex items-center gap-1.5 text-xs text-[var(--soxu-text-tertiary)] hover:border-[var(--soxu-border-strong)] hover:text-[var(--soxu-text-secondary)] transition-colors cursor-pointer",
+            compactLeftHeader && "px-2",
+          )}
+          aria-label={t("header.searchCompact")}
+        >
+          <Search className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+          <span className="truncate">{compactLeftHeader ? activeScopeTitle : t("header.searchCompact")}</span>
+        </button>
+
+        <div className="flex items-center gap-0.5 sm:gap-1 shrink-0 justify-self-end">
+          {!compactLeftHeader && (
+            <Button
+              variant={activeTab === "inbox" || activeTab === "approvals" ? "secondary" : "ghost"}
+              size="icon-sm"
+              onClick={() => setActiveTab((prev) => (prev === "inbox" ? "session" : "inbox"))}
+              aria-label={t("mobile.navInbox")}
+              title={t("mobile.navInbox")}
+              className="rounded-full relative"
+            >
+              <Inbox className="h-4 w-4" strokeWidth={1.75} />
+              {inboxAttentionCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full text-[9px] leading-[14px] text-center bg-[var(--soxu-semantic-warning)] text-black font-bold">
+                  {inboxAttentionCount}
+                </span>
+              )}
+            </Button>
+          )}
+
+          {!compactLeftHeader && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setSheet("pair")}
+              aria-label={t("header.pair")}
+              title={t("header.pair")}
+              className="rounded-full"
+            >
+              <QrCode className="h-4 w-4" strokeWidth={1.75} />
+            </Button>
+          )}
+
+          <HoverExpandDock
+            triggerIcon={<SlidersHorizontal className="h-4 w-4" strokeWidth={1.75} />}
+            triggerLabel={t("header.moreTools")}
+            expandDirection="left"
+          >
+            {compactLeftHeader && (
+              <Button variant="ghost" size="icon-sm" onClick={() => setActiveTab("inbox")} title={t("mobile.navInbox")}>
+                <Inbox className="h-3.5 w-3.5" strokeWidth={1.75} />
+              </Button>
+            )}
+            {compactLeftHeader && (
+              <Button variant="ghost" size="icon-sm" onClick={() => setSheet("pair")} title={t("header.pair")}>
+                <QrCode className="h-3.5 w-3.5" strokeWidth={1.75} />
+              </Button>
+            )}
+            <Button variant="ghost" size="icon-sm" onClick={() => setSheet("history")} title={t("sidebar.importHistory")}>
+              <History className="h-3.5 w-3.5" strokeWidth={1.75} />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => setSheet("new-worktree")} title={t("sidebar.worktree")}>
+              <GitBranch className="h-3.5 w-3.5" strokeWidth={1.75} />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => setSheet("new-quick-chat")} title={t("sidebar.newQuickChat")}>
+              <MessageSquare className="h-3.5 w-3.5" strokeWidth={1.75} />
+            </Button>
+          </HoverExpandDock>
+
+          <ThemeToggle resolvedTheme={resolvedTheme} onToggle={handleToggleTheme} />
+
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => {
+              setSettingsSection("appearance");
+              setSettingsOpen(true);
+            }}
+            aria-label={t("header.settings")}
+            title={`${t("header.settings")} (${formatShortcut("Mod+,", vp.isMac)})`}
+            className="rounded-full"
+          >
+            <Settings className="h-4 w-4" strokeWidth={1.75} />
+          </Button>
+
+          {!isFoldDualH && (
+            <Button
+              variant={rightDrawerOpen ? "secondary" : "ghost"}
+              size="icon-sm"
+              onClick={() => setRightDrawerOpen((v) => !v)}
+              aria-label={t("header.openRightDrawer")}
+              title={t("header.openRightDrawer")}
+              className="rounded-full"
+            >
+              <PanelRight className="h-4 w-4" strokeWidth={1.75} />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {toastMsg && (
+        <div className="max-w-[760px] mx-auto mt-2 px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 bg-[var(--soxu-semantic-accent-soft)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-semantic-accent)]">
+          <Bolt className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+          <span className="truncate">{toastMsg}</span>
+        </div>
+      )}
+    </header>
+  );
+
+  const MainBodyView = (
+    <div
+      ref={transcriptScrollRef}
+      onScroll={handleScrollTranscript}
+      className="flex-1 min-h-0 overflow-y-auto soxu-scroll relative"
+    >
+      <div
+        ref={transcriptContentRef}
+        className="w-full mx-auto px-3.5 sm:px-4 py-3.5 sm:py-4 flex flex-col gap-3.5"
+        style={{ maxWidth: "var(--soxu-layout-transcript-max-width)" }}
+      >
+        {pendingApprovals.length > 0 && activeTab !== "inbox" && activeTab !== "approvals" && (
+          <button
+            type="button"
+            onClick={() => {
+              setInboxSubMode("triage");
+              setActiveTab("inbox");
+            }}
+            className="w-full rounded-xl px-3.5 py-2.5 text-left flex items-center justify-between gap-2 bg-[var(--soxu-semantic-warning-soft)] border border-[var(--soxu-semantic-warning-border)] text-[var(--soxu-semantic-warning)] cursor-pointer"
+          >
+            <span className="text-xs font-medium flex items-center gap-2 min-w-0">
+              <Shield className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+              <span className="truncate">有 {pendingApprovals.length} 项操作待远程批准</span>
+            </span>
+            <span className="text-xs font-semibold shrink-0">去处理</span>
+          </button>
         )}
 
-        {/* 窄屏左侧工作区与快速对话抽屉 */}
-        <Sheet open={sizeClass !== "wide" && leftDrawerOpen} onOpenChange={setLeftDrawerOpen}>
+        {sizeClass !== "wide" && activeTab === "workspaces" && WorkspaceRail}
+
+        {(activeTab === "inbox" || activeTab === "approvals") && (
+          <section className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="inline-flex rounded-xl p-0.5 bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInboxSubMode("triage");
+                    setActiveTab("inbox");
+                  }}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs border-0 cursor-pointer transition-colors",
+                    inboxSubMode === "triage" && activeTab === "inbox"
+                      ? "bg-[var(--soxu-surface-raised)] text-[var(--soxu-text-primary)] font-semibold"
+                      : "bg-transparent text-[var(--soxu-text-tertiary)]",
+                  )}
+                >
+                  {t("inbox.title")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInboxSubMode("approvals");
+                    setActiveTab("approvals");
+                  }}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs border-0 cursor-pointer transition-colors",
+                    inboxSubMode === "approvals" || activeTab === "approvals"
+                      ? "bg-[var(--soxu-surface-raised)] text-[var(--soxu-text-primary)] font-semibold"
+                      : "bg-transparent text-[var(--soxu-text-tertiary)]",
+                  )}
+                >
+                  审批流明细 ({pendingApprovals.length})
+                </button>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setActiveTab("session")}>
+                返回当前会话
+              </Button>
+            </div>
+
+            {inboxSubMode === "triage" && activeTab === "inbox" ? (
+              <InboxTriageView
+                workspaces={activeWorkspaces}
+                approvals={approvals}
+                askQuestion={askQuestion}
+                onResolveApproval={handleResolveApproval}
+                onAnswerAsk={handleAnswerAsk}
+                onOpenWorkspace={(wsId) => {
+                  setTargetKind("workspace");
+                  setSelectedWorkspaceId(wsId);
+                  setActiveTab("session");
+                }}
+                onMarkAllAttentionRead={handleMarkAllAttentionRead}
+              />
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant={approvalSubTab === "pending" ? "default" : "secondary"}
+                    size="sm"
+                    onClick={() => setApprovalSubTab("pending")}
+                  >
+                    待人工确认 ({pendingApprovals.length})
+                  </Button>
+                  <Button
+                    variant={approvalSubTab === "history" ? "default" : "secondary"}
+                    size="sm"
+                    onClick={() => setApprovalSubTab("history")}
+                  >
+                    已处理记录 ({resolvedApprovals.length})
+                  </Button>
+                </div>
+                {(approvalSubTab === "pending" ? pendingApprovals : resolvedApprovals).length === 0 ? (
+                  <div className="rounded-2xl p-6 text-center text-xs text-[var(--soxu-text-tertiary)] bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-subtle)]">
+                    当前分类暂无审批记录
+                  </div>
+                ) : (
+                  (approvalSubTab === "pending" ? pendingApprovals : resolvedApprovals).map((a) => renderApprovalCard(a))
+                )}
+              </>
+            )}
+          </section>
+        )}
+
+        {activeTab === "scripts" && ScriptsAndSchedulesView}
+
+        {(activeTab === "session" || (sizeClass === "wide" && activeTab === "workspaces")) && (
+          <>
+            {targetKind === "quick" && activeQuickChat ? (
+              <div className="flex flex-col gap-4">
+                <div className="rounded-xl px-3.5 py-2.5 text-xs bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-secondary)] flex items-center justify-between gap-2">
+                  <span className="truncate">无项目自由对话 · {activeQuickChat.title}</span>
+                  <Badge variant="neutral">轻量模式</Badge>
+                </div>
+                {activeQuickChat.messages.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-[var(--soxu-text-tertiary)]">
+                    在下方输入内容开始无项目自由对话
+                  </div>
+                ) : (
+                  activeQuickChat.messages.map((m) =>
+                    m.role === "user" ? (
+                      <div key={m.id} className="flex flex-col items-end gap-1.5">
+                        {m.chips && m.chips.length > 0 && <ComposerChipBar chips={m.chips} className="justify-end" />}
+                        <div className="max-w-[85%] rounded-[18px] px-4 py-2.5 text-sm leading-relaxed bg-[var(--soxu-surface-raised)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)]">
+                          {m.text}
+                        </div>
+                      </div>
+                    ) : (
+                      <article key={m.id} className="group flex flex-col gap-2">
+                        <div className="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--soxu-text-secondary)]">
+                          <span className="inline-flex items-center gap-1.5 min-w-0">
+                            <AgentIcon agent={m.author} className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{m.author}</span>
+                            {m.badge && <Badge variant="handoff">{m.badge}</Badge>}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleBranchFromTurn(m)}
+                            className="soxu-reveal-action soxu-hit-44 inline-flex items-center gap-1 text-[11px] font-normal text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] bg-transparent border-0 cursor-pointer shrink-0"
+                          >
+                            <GitBranch className="h-3 w-3" strokeWidth={1.75} />
+                            <span>{t("turn.branchSession")}</span>
+                          </button>
+                        </div>
+                        <p className="text-sm m-0 leading-relaxed text-[var(--soxu-text-primary)]">{m.text}</p>
+                      </article>
+                    ),
+                  )
+                )}
+              </div>
+            ) : (
+              <>
+                {/* 会话信息微条 */}
+                <div className="flex items-center justify-between gap-2 text-xs text-[var(--soxu-text-tertiary)] pb-1 border-b border-[var(--soxu-border-hairline)]">
+                  <span className="truncate">
+                    {activeWorkspace.project} · {activeWorkspace.summary}
+                  </span>
+                  <span className="soxu-mono soxu-tabular shrink-0">{activeWorkspace.diffStat}</span>
+                </div>
+
+                {/* 实时步骤焦点（吸收 AGY Live Steps） */}
+                <Collapsible
+                  open={stepsOpen}
+                  onOpenChange={setStepsOpen}
+                  className="rounded-xl bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-hairline)]"
+                >
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="w-full px-3 py-2 flex items-center justify-between gap-2 text-xs bg-transparent border-0 cursor-pointer"
+                    >
+                      <span className="inline-flex items-center gap-2 min-w-0 text-[var(--soxu-text-secondary)] font-medium">
+                        <span className="h-2 w-2 rounded-full bg-[var(--soxu-semantic-running)] soxu-live-dot shrink-0" />
+                        <span className="truncate">
+                          {t("focus.title")} · {liveSteps.filter((s) => s.status === "done").length}/{liveSteps.length}
+                        </span>
+                      </span>
+                      <ChevronRight
+                        className={cn("h-3.5 w-3.5 text-[var(--soxu-text-tertiary)] transition-transform", stepsOpen && "rotate-90")}
+                        strokeWidth={1.75}
+                      />
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="soxu-collapsible overflow-hidden px-3 pb-2.5 flex flex-col gap-1.5">
+                    {liveSteps.map((st) => (
+                      <div key={st.id} className="flex items-center gap-2 text-xs">
+                        {st.status === "done" ? (
+                          <Check className="h-3.5 w-3.5 text-[var(--soxu-semantic-success)] shrink-0" strokeWidth={2} />
+                        ) : st.status === "in_progress" ? (
+                          <span className="h-2 w-2 mx-0.5 rounded-full bg-[var(--soxu-semantic-running)] soxu-live-dot shrink-0" />
+                        ) : (
+                          <span className="h-2 w-2 mx-0.5 rounded-full bg-[var(--soxu-border-strong)] shrink-0" />
+                        )}
+                        <span
+                          className={cn(
+                            "truncate",
+                            st.status === "done"
+                              ? "text-[var(--soxu-text-tertiary)] line-through"
+                              : st.status === "in_progress"
+                                ? "text-[var(--soxu-text-primary)] font-medium"
+                                : "text-[var(--soxu-text-tertiary)]",
+                          )}
+                        >
+                          {st.title}
+                        </span>
+                      </div>
+                    ))}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {/* 对话回合流 */}
+                <div className="flex flex-col gap-4">
+                  {turns.map((turn) => {
+                    if (turn.role === "user") {
+                      return (
+                        <div key={turn.id} className="flex flex-col items-end gap-1.5">
+                          {turn.badge && <Badge variant="handoff">{turn.badge}</Badge>}
+                          {turn.chips && turn.chips.length > 0 && (
+                            <ComposerChipBar chips={turn.chips} className="justify-end" />
+                          )}
+                          <div className="max-w-[85%] rounded-[18px] px-4 py-2.5 text-sm leading-relaxed bg-[var(--soxu-surface-raised)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)]">
+                            {turn.text}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const reasonOpen = Boolean(openReasons[turn.id]);
+                    return (
+                      <article key={turn.id} className="group flex flex-col gap-2.5">
+                        <div className="flex items-center justify-between gap-2 text-xs text-[var(--soxu-text-tertiary)]">
+                          <span className="inline-flex items-center gap-2 min-w-0">
+                            <AgentIcon agent={turn.author} className="h-4 w-4 shrink-0" />
+                            <span className="font-semibold text-[var(--soxu-text-secondary)] truncate">{turn.author}</span>
+                            {turn.badge && <Badge variant="handoff">{turn.badge}</Badge>}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleBranchFromTurn(turn)}
+                            className="soxu-reveal-action soxu-hit-44 inline-flex items-center gap-1 text-[11px] text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] bg-transparent border-0 cursor-pointer shrink-0"
+                          >
+                            <GitBranch className="h-3 w-3" strokeWidth={1.75} />
+                            <span>{t("turn.branchSession")}</span>
+                          </button>
+                        </div>
+
+                        {turn.reasoningSteps && turn.reasoningSteps.length > 0 && (
+                          <Collapsible
+                            open={reasonOpen}
+                            onOpenChange={(o) => setOpenReasons((p) => ({ ...p, [turn.id]: o }))}
+                            className="rounded-xl bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-hairline)]"
+                          >
+                            <CollapsibleTrigger asChild>
+                              <button
+                                type="button"
+                                className="w-full px-3 py-2 flex items-center justify-between gap-2 text-xs text-[var(--soxu-text-secondary)] bg-transparent border-0 cursor-pointer"
+                              >
+                                <span className="flex items-center gap-1.5 truncate">
+                                  <Sparkles className="h-3.5 w-3.5 text-[var(--soxu-semantic-handoff)] shrink-0" strokeWidth={1.75} />
+                                  <span className="truncate">思考过程 · {turn.reasoningSec ?? "已完成"}</span>
+                                </span>
+                                <ChevronRight
+                                  className={cn("h-3.5 w-3.5 shrink-0 transition-transform duration-150", reasonOpen && "rotate-90")}
+                                  strokeWidth={1.75}
+                                />
+                              </button>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="soxu-collapsible overflow-hidden">
+                              <div className="px-3 pb-2.5 text-xs text-[var(--soxu-text-tertiary)] leading-relaxed flex flex-col gap-1">
+                                {turn.reasoningSteps.map((step) => (
+                                  <div key={step}>{step}</div>
+                                ))}
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+                        )}
+
+                        <p className="text-sm m-0 leading-relaxed text-[var(--soxu-text-primary)]">{turn.text}</p>
+
+                        {turn.tools?.map((tl) => (
+                          <ToolCallCard
+                            key={tl.id}
+                            tool={tl}
+                            open={Boolean(openTools[tl.id])}
+                            onOpenChange={(o) => setOpenTools((p) => ({ ...p, [tl.id]: o }))}
+                            showLineNumbers={prefs.showLineNumbers}
+                            wrap={prefs.codeWordWrap}
+                            onSubmitLineComment={handleSubmitDiffLineComment}
+                          />
+                        ))}
+
+                        {turn.checkpoint && (
+                          <div className="rounded-xl px-3 py-2 flex items-center justify-between gap-2 text-xs bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)]">
+                            <span className="flex items-center gap-2 min-w-0 text-[var(--soxu-text-secondary)]">
+                              <RotateCcw className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                              <span className="truncate">
+                                检查点 {turn.checkpoint.id} ({turn.checkpoint.sha}) · {turn.checkpoint.stat}
+                              </span>
+                            </span>
+                            <Button variant="outline" size="sm" onClick={() => setSheet("rewind")}>
+                              安全回退
+                            </Button>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+
+                  {/* 结构化 Artifact 产出预览卡 */}
+                  <div className="rounded-2xl p-3.5 flex flex-col gap-2.5 bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-subtle)]">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-4 w-4 text-[var(--soxu-semantic-accent)] shrink-0" strokeWidth={1.75} />
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold truncate">{activeArtifact.title}</div>
+                          <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] truncate">{activeArtifact.path}</div>
+                        </div>
+                      </div>
+                      <Badge variant={activeArtifact.status === "approved" ? "running" : "warning"}>
+                        {activeArtifact.status === "approved" ? t("artifact.approved") : "待审阅"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-[var(--soxu-text-secondary)] m-0 leading-relaxed">{activeArtifact.summary}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setRightInspectorTab("artifact");
+                          if (!isFoldDualH) setRightDrawerOpen(true);
+                        }}
+                      >
+                        <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />
+                        <span>{t("artifact.preview")}</span>
+                      </Button>
+                      {activeArtifact.status !== "approved" && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => {
+                            setActiveArtifact((prev) => ({ ...prev, status: "approved" }));
+                            setLiveSteps((prev) =>
+                              prev.map((st, idx) => (idx <= 2 ? { ...st, status: "done" } : idx === 3 ? { ...st, status: "in_progress" } : st)),
+                            );
+                            flashToast("已批准实施产物并推进下一步骤");
+                          }}
+                        >
+                          <Check className="h-3.5 w-3.5" strokeWidth={2} />
+                          <span>{t("artifact.approve")}</span>
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 结构化确认提问卡 */}
+                  <div className="rounded-2xl p-4 flex flex-col gap-3 bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-strong)]">
+                    <div className="flex items-center justify-between gap-2">
+                      <Badge variant="accent">结构化确认提问</Badge>
+                      <span className="text-[11px] text-[var(--soxu-text-tertiary)]">
+                        {askQuestion.submitted ? "已回传决策" : "等待选择确认"}
+                      </span>
+                    </div>
+                    <div className="text-sm font-medium leading-relaxed">{askQuestion.prompt}</div>
+                    <div className="flex flex-col gap-2">
+                      {askQuestion.options.map((opt) => {
+                        const picked = askQuestion.selectedId === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => handleAnswerAsk(opt.id)}
+                            className={cn(
+                              "w-full rounded-xl px-3.5 py-2.5 text-left text-xs flex items-center justify-between gap-2 border cursor-pointer transition-colors",
+                              picked
+                                ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)] font-semibold"
+                                : "bg-[var(--soxu-surface-card-muted)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-secondary)]",
+                            )}
+                          >
+                            <span className="flex items-center gap-2 min-w-0">
+                              <span className="truncate">{opt.label}</span>
+                              {opt.recommended && <Badge variant="accent">推荐</Badge>}
+                            </span>
+                            {picked && <Check className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)] shrink-0" strokeWidth={2} />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {pendingApprovals.map((item) => renderApprovalCard(item))}
+                </div>
+
+                <QuoteSelectionPopover
+                  containerRef={transcriptContentRef}
+                  isCoarsePointer={vp.isCoarsePointer}
+                  onQuote={(snippet) => {
+                    addComposerChip({
+                      kind: "quote",
+                      label: snippet.slice(0, 42) + (snippet.length > 42 ? "..." : ""),
+                      detail: snippet,
+                    });
+                    setComposerCollapsed(false);
+                    window.setTimeout(() => composerInputRef.current?.focus(), 40);
+                  }}
+                  onCopyText={() => flashToast("已复制选中内容")}
+                />
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  const quickChipsList = isRunning ? MOBILE_QUICK_CHIPS.running : MOBILE_QUICK_CHIPS.idle;
+
+  const ComposerSection = activeTab === "session" && (
+    <div className="shrink-0 relative px-3 sm:px-4 pt-1.5 soxu-kb-pad bg-gradient-to-t from-[var(--soxu-surface-canvas)] via-[var(--soxu-surface-canvas)] to-transparent">
+      {showScrollBottom && (
+        <div className="w-full mx-auto mb-1.5 flex justify-end" style={{ maxWidth: "var(--soxu-layout-transcript-max-width)" }}>
+          <button
+            type="button"
+            onClick={() => scrollToBottom(true)}
+            className="h-8 px-3 rounded-full bg-[var(--soxu-surface-floating)] border border-[var(--soxu-border-strong)] text-xs text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)] inline-flex items-center gap-1.5 shadow-md cursor-pointer"
+          >
+            <ArrowDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+            <span>{t("mobile.scrollToBottom")}</span>
+          </button>
+        </div>
+      )}
+
+      {composerCollapsed ? (
+        <div
+          style={{ maxWidth: "var(--soxu-layout-transcript-max-width)" }}
+          className="w-full mx-auto flex justify-center"
+        >
+          <div
+            role="button"
+            tabIndex={0}
+            onPointerDown={(e) => {
+              composerSwipeStartYRef.current = e.clientY;
+            }}
+            onPointerUp={(e) => {
+              const startY = composerSwipeStartYRef.current;
+              composerSwipeStartYRef.current = null;
+              if (startY !== null && startY - e.clientY > 24) {
+                setComposerCollapsed(false);
+                window.setTimeout(() => composerInputRef.current?.focus(), 40);
+              }
+            }}
+            onClick={() => {
+              setComposerCollapsed(false);
+              window.setTimeout(() => composerInputRef.current?.focus(), 40);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setComposerCollapsed(false);
+              }
+            }}
+            className="h-10 w-full rounded-full px-3.5 border border-[var(--soxu-border-strong)] bg-[var(--soxu-surface-composer)] flex items-center justify-between gap-2 cursor-pointer"
+          >
+            <span className="inline-flex items-center gap-2 min-w-0 text-xs text-[var(--soxu-text-secondary)]">
+              <AgentIcon agent={cli} className="h-3.5 w-3.5 shrink-0" />
+              <span className={cn("h-2 w-2 rounded-full shrink-0", isRunning ? "bg-[var(--soxu-semantic-running)] soxu-live-dot" : "bg-[var(--soxu-text-tertiary)]")} />
+              <span className="truncate">{t("mobile.dockExpand")}</span>
+              {queuedPrompts.length > 0 && (
+                <Badge variant="warning" className="soxu-tabular">
+                  {queuedPrompts.length}
+                </Badge>
+              )}
+            </span>
+            <ChevronUp className="h-4 w-4 text-[var(--soxu-text-tertiary)] shrink-0" strokeWidth={1.75} />
+          </div>
+        </div>
+      ) : (
+        <div
+          className={cn(
+            "w-full mx-auto border border-[var(--soxu-border-strong)] bg-[var(--soxu-surface-composer)] flex flex-col",
+            vp.isShortViewport ? "rounded-[18px] p-2 gap-1" : "rounded-[22px] p-2.5 gap-2",
+          )}
+          style={{ maxWidth: "var(--soxu-layout-transcript-max-width)" }}
+        >
+          {/* 顶部轻质滑动折叠手把（点击或下拉收起为 40px DockPill） */}
+          <div
+            className={cn("flex items-center justify-center cursor-pointer select-none", vp.isShortViewport ? "py-0" : "py-0.5")}
+            onPointerDown={(e) => {
+              composerSwipeStartYRef.current = e.clientY;
+            }}
+            onPointerUp={(e) => {
+              const startY = composerSwipeStartYRef.current;
+              composerSwipeStartYRef.current = null;
+              if (startY !== null && e.clientY - startY > 28) {
+                setComposerCollapsed(true);
+              }
+            }}
+            onClick={() => setComposerCollapsed(true)}
+            title="点击或下滑收起输入舱为 40px 悬浮胶囊"
+            aria-label="收起输入舱"
+          >
+            <span className="h-1 w-9 rounded-full bg-[var(--soxu-border-strong)]" />
+          </div>
+
+          {lostControlNote && (
+            <div className="px-2.5 py-1 rounded-lg text-[11px] bg-[var(--soxu-semantic-warning-soft)] text-[var(--soxu-semantic-warning)]">
+              {lostControlNote}
+            </div>
+          )}
+
+          {targetKind === "workspace" && (
+            <MultiQueueBar
+              items={queuedPrompts}
+              paused={queuePaused}
+              supportsLiveSteer={activeProfile.supportsLiveSteer}
+              isMac={vp.isMac}
+              onTogglePause={() => setQueuePaused((v) => !v)}
+              onPromoteSteer={handlePromoteSteerItem}
+              onEditItem={handleEditQueueItem}
+              onMoveItem={handleMoveQueueItem}
+              onRemoveItem={handleRemoveQueueItem}
+            />
+          )}
+
+          {sizeClass !== "wide" && !vp.isShortViewport && targetKind === "workspace" && (
+            <div className="flex items-center gap-1.5 overflow-x-auto soxu-no-scrollbar">
+              {quickChipsList.map((chip) => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={() => handleSubmitPrompt(chip.mode, chip.label)}
+                  className="px-2.5 py-1 rounded-full text-[11px] whitespace-nowrap border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)] hover:border-[var(--soxu-border-strong)] cursor-pointer transition-colors"
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <ComposerChipBar chips={composerChips} onRemove={removeComposerChip} />
+
+          <textarea
+            ref={composerInputRef}
+            rows={vp.isShortViewport ? 1 : 2}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
+              if (e.key === "Escape" && queuedPrompts.length > 0) {
+                e.preventDefault();
+                setQueuedPrompts((prev) => prev.slice(0, -1));
+              } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+                e.preventDefault();
+                setBehavior("queue");
+                handleSubmitPrompt("queue");
+              } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                const targetMode: TurnBehavior = activeProfile.supportsLiveSteer ? "steer" : "queue";
+                setBehavior(targetMode);
+                handleSubmitPrompt(targetMode);
+              } else if (e.key === "Enter" && e.altKey) {
+                e.preventDefault();
+                setBehavior("interrupt");
+                handleSubmitPrompt("interrupt");
+              } else if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmitPrompt();
+              }
+            }}
+            placeholder={
+              targetKind === "quick"
+                ? "输入问题随时开展无项目对话..."
+                : isRunning
+                  ? `运行中（${behavior === "steer" ? "热纠偏" : behavior === "queue" ? "排队" : "打断重发"}）...`
+                  : "输入指令、@代理 移交上下文，或粘贴任务要求..."
+            }
+            className="w-full resize-none bg-transparent border-0 outline-none px-1.5 py-1 text-base text-[var(--soxu-text-primary)] placeholder:text-[var(--soxu-text-ghost)]"
+          />
+
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
+            <div className="flex flex-wrap items-center gap-1 min-w-0">
+              <ComposerPlusMenu
+                hasWorkspace={targetKind === "workspace"}
+                onAddChip={addComposerChip}
+              />
+
+              <Button variant="ghost" size="sm" onClick={() => setSheet("cli")} className="h-7 px-2 text-[11.5px] soxu-mono">
+                <AgentIcon agent={cli} className="h-3.5 w-3.5 shrink-0" />
+                <span>{cli}</span>
+                <ChevronDown className="h-3 w-3" strokeWidth={1.75} />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSheet("model")}
+                className={cn(
+                  "h-7 px-2 text-[11.5px] soxu-mono truncate",
+                  vp.isUltraNarrow ? "max-w-[84px]" : "max-w-[116px]",
+                )}
+              >
+                {model.replace("group/", "").replace("auto/", "")}
+              </Button>
+
+              {activeProfile.supportsThinking && !vp.isUltraNarrow && (
+                <Button variant="ghost" size="sm" onClick={() => setSheet("thinking")} className="h-7 px-2 text-[11.5px]">
+                  <span>{THINKING_LABELS[thinking] ?? thinking}</span>
+                </Button>
+              )}
+
+              <ComposerPermissionButton
+                agentId={cli}
+                permLevel={permLevel}
+                isMac={vp.isMac}
+                onSelectPerm={(nextId, label) => {
+                  setPermLevel(nextId);
+                  flashToast(`操作权限已调整为「${label}」`);
+                }}
+                onOpenSheet={sizeClass !== "wide" ? () => setSheet("perm") : undefined}
+              />
+
+              <ComposerHandoffMenu
+                currentCli={cli}
+                currentModel={model}
+                currentThinking={thinking}
+                selectedHandoff={selectedHandoff}
+                onSelectHandoff={(chipDraft) => {
+                  addComposerChip(chipDraft);
+                  flashToast(`已配置移交至 ${chipDraft.label}`);
+                }}
+                onClearHandoff={() => {
+                  if (handoffChip) {
+                    removeComposerChip(handoffChip.id);
+                    flashToast("已取消移交配置");
+                  }
+                }}
+                onOpenSheet={sizeClass !== "wide" ? () => setSheet("handoff") : undefined}
+              />
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0 ml-auto">
+              <ContextUsageRing
+                model={model}
+                usedTokens={contextTokens}
+                compact={vp.isUltraNarrow}
+                onCompact={() => {
+                  setContextTokens((c) => Math.round(c * 0.42));
+                  flashToast("已完成上下文摘要压缩");
+                }}
+                onOpenSheet={sizeClass !== "wide" ? () => setSheet("context") : undefined}
+              />
+
+              <SessionStatsPopover
+                stats={sessionStats}
+                compact={vp.isUltraNarrow}
+                onOpenSheet={sizeClass !== "wide" ? () => setSheet("stats") : undefined}
+              />
+
+              {targetKind === "workspace" && (
+                <ComposerTurnBehaviorGroup
+                  mode={behavior}
+                  supportsLiveSteer={activeProfile.supportsLiveSteer}
+                  isMac={vp.isMac}
+                  onChange={setBehavior}
+                />
+              )}
+              {isRunning && !draft.trim() && composerChips.length === 0 ? (
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  onClick={() => {
+                    setWorkspaces((prev) =>
+                      prev.map((w) => (w.id === activeWorkspace.id ? { ...w, bucket: "done" } : w)),
+                    );
+                    flashToast("已发送停止信号");
+                  }}
+                  aria-label="停止生成"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" strokeWidth={1.75} />
+                </Button>
+              ) : (
+                <Button
+                  variant="default"
+                  size="icon"
+                  disabled={!draft.trim() && composerChips.length === 0}
+                  onClick={() => handleSubmitPrompt()}
+                  aria-label="发送指令"
+                >
+                  <ArrowUp className="h-4 w-4" strokeWidth={2} />
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const SinkCapsuleNav = (
+    <nav
+      aria-label="侧栏分区切换"
+      className="h-[52px] rounded-[26px] px-1.5 bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-subtle)] grid grid-cols-4 items-center gap-1"
+    >
+      {(
+        [
+          { id: "session", label: t("mobile.navSession"), icon: MessageSquare, action: () => { setActiveTab("session"); setLeftDrawerOpen(false); } },
+          { id: "inbox", label: t("mobile.navInbox"), icon: Inbox, count: inboxAttentionCount, action: () => { setInboxSubMode("triage"); setActiveTab("inbox"); setLeftDrawerOpen(false); } },
+          { id: "scripts", label: t("mobile.navScripts"), icon: Layers, action: () => { setActiveTab("scripts"); setLeftDrawerOpen(false); } },
+          { id: "settings", label: t("mobile.navSettings"), icon: Settings, action: () => { setLeftDrawerOpen(false); setSettingsSection("appearance"); setSettingsOpen(true); } },
+        ] as const
+      ).map((nav) => {
+        const Icon = nav.icon;
+        const active = activeTab === nav.id || (nav.id === "inbox" && activeTab === "approvals");
+        return (
+          <button
+            key={nav.id}
+            type="button"
+            onClick={nav.action}
+            className={cn(
+              "h-10 rounded-[20px] flex flex-col items-center justify-center gap-0.5 text-[10.5px] border-0 cursor-pointer transition-colors relative",
+              active
+                ? "bg-[var(--soxu-interaction-selected)] text-[var(--soxu-text-primary)] font-semibold"
+                : "bg-transparent text-[var(--soxu-text-tertiary)]",
+            )}
+          >
+            <div className="relative">
+              <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+              {"count" in nav && nav.count > 0 && (
+                <span className="absolute -top-1.5 -right-2.5 min-w-[14px] h-[14px] px-1 rounded-full text-[9px] leading-[14px] text-center bg-[var(--soxu-semantic-warning)] text-black font-bold">
+                  {nav.count}
+                </span>
+              )}
+            </div>
+            <span>{nav.label}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+
+  const CompactSideRail = (
+    <aside
+      aria-label="紧凑功能轨"
+      className="w-[52px] shrink-0 soxu-safe-left py-2 border-r border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-sidebar)] flex flex-col items-center justify-between gap-2"
+    >
+      <div className="flex flex-col items-center gap-1.5">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => setLeftDrawerOpen(true)}
+          aria-label={t("header.openLeftDrawer")}
+          title={t("sidebar.title")}
+        >
+          <PanelLeft className="h-4 w-4" strokeWidth={1.75} />
+        </Button>
+        <Button
+          variant={activeTab === "session" ? "secondary" : "ghost"}
+          size="icon-sm"
+          onClick={() => setActiveTab("session")}
+          aria-label={t("mobile.navSession")}
+          title={t("mobile.navSession")}
+        >
+          <MessageSquare className="h-4 w-4" strokeWidth={1.75} />
+        </Button>
+        <Button
+          variant={activeTab === "inbox" || activeTab === "approvals" ? "secondary" : "ghost"}
+          size="icon-sm"
+          onClick={() => setActiveTab("inbox")}
+          aria-label={t("mobile.navInbox")}
+          title={t("mobile.navInbox")}
+          className="relative"
+        >
+          <Inbox className="h-4 w-4" strokeWidth={1.75} />
+          {inboxAttentionCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full text-[9px] leading-[14px] text-center bg-[var(--soxu-semantic-warning)] text-black font-bold">
+              {inboxAttentionCount}
+            </span>
+          )}
+        </Button>
+        <Button
+          variant={activeTab === "scripts" ? "secondary" : "ghost"}
+          size="icon-sm"
+          onClick={() => setActiveTab("scripts")}
+          aria-label={t("mobile.navScripts")}
+          title={t("mobile.navScripts")}
+        >
+          <Layers className="h-4 w-4" strokeWidth={1.75} />
+        </Button>
+      </div>
+      <div className="flex flex-col items-center gap-1.5">
+        <Button
+          variant={rightDrawerOpen ? "secondary" : "ghost"}
+          size="icon-sm"
+          onClick={() => setRightDrawerOpen(true)}
+          aria-label={t("header.openRightDrawer")}
+          title={t("header.openRightDrawer")}
+        >
+          <PanelRight className="h-4 w-4" strokeWidth={1.75} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => {
+            setSettingsSection("appearance");
+            setSettingsOpen(true);
+          }}
+          aria-label={t("header.settings")}
+          title={t("header.settings")}
+        >
+          <Settings className="h-4 w-4" strokeWidth={1.75} />
+        </Button>
+      </div>
+    </aside>
+  );
+
+  return (
+    <TooltipProvider delayDuration={220}>
+      <div
+        className="h-dvh flex flex-col bg-[var(--soxu-surface-canvas)] text-[var(--soxu-text-primary)] overflow-hidden"
+        style={{ "--soxu-kb-inset": `${vp.keyboardInset}px` } as React.CSSProperties}
+      >
+        {isFoldDualH ? (
+          /* 折叠屏展开 / 左右双屏分栏（跨铰链零控件跨缝） */
+          <div className="flex-1 min-h-0 flex w-full overflow-hidden">
+            <section
+              className="flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--soxu-surface-canvas)]"
+              style={
+                vp.leftSegmentWidth > 0
+                  ? { width: `${vp.leftSegmentWidth}px`, flexShrink: 0 }
+                  : { flex: "1 1 56%" }
+              }
+            >
+              {HeaderBar}
+              {MainBodyView}
+              {ComposerSection}
+            </section>
+
+            {/* 铰链安全隔离带 */}
+            <div
+              aria-hidden="true"
+              style={{ width: `${Math.max(12, vp.hingeWidth)}px` }}
+              className="shrink-0 bg-[var(--soxu-surface-inset)] border-x border-[var(--soxu-border-hairline)] flex flex-col items-center justify-center"
+              title={t("mobile.foldDualHint")}
+            >
+              <span className="h-12 w-1 rounded-full bg-[var(--soxu-border-strong)]" />
+            </div>
+
+            <aside
+              aria-label={t("inspector.title")}
+              className="flex flex-col min-w-[280px] min-h-0 border-l border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-sidebar)]"
+              style={
+                vp.rightSegmentWidth > 0
+                  ? { width: `${vp.rightSegmentWidth}px`, flexShrink: 0 }
+                  : { width: "42%" }
+              }
+            >
+              {renderRightInspectorBody(false)}
+            </aside>
+          </div>
+        ) : isCompactSink ? (
+          /* 常规手机竖屏：下沉式侧栏 + 平时隐没、拉出可见的 52px 底层分区胶囊 */
+          <SinkLayout
+            open={leftDrawerOpen}
+            onOpenChange={setLeftDrawerOpen}
+            reduceMotion={prefs.reduceMotion}
+            triggerRef={leftTriggerRef}
+            sidebar={WorkspaceRail}
+            footer={SinkCapsuleNav}
+          >
+            {HeaderBar}
+            {MainBodyView}
+            {ComposerSection}
+          </SinkLayout>
+        ) : isFoldDualV ? (
+          /* 上下双段半折悬停态：上屏浏览，下屏控制 */
+          <div className="flex-1 min-h-0 flex overflow-hidden">
+            {CompactSideRail}
+            <div className="flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden">
+              <div
+                className="flex flex-col min-h-0 overflow-hidden"
+                style={{
+                  maxHeight: vp.topSegmentHeight > 0 ? `${vp.topSegmentHeight}px` : "52dvh",
+                  flex: "1 1 auto",
+                }}
+              >
+                {HeaderBar}
+                {MainBodyView}
+              </div>
+              <div
+                aria-hidden="true"
+                style={{ height: `${Math.max(12, vp.hingeHeight)}px` }}
+                className="shrink-0 bg-[var(--soxu-surface-inset)] border-y border-[var(--soxu-border-hairline)] flex items-center justify-center"
+              >
+                <span className="w-12 h-1 rounded-full bg-[var(--soxu-border-strong)]" />
+              </div>
+              <div
+                className="shrink-0 flex flex-col justify-end bg-[var(--soxu-surface-canvas)]"
+                style={{ minHeight: vp.bottomSegmentHeight > 0 ? `${vp.bottomSegmentHeight}px` : undefined }}
+              >
+                {ComposerSection}
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* 横屏紧凑左轨 / 平板 regular / 桌面 wide 通用结构 */
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            {HeaderBar}
+            <div className="flex-1 min-h-0 flex max-w-[1280px] w-full mx-auto overflow-hidden">
+              {showCompactRail && CompactSideRail}
+              {sizeClass === "wide" && (
+                <div className="h-full overflow-y-auto soxu-scroll shrink-0 border-r border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-sidebar)]">
+                  {WorkspaceRail}
+                </div>
+              )}
+              <main className="flex-1 min-w-0 min-h-0 flex flex-col justify-between overflow-hidden">
+                {MainBodyView}
+                {ComposerSection}
+              </main>
+            </div>
+          </div>
+        )}
+
+        {/* 非 SinkLayout 形态使用的左侧工作区抽屉 */}
+        <Sheet open={!isCompactSink && sizeClass !== "wide" && leftDrawerOpen} onOpenChange={setLeftDrawerOpen}>
           <SheetContent side="left" rawBody srTitle={t("sidebar.title")}>
             <div className="px-3.5 py-2.5 border-b border-[var(--soxu-border-hairline)] flex items-center justify-between gap-2 shrink-0 bg-[var(--soxu-surface-sidebar)]">
               <span className="text-xs font-semibold truncate">{t("sidebar.title")}</span>
@@ -1866,58 +2725,10 @@ function MobileAppInner({
           </SheetContent>
         </Sheet>
 
-        {/* 右侧变更对比与受管脚本抽屉 */}
-        <Sheet open={rightDrawerOpen} onOpenChange={setRightDrawerOpen}>
+        {/* 右侧变更对比、产物预览与受管脚本抽屉 */}
+        <Sheet open={!isFoldDualH && rightDrawerOpen} onOpenChange={setRightDrawerOpen}>
           <SheetContent side="right" rawBody srTitle={t("inspector.title")}>
-            <div className="px-3.5 py-2.5 border-b border-[var(--soxu-border-hairline)] flex items-center justify-between gap-2 shrink-0 bg-[var(--soxu-surface-sidebar)]">
-              <div className="inline-flex rounded-lg bg-[var(--soxu-surface-inset)] p-0.5 border border-[var(--soxu-border-hairline)]">
-                {(
-                  [
-                    { id: "diff", label: t("inspector.diff") },
-                    { id: "scripts", label: t("inspector.scripts") },
-                  ] as const
-                ).map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setRightInspectorTab(item.id)}
-                    className={cn(
-                      "px-2.5 py-1 rounded-md text-xs cursor-pointer transition-colors",
-                      rightInspectorTab === item.id
-                        ? "bg-[var(--soxu-surface-raised)] text-[var(--soxu-text-primary)] font-medium"
-                        : "text-[var(--soxu-text-tertiary)]",
-                    )}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setRightDrawerOpen(false)}
-                aria-label={t("header.toggleRight")}
-              >
-                <X className="h-4 w-4" strokeWidth={1.75} />
-              </Button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3.5 flex flex-col gap-3 soxu-scroll bg-[var(--soxu-surface-sidebar)]">
-              {rightInspectorTab === "diff" ? (
-                <>
-                  <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] truncate">
-                    crates/soxu-drivers/src/lib.rs · {t("inspector.baseBranchLabel", { branch: prefs.defaultBranch })}
-                  </div>
-                  <CodeDiffView
-                    rows={INSPECTOR_DIFF_ROWS}
-                    layout="unified"
-                    showLineNumbers={prefs.showLineNumbers}
-                    wrap={prefs.codeWordWrap}
-                  />
-                </>
-              ) : (
-                ScriptsAndSchedulesView
-              )}
-            </div>
+            {renderRightInspectorBody(true)}
           </SheetContent>
         </Sheet>
 
@@ -2095,26 +2906,44 @@ function MobileAppInner({
           )}
 
           {sheet === "handoff" && (
-            <SheetContent title="跨代理上下文移交" subtitle="自动附带最近 3 轮摘要与未提交变更文件列表">
-              {CLI_OPTIONS.filter((c) => c.available).map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => handleHandoff(c.id)}
-                  className="w-full rounded-xl p-3 text-left flex items-center justify-between gap-2 bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)] cursor-pointer"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <AgentIcon agent={c.id} className="h-5 w-5 shrink-0" />
-                    <div>
-                      <div className="text-sm font-semibold">@{c.id}</div>
-                      <div className="text-xs soxu-mono text-[var(--soxu-text-tertiary)]">
-                        {c.bin} · v{c.ver}
-                      </div>
-                    </div>
-                  </div>
-                  <Badge variant="handoff">移交</Badge>
-                </button>
-              ))}
+            <SheetContent title={t("composer.handoff")} subtitle={t("composer.handoffChoose")} tall>
+              <HandoffConfigPanel
+                currentCli={cli}
+                currentModel={model}
+                currentThinking={thinking}
+                selectedHandoff={selectedHandoff}
+                onSelectHandoff={(chipDraft) => {
+                  addComposerChip(chipDraft);
+                  flashToast(`已配置移交至 ${chipDraft.label}`);
+                }}
+                onClearHandoff={() => {
+                  if (handoffChip) {
+                    removeComposerChip(handoffChip.id);
+                    flashToast("已取消移交配置");
+                  }
+                }}
+                onDone={() => setSheet(null)}
+              />
+            </SheetContent>
+          )}
+
+          {sheet === "context" && (
+            <SheetContent title="上下文窗口分析" subtitle={`当前模型：${model}`}>
+              <ContextUsagePanel
+                model={model}
+                usedTokens={contextTokens}
+                onCompact={() => {
+                  setContextTokens((c) => Math.round(c * 0.42));
+                  flashToast("已完成上下文摘要压缩");
+                }}
+                onClose={() => setSheet(null)}
+              />
+            </SheetContent>
+          )}
+
+          {sheet === "stats" && (
+            <SheetContent title={t("stats.title")} subtitle="实时会话速率、缓存命中率与参考费用统计">
+              <SessionStatsPanel stats={sessionStats} />
             </SheetContent>
           )}
 

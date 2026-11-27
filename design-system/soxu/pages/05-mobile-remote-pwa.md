@@ -105,3 +105,21 @@
   1. **守护进程与 Magpie 协同健康卡**（实时连接状态、协议版本 `v1`、Magpie `MagpieManaged` / `StandaloneNative` 模式）；
   2. **Workspace Scripts 遥控开关**（查看 `daemon-dev`、`mobile-dev`、`check-all` 最近一次退出码、耗时与尾部 20 行日志，支持远程一键重跑 `check-all`）；
   3. **Schedules & Heartbeats 概览**（查看定时巡检任务下次触发时间、暂停/恢复开关与未读失败角标）。
+
+---
+
+## 四、Oryn 移动端架构与全形态自适应增补规范（SinkLayout / DockPill / 折叠屏 / 触控安全）
+
+1. **`SinkLayout` 下沉式侧栏与底层 `52px` 分区胶囊**：
+   - 在常规竖屏手机（`< 640px` 且视口高 `> 500px`）中取消传统固定占屏的常驻底部导航栏，改用 `SinkLayout`；
+   - 主对话卡片平时覆盖整个屏幕（最大纵深留给对话与输入）；左滑（`clientX <= 24px` 右拖 `> 60px`）或点击左上菜单键将主卡片向右推移 `min(84vw, 316px)` 并呈现圆角描边，底层露出完整工作区侧栏及底部 `52px` 四分区胶囊（`会话` / `收件箱(角标)` / `脚本` / `设置`）；开启时主卡片自动施加 `inert`，按 `Esc` 或点击卡片右缘条关闭并精准还原焦点。
+2. **上滑/点击收起输入舱为 `40px` `DockPill` 与回到底部浮动胶囊**：
+   - 输入舱顶部设细腻折叠握把：用户向下滑动（`dy > 28px`）或轻点可将整个输入舱收起为 `h = 40px` 紧凑胶囊 **`DockPill`**（展示活跃 Agent 图标、运行脉冲点与待发队列数量），上滑或轻点即可瞬间恢复并聚焦文本域；
+   - 滚动正文距底部超出 `80px` 时浮现 **`回到底部`** 悬浮按钮。
+3. **折叠屏双段窗口与短横屏布局（`useAdaptiveViewport` + VisualViewport）**：
+   - **左右双屏展开 (`dual-horizontal` / `viewport.segments` 或 `?fold=dual-h` 与外观设置预览)**：左屏承载对话流与输入舱，右屏常驻多文件 Diff / Artifact / Scripts 检查器，中间留出 `>= 12px` 铰链安全隔离槽，绝不把按钮或文字跨在折叠缝上；
+   - **手机横屏 (`height <= 500px`) 与半折悬停 (`dual-vertical`)**：右侧/底部切换为左缘固定 **`52px` 紧凑图标轨**（释放垂直阅读区），半折悬停态进一步按上下物理段分隔对话流与输入区；
+   - **软键盘与气泡对比度**：根视图实时绑定 `window.visualViewport` 键盘差值至 `--soxu-kb-inset`，配合 `.soxu-kb-pad` 自动顶起输入舱；用户发送气泡使用 `bg-[var(--soxu-surface-raised)] border-[var(--soxu-border-subtle)]`，确保纯黑/纯白模式下高对比清晰可读。
+4. **触控手势与超窄防溢出（`320px` + `pointer: coarse`）**：
+   - 底部 `Sheet` 顶部抓手区支持向下拖拽超出 `72px` 直接滑关；
+   - 当视口 `< 400px`（iPad 1/3 分屏 `320px`、外屏 `344px`）时自动将配对/收件箱收纳至 `HoverExpandDock` 并简并思维强度按钮入 Sheet，确保顶栏与输入舱工具条永远单屏居中不越界、无横向滚动条。
