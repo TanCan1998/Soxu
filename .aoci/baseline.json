@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-27T19:30:33Z",
+  "updated_at": "2026-11-27T20:38:55Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "df135017f0149e1cb1dcf5fe07ffe272293700f121bfa584159092849dc5f4ea",
-      "size": 107323,
-      "normalized_sha256": "df135017f0149e1cb1dcf5fe07ffe272293700f121bfa584159092849dc5f4ea"
+      "sha256": "6f1bb2307208c3098fc9cedc04307e92a3bfd8057783f286bebe7082a5a4762b",
+      "size": 108836,
+      "normalized_sha256": "6f1bb2307208c3098fc9cedc04307e92a3bfd8057783f286bebe7082a5a4762b"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -965,9 +965,9 @@
     },
     "crates/soxu-git/tests/worktree_recovery_preview.rs": {
       "role": "observe",
-      "sha256": "74527bdfa3977d226f508f1d096b58b2b70e6c1883ee032e5692b6fd882a1ec8",
-      "size": 25272,
-      "normalized_sha256": "74527bdfa3977d226f508f1d096b58b2b70e6c1883ee032e5692b6fd882a1ec8"
+      "sha256": "5cc2e74cab864529756535a68f0c263bdd4cc5f98fb41b4d2d23ecc92197394d",
+      "size": 25420,
+      "normalized_sha256": "5cc2e74cab864529756535a68f0c263bdd4cc5f98fb41b4d2d23ecc92197394d"
     },
     "crates/soxu-git/tests/worktrees.rs": {
       "role": "observe",
@@ -1223,9 +1223,9 @@
     },
     "docs/ops/LESSONS.md": {
       "role": "index",
-      "sha256": "f8a72358e3a85bc055255a97eb06a20bee5df0492b5e99e25fec1affc9b60c28",
-      "size": 38115,
-      "normalized_sha256": "f8a72358e3a85bc055255a97eb06a20bee5df0492b5e99e25fec1affc9b60c28"
+      "sha256": "fc53b7816d26087122811933aa1ef98e771c5f2c1e70b103f85cd3a04e8b354f",
+      "size": 38838,
+      "normalized_sha256": "fc53b7816d26087122811933aa1ef98e771c5f2c1e70b103f85cd3a04e8b354f"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
