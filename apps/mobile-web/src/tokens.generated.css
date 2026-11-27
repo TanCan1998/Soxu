@@ -138,16 +138,19 @@
   --soxu-layout-max-content-width: 800px;
   --soxu-layout-touch-target-min: 44px;
   --soxu-layout-touch-target-android: 48px;
+  --soxu-layout-breakpoint-ultra-compact: 400px;
   --soxu-layout-breakpoint-regular: 640px;
   --soxu-layout-breakpoint-wide: 1024px;
+  --soxu-layout-short-viewport-max: 500px;
+  --soxu-layout-macos-traffic-lights-inset: 78px;
 
   /* Component Sizing */
-  --soxu-size-titlebar-height: 38px;
-  --soxu-size-tabbar-height: 36px;
-  --soxu-size-subagent-bar-height: 28px;
-  --soxu-size-statusbar-height: 26px;
-  --soxu-size-sidebar-row-height: 32px;
-  --soxu-size-tool-card-header-height: 34px;
+  --soxu-size-titlebar-height: 48px;
+  --soxu-size-tabbar-height: 40px;
+  --soxu-size-subagent-bar-height: 32px;
+  --soxu-size-statusbar-height: 30px;
+  --soxu-size-sidebar-row-height: 36px;
+  --soxu-size-tool-card-header-height: 38px;
   --soxu-size-diff-gutter-width: 52px;
   --soxu-size-activity-diff-max-height: 400px;
   --soxu-size-permission-detail-max-height: 96px;
@@ -155,6 +158,11 @@
   --soxu-size-cmd-palette-max-height: 440px;
   --soxu-size-cmd-palette-input-height: 52px;
   --soxu-size-turn-nav-rail-width: 20px;
+  --soxu-size-compact-rail-width: 52px;
+  --soxu-size-dock-pill-height: 40px;
+  --soxu-size-sink-sidebar-max-width: 316px;
+  --soxu-size-touch-hit-min: 44px;
+  --soxu-size-touch-hit-primary: 48px;
   --soxu-size-icon-sm: 14px;
   --soxu-size-icon-md: 16px;
   --soxu-size-icon-lg: 20px;

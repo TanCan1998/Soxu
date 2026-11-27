@@ -15,8 +15,8 @@ interface HoverExpandDockProps {
 /**
  * 极简悬停自动展开收纳容器：
  * - 常态仅展示单一纯净线性图标，不附加角标；
- * - 鼠标划过 40ms 或键盘聚焦时平滑展开子工具栏；
- * - 移开 160ms 防抖收起；若子浮层激活则保持锁定展开态。
+ * - 鼠标指针划过 40ms 或键盘聚焦时平滑展开子工具栏；
+ * - 触控与触控笔点击触发键直接锁定展开，外部 pointerdown 或 Esc 收起。
  */
 export function HoverExpandDock({
   triggerIcon,
@@ -31,6 +31,7 @@ export function HoverExpandDock({
   const openTimer = useRef<number | null>(null);
   const closeTimer = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const isExpanded = hovered || pinned || locked;
 
@@ -45,34 +46,48 @@ export function HoverExpandDock({
     }
   }
 
-  function handleMouseEnter() {
+  function handlePointerEnter(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.pointerType !== "mouse") return;
     clearTimers();
     openTimer.current = window.setTimeout(() => setHovered(true), 40);
   }
 
-  function handleMouseLeave() {
+  function handlePointerLeave(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.pointerType !== "mouse") return;
     clearTimers();
     closeTimer.current = window.setTimeout(() => setHovered(false), 160);
   }
 
   useEffect(() => {
-    if (!pinned) return;
-    const onOutside = (ev: MouseEvent) => {
+    if (!pinned && !hovered) return;
+    const onOutside = (ev: PointerEvent) => {
       if (containerRef.current && !containerRef.current.contains(ev.target as Node)) {
         setPinned(false);
+        setHovered(false);
       }
     };
-    document.addEventListener("mousedown", onOutside);
-    return () => document.removeEventListener("mousedown", onOutside);
-  }, [pinned]);
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        setPinned(false);
+        setHovered(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onOutside);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onOutside);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [pinned, hovered]);
 
   useEffect(() => () => clearTimers(), []);
 
   return (
     <div
       ref={containerRef}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
       onFocus={() => setHovered(true)}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -91,12 +106,13 @@ export function HoverExpandDock({
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            ref={triggerRef}
             type="button"
             onClick={() => setPinned((p) => !p)}
             aria-expanded={isExpanded}
             aria-label={triggerLabel}
             className={cn(
-              "relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)] transition-colors cursor-pointer",
+              "soxu-hit-44 relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)] transition-colors cursor-pointer",
               pinned && "bg-[var(--soxu-interaction-selected)] text-[var(--soxu-text-primary)]",
             )}
           >
@@ -108,7 +124,7 @@ export function HoverExpandDock({
 
       <div
         className={cn(
-          "inline-flex items-center gap-0.5 overflow-hidden transition-all duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)]",
+          "inline-flex items-center gap-1 overflow-hidden transition-all duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)]",
           "max-lg:absolute max-lg:top-[calc(100%+6px)] max-lg:z-[var(--soxu-z-popover)] max-lg:rounded-full max-lg:border max-lg:border-[var(--soxu-border-strong)] max-lg:bg-[var(--soxu-surface-floating)] max-lg:px-1.5 max-lg:py-1",
           expandDirection === "right" ? "max-lg:left-0" : "max-lg:right-0",
           isExpanded

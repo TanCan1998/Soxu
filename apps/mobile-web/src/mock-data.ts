@@ -1,7 +1,10 @@
 import type {
   ApprovalItem,
+  ArtifactItem,
   AskQuestionState,
   CliOption,
+  DiffFileItem,
+  LiveStepItem,
   ModelOption,
   NativeSessionHistory,
   QuickChatItem,
@@ -24,6 +27,7 @@ export const INITIAL_WORKSPACES: WorkspaceItem[] = [
     summary: "主工作目录：纯黑设计系统与令牌门禁已对齐",
     diffStat: "+2569",
     label: "设计审阅",
+    pinned: true,
   },
   {
     id: "wks-m2",
@@ -35,8 +39,10 @@ export const INITIAL_WORKSPACES: WorkspaceItem[] = [
     model: "group/gpt-6.2-sol",
     bucket: "needs_input",
     summary: "2 项权限待确认（含 1 项高危清理拦截）",
+    activeIntent: "等待确认门禁指令与临时夹具清理边界",
     diffStat: "+142 -18",
     label: "驱动层",
+    pinned: true,
   },
   {
     id: "wks-m1",
@@ -48,6 +54,7 @@ export const INITIAL_WORKSPACES: WorkspaceItem[] = [
     model: "group/claude-sonnet-5.5",
     bucket: "running",
     summary: "正在运行增量游标追平验证 (01:38)",
+    activeIntent: "cargo test -p soxu-daemon --test rpc_ws_e2e",
     diffStat: "+86 -9",
     label: "协议层",
   },
@@ -223,14 +230,19 @@ export const INITIAL_TURNS: TurnMessage[] = [
       {
         id: "tl-read",
         kind: "read",
-        title: "已检索并读取 6 个核心源码文件 · 0.4 秒",
+        title: "已检索并读取 6 个核心源码文件",
+        intent: "读取驱动能力探测与协议边界源码",
+        metric: "6 个文件 · 0.4s",
         status: "已完成",
         lines: ["crates/soxu-drivers/src/lib.rs", "crates/soxu-magpie/src/lib.rs", "crates/soxu-protocol/src/lib.rs"],
       },
       {
         id: "tl-edit",
         kind: "edit",
-        title: "修改 crates/soxu-drivers/src/lib.rs (+5 -1)",
+        title: "修改 crates/soxu-drivers/src/lib.rs",
+        intent: "为 NativeCliKind 补齐运行中热纠偏能力探测",
+        diffAdd: 5,
+        diffDel: 1,
         status: "已应用",
         lines: [
           "  pub enum NativeCliKind { Claude, Codex, Pi, OpenCode, Antigravity, Copilot, Qwen }",
@@ -245,14 +257,24 @@ export const INITIAL_TURNS: TurnMessage[] = [
       {
         id: "tl-bash",
         kind: "bash",
-        title: "cargo test -p soxu-drivers · 退出码 0 · 1.8 秒",
+        title: "cargo test -p soxu-drivers",
+        intent: "在临时沙箱目录中验证热纠偏与降级矩阵",
+        metric: "6 项通过 · 1.8s",
+        pseudoLines: [
+          "with TempFixtureDir() as dir:",
+          "  run('cargo test -p soxu-drivers --locked')",
+          "> assert steer_capability_matrix.passed == 6  # 1.8s",
+          "  assert global_user_configs.untouched()",
+        ],
         status: "6 项通过",
         lines: ["$ cargo test -p soxu-drivers", "test tests::steer_capability_matrix ... ok", "test result: ok. 6 passed; 0 failed"],
       },
       {
         id: "tl-mcp",
         kind: "mcp",
-        title: "aoci · 索引维护 [当前工作树] · 0.3 秒",
+        title: "aoci · 索引维护 [当前工作树]",
+        intent: "检查并保持分支认知条目与代码摘要同步",
+        metric: "零漂移 · 0.3s",
         status: "零漂移对齐",
         lines: ["工作区模式: Direct Worktree", "索引指纹: 921fdc04", "待处理条目: 0"],
       },
@@ -346,3 +368,90 @@ export const NATIVE_HISTORY: NativeSessionHistory[] = [
   { id: "his-2", cli: "claude", title: "设计工作树隔离与钩子签名", project: "Soxu", turns: 8, updatedAt: "昨天 19:12" },
   { id: "his-3", cli: "pi", title: "排查依赖最小发布期校验", project: "Soxu", turns: 5, updatedAt: "昨天 14:05" },
 ];
+
+export const INITIAL_DIFF_FILES: DiffFileItem[] = [
+  {
+    path: "crates/soxu-drivers/src/lib.rs",
+    added: 5,
+    deleted: 1,
+    status: "M",
+    staged: true,
+    rows: [
+      { lineNum: 22, kind: "ctx", code: "pub enum NativeCliKind { Claude, Codex, Pi, OpenCode, Antigravity, Copilot, Qwen }" },
+      { kind: "del", code: "// 旧版仅在运行时返回可执行文件名" },
+      { lineNum: 23, kind: "add", code: "/// 返回驱动是否支持活跃回合中途热纠偏" },
+      { lineNum: 24, kind: "add", code: "#[inline]" },
+      { lineNum: 25, kind: "add", code: "pub const fn supports_live_steer(self) -> bool {" },
+      { lineNum: 26, kind: "add", code: "  matches!(self, Self::Pi | Self::Codex | Self::Claude)" },
+      { lineNum: 27, kind: "add", code: "}" },
+    ],
+  },
+  {
+    path: "crates/soxu-drivers/src/steer_fallback.rs",
+    added: 18,
+    deleted: 3,
+    status: "M",
+    staged: true,
+    rows: [
+      { lineNum: 41, kind: "ctx", code: "pub fn dispatch_active_turn(kind: NativeCliKind, msg: &str) -> DeliveryOutcome {" },
+      { kind: "del", code: "  return DeliveryOutcome::RejectedBusy;" },
+      { lineNum: 42, kind: "add", code: "  if kind.supports_live_steer() {" },
+      { lineNum: 43, kind: "add", code: "    DeliveryOutcome::InjectedLive" },
+      { lineNum: 44, kind: "add", code: "  } else {" },
+      { lineNum: 45, kind: "add", code: "    DeliveryOutcome::SoftInterruptResume" },
+      { lineNum: 46, kind: "add", code: "  }" },
+      { lineNum: 47, kind: "ctx", code: "}" },
+    ],
+  },
+  {
+    path: "crates/soxu-drivers/tests/steer_matrix.rs",
+    added: 24,
+    deleted: 0,
+    status: "A",
+    staged: false,
+    rows: [
+      { lineNum: 1, kind: "add", code: "#[test]" },
+      { lineNum: 2, kind: "add", code: "fn live_steer_and_soft_fallback_stay_isolated() {" },
+      { lineNum: 3, kind: "add", code: "  let fixture = tempfile::tempdir().expect(\"temp fixture\");" },
+      { lineNum: 4, kind: "add", code: "  assert!(NativeCliKind::Pi.supports_live_steer());" },
+      { lineNum: 5, kind: "add", code: "}" },
+    ],
+  },
+];
+
+export const INITIAL_LIVE_STEPS: LiveStepItem[] = [
+  { id: "st-1", title: "探测 7 大原生 CLI 热纠偏能力矩阵", status: "done" },
+  { id: "st-2", title: "在隔离临时夹具运行驱动层单测 (6/6)", status: "done" },
+  { id: "st-3", title: "等待人工确认安全门禁与目录清理边界", status: "in_progress" },
+  { id: "st-4", title: "生成 Git Emoji 提交预览并更新认知索引", status: "pending" },
+];
+
+export const INITIAL_ARTIFACT: ArtifactItem = {
+  id: "art-plan-steer",
+  title: "原生驱动热纠偏降级与沙箱隔离实施方案",
+  kind: "plan",
+  path: "docs/plans/native-driver-steer-fallback.md",
+  summary: "已覆盖 3 个支持热注入驱动与 4 个柔和中断续接驱动，全部夹具隔离在 TempDir。",
+  status: "pending_approval",
+  content: [
+    "# 原生驱动热纠偏与降级边界方案",
+    "",
+    "1. 热注入优先路径：Pi (RPC) / Codex / Claude 在下一工具边界无损注入 steer。",
+    "2. 降级续接路径：Agy / OpenCode / Copilot / Qwen 触发柔和中断并保留未消费草稿。",
+    "3. 安全红线：严禁写入 ~/.config/magpie 等用户真实全局配置，夹具统一用 tempfile。",
+    "4. 验收命令：pwsh -NoProfile -File scripts/check-all.ps1。",
+  ],
+};
+
+export const MOBILE_QUICK_CHIPS = {
+  running: [
+    { id: "qc-check", label: "先跑 check-all 别急着提交", mode: "steer" as const },
+    { id: "qc-stop-risk", label: "遇高危改动先暂停汇报", mode: "steer" as const },
+    { id: "qc-aoci", label: "收尾对齐本地认知索引", mode: "queue" as const },
+  ],
+  idle: [
+    { id: "qc-summary", label: "总结本轮改动与潜在风险", mode: "steer" as const },
+    { id: "qc-tests", label: "运行全工作区增量门禁", mode: "steer" as const },
+    { id: "qc-commit", label: "生成规范提交标题预览", mode: "steer" as const },
+  ],
+};

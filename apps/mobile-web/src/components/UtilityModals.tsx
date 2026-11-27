@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useI18n } from "@/lib/i18n";
+import { formatShortcut, isImeComposing } from "@/lib/useAdaptiveViewport";
 import { NATIVE_HISTORY } from "@/mock-data";
 import type { ScheduleItem } from "@/types";
 
@@ -18,6 +19,8 @@ interface UtilityModalsProps {
   onOpenSettings: () => void;
   onToggleTheme: () => void;
   branch?: string;
+  isMac?: boolean;
+  isCoarsePointer?: boolean;
   schedules: ScheduleItem[];
   onToggleSchedule: (id: string) => void;
   onFlashToast: (msg: string) => void;
@@ -30,6 +33,8 @@ export function UtilityModals({
   onOpenSettings,
   onToggleTheme,
   branch,
+  isMac = false,
+  isCoarsePointer = false,
   schedules,
   onToggleSchedule,
   onFlashToast,
@@ -39,18 +44,33 @@ export function UtilityModals({
   const [onboardingStep, setOnboardingStep] = useState(1);
 
   const cmdItems = [
-    { sec: "会话", title: "feat/12-native-drivers · codex", run: () => onClose() },
-    { sec: "文件", title: "crates/soxu-drivers/src/lib.rs", run: () => onClose() },
-    { sec: "设置", title: "打开独立系统设置面板 (Ctrl+,)", run: () => { onClose(); onOpenSettings(); } },
-    { sec: "工具", title: "打开手机扫码遥控配对", run: () => onOpenModal("pair") },
-    { sec: "工具", title: "打开结构化 Git 提交编辑框", run: () => onOpenModal("commit") },
-    { sec: "调度", title: "管理定时任务与周期巡检中心", run: () => onOpenModal("schedules") },
-    { sec: "外观", title: "切换纯黑深色与纯净浅色主题", run: () => { onToggleTheme(); onClose(); } },
-  ].filter((x) => !cmdkQuery.trim() || x.title.toLowerCase().includes(cmdkQuery.toLowerCase()));
+    { sec: "工作区与会话", title: "feat/12-native-drivers · codex", sub: "2 项权限待确认", run: () => onClose() },
+    { sec: "工作区与会话", title: "feat/8-ws-cursor-stream · pi", sub: "运行中 · 游标增量追平", run: () => onClose() },
+    { sec: "对话正文", title: "crates/soxu-drivers/src/lib.rs · supports_live_steer", sub: "已完成热纠偏能力探测重构", run: () => onClose() },
+    { sec: "系统动作", title: `打开独立系统设置面板 (${formatShortcut("Mod+,", isMac)})`, sub: "外观、字体、路由器与快捷键", run: () => { onClose(); onOpenSettings(); } },
+    { sec: "系统动作", title: "打开手机扫码遥控配对", sub: "局域网 / Tailscale 6 位码连接", run: () => onOpenModal("pair") },
+    { sec: "系统动作", title: "打开结构化 Git 提交编辑框", sub: "规范表情标题与隐私扫描", run: () => onOpenModal("commit") },
+    { sec: "系统动作", title: "管理定时任务与周期巡检中心", sub: "Schedule & Heartbeat 调度", run: () => onOpenModal("schedules") },
+    { sec: "系统动作", title: "切换纯黑深色与纯净浅色主题", sub: "Pure Black / Clean Light", run: () => { onToggleTheme(); onClose(); } },
+  ].filter(
+    (x) =>
+      !cmdkQuery.trim() ||
+      x.title.toLowerCase().includes(cmdkQuery.toLowerCase()) ||
+      x.sub.toLowerCase().includes(cmdkQuery.toLowerCase()),
+  );
+
+  const cmdGroups = Array.from(
+    cmdItems.reduce((map, it) => {
+      const list = map.get(it.sec) ?? [];
+      list.push(it);
+      map.set(it.sec, list);
+      return map;
+    }, new Map<string, typeof cmdItems>()),
+  );
 
   return (
     <>
-      {/* 全局命令与检索面板 */}
+      {/* 全局命令与检索面板（对齐 Oryn：偏顶停靠防键盘遮挡 + 16px 防 iOS 缩放 + 分组高亮） */}
       <Dialog
         open={modal === "cmdk"}
         onOpenChange={(o) => {
@@ -59,7 +79,7 @@ export function UtilityModals({
       >
         <DialogContent
           showClose={false}
-          className="w-[min(var(--soxu-size-cmd-palette-width),94vw)] p-0 overflow-hidden bg-[var(--soxu-surface-floating)]"
+          className="top-[12dvh] translate-y-0 w-[min(var(--soxu-size-cmd-palette-width),94vw)] p-0 overflow-hidden bg-[var(--soxu-surface-floating)]"
         >
           <DialogHeader className="sr-only">
             <DialogTitle>全局命令与检索面板</DialogTitle>
@@ -72,6 +92,7 @@ export function UtilityModals({
               value={cmdkQuery}
               onChange={(e) => setCmdkQuery(e.target.value)}
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
                 if (e.key === "Escape" && cmdkQuery.trim()) {
                   e.stopPropagation();
                   setCmdkQuery("");
@@ -81,35 +102,51 @@ export function UtilityModals({
                 }
               }}
               placeholder="搜索工作区会话、代码文件、历史记录或系统指令..."
-              className="flex-1 bg-transparent border-0 outline-none text-sm text-[var(--soxu-text-primary)] placeholder:text-[var(--soxu-text-ghost)]"
+              className="flex-1 bg-transparent border-0 outline-none text-base sm:text-sm text-[var(--soxu-text-primary)] placeholder:text-[var(--soxu-text-ghost)]"
             />
-            <kbd className="soxu-mono text-[10.5px] px-1.5 py-0.5 rounded bg-[var(--soxu-surface-control)] text-[var(--soxu-text-tertiary)]">
+            <button
+              type="button"
+              onClick={onClose}
+              className="soxu-mono text-[10.5px] px-2 py-1 rounded bg-[var(--soxu-surface-control)] text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] cursor-pointer"
+            >
               Esc
-            </kbd>
+            </button>
           </div>
-          <div className="max-h-[340px] overflow-y-auto p-2 flex flex-col gap-0.5 soxu-scroll">
+          <div className="max-h-[min(360px,56dvh)] overflow-y-auto p-2 flex flex-col gap-2 soxu-scroll">
             {cmdItems.length === 0 ? (
               <div className="py-10 text-center text-xs text-[var(--soxu-text-tertiary)]">
                 未找到匹配的命令或会话条目
               </div>
             ) : (
-              cmdItems.map((it) => (
-                <button
-                  key={it.title}
-                  type="button"
-                  onClick={it.run}
-                  className="w-full rounded-lg px-3 py-2 text-left text-xs flex items-center justify-between gap-2 hover:bg-[var(--soxu-interaction-selected)] cursor-pointer transition-colors"
-                >
-                  <span>{it.title}</span>
-                  <Badge variant="neutral">{it.sec}</Badge>
-                </button>
+              cmdGroups.map(([groupName, groupItems]) => (
+                <div key={groupName} className="flex flex-col gap-0.5">
+                  <div className="px-3 py-1 text-[11px] font-semibold text-[var(--soxu-text-tertiary)]">
+                    {groupName}
+                  </div>
+                  {groupItems.map((it) => (
+                    <button
+                      key={it.title}
+                      type="button"
+                      onClick={it.run}
+                      className="w-full min-h-[42px] rounded-lg px-3 py-2 text-left text-xs flex items-center justify-between gap-2 hover:bg-[var(--soxu-interaction-selected)] cursor-pointer transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-medium text-[var(--soxu-text-primary)] truncate">{it.title}</div>
+                        <div className="text-[11px] text-[var(--soxu-text-tertiary)] truncate">{it.sub}</div>
+                      </div>
+                      <Badge variant="neutral">{it.sec}</Badge>
+                    </button>
+                  ))}
+                </div>
               ))
             )}
           </div>
-          <div className="h-8 px-3.5 border-t border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-card)] flex items-center gap-4 text-[11px] text-[var(--soxu-text-tertiary)]">
-            <span>Enter 执行首项</span>
-            <span>Esc 清空或关闭</span>
-          </div>
+          {!isCoarsePointer && (
+            <div className="h-8 px-3.5 border-t border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-card)] flex items-center gap-4 text-[11px] text-[var(--soxu-text-tertiary)]">
+              <span>Enter 执行首项</span>
+              <span>Esc 清空或关闭</span>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

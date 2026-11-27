@@ -1,9 +1,11 @@
+import type { DiffRowItem } from "@/components/CodeBlockView";
+
 export type TurnBehavior = "queue" | "steer" | "interrupt";
-export type MobileTab = "session" | "workspaces" | "approvals" | "scripts";
+export type MobileTab = "session" | "workspaces" | "approvals" | "scripts" | "diff" | "files" | "terminal" | "inbox" | "settings";
 export type SizeClass = "compact" | "regular" | "wide";
 export type WorkspaceBucket = "needs_input" | "failed" | "running" | "attention" | "done";
 export type PermissionLevel = "plan" | "read-only" | "ask" | "auto-edit" | "full-access" | "turbo";
-export type ComposerChipKind = "file" | "folder" | "diff" | "terminal" | "image" | "skill" | "handoff";
+export type ComposerChipKind = "file" | "folder" | "diff" | "terminal" | "image" | "skill" | "handoff" | "quote" | "review";
 
 export interface HandoffSelection {
   targetAgent: string;
@@ -18,6 +20,39 @@ export interface ComposerChip {
   targetAgent?: string;
   targetModel?: string;
   targetThinking?: string;
+  detail?: string;
+}
+
+export interface QueuedPromptItem {
+  id: string;
+  text: string;
+  createdAt: string;
+  mode?: TurnBehavior;
+}
+
+export interface DiffFileItem {
+  path: string;
+  added: number;
+  deleted: number;
+  status: "M" | "A" | "D";
+  staged?: boolean;
+  rows: DiffRowItem[];
+}
+
+export interface ArtifactItem {
+  id: string;
+  title: string;
+  kind: "plan" | "review" | "report";
+  path: string;
+  summary: string;
+  status: "pending_approval" | "approved" | "draft";
+  content: string[];
+}
+
+export interface LiveStepItem {
+  id: string;
+  title: string;
+  status: "done" | "in_progress" | "pending";
 }
 
 export interface SessionTelemetryStats {
@@ -42,8 +77,11 @@ export type SheetKind =
   | "cli"
   | "model"
   | "thinking"
+  | "model-config"
   | "perm"
   | "handoff"
+  | "context"
+  | "stats"
   | "rewind"
   | "history"
   | "new-worktree"
@@ -60,8 +98,10 @@ export interface WorkspaceItem {
   model: string;
   bucket: WorkspaceBucket;
   summary: string;
+  activeIntent?: string;
   diffStat: string;
   label?: string;
+  pinned?: boolean;
   archived?: boolean;
 }
 
@@ -80,6 +120,12 @@ export interface ToolCardItem {
   id: string;
   kind: "read" | "edit" | "bash" | "mcp";
   title: string;
+  intent?: string;
+  metric?: string;
+  running?: boolean;
+  diffAdd?: number;
+  diffDel?: number;
+  pseudoLines?: string[];
   status: string;
   lines: string[];
 }

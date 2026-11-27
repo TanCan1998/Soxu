@@ -9,6 +9,8 @@ export type AccentPresetId = "emerald" | "ocean" | "violet" | "amber" | "rose" |
 export type LineHeightMode = "compact" | "normal" | "relaxed";
 export type TimestampFormatMode = "relative" | "absolute";
 export type WorktreeLocationMode = "sibling" | "central";
+export type WindowChromeStyle = "auto" | "macos" | "windows";
+export type FoldPreviewMode = "auto" | "dual-horizontal" | "dual-vertical";
 
 export interface AccentPreset {
   id: Exclude<AccentPresetId, "custom">;
@@ -158,6 +160,8 @@ export interface SoxuPreferences {
   redactHomePath: boolean;
   lanRemoteEnabled: boolean;
   remoteIdleLockMin: 5 | 15 | 30 | 0;
+  windowChromeStyle?: WindowChromeStyle;
+  foldPreviewMode?: FoldPreviewMode;
 }
 
 export const DEFAULT_PREFERENCES: SoxuPreferences = {
@@ -192,6 +196,8 @@ export const DEFAULT_PREFERENCES: SoxuPreferences = {
   redactHomePath: true,
   lanRemoteEnabled: true,
   remoteIdleLockMin: 15,
+  windowChromeStyle: "auto",
+  foldPreviewMode: "auto",
 };
 
 const STORAGE_KEY = "soxu.preferences.v2";
