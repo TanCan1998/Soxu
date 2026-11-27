@@ -962,6 +962,10 @@ function Invoke-EvidenceMode {
       foreach ($row in $matrixRows) {
         $null = ([string]$row.name) -match '^Rust \((.+)\)$'
         $rowPlatform = $Matches[1]
+        # GitHub Jobs API 在矩阵 job 被计划跳过且从未生成实例时，会把 job name 保留为
+        # 未展开的 `${{ matrix.platform.id }}`。此时没有任何可归属的平台实例；当计划
+        # 本来就不要求 Rust 矩阵时跳过该占位符，否则仍按未知名称失败闭合。
+        if ($rowPlatform -eq '${{ matrix.platform.id }}' -and $expectedPlatforms.Count -eq 0) { continue }
         if (-not $PlatformCatalog.Contains($rowPlatform)) { $errors.Add("matrix_job_unknown:$rowPlatform"); continue }
         if ($expectedPlatforms -notcontains $rowPlatform) { $errors.Add("matrix_job_unplanned:$rowPlatform"); continue }
         if ($seenRowPlatforms.ContainsKey($rowPlatform)) { $errors.Add("matrix_job_duplicate:$rowPlatform"); continue }

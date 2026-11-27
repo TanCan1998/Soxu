@@ -751,6 +751,16 @@ try {
   # ============ 一、证据与状态对账 ============
   Assert-Pass "通过：必跑 success + 计划内 skipped" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceBaseline)
   Assert-Pass "通过：rust 与 mobile 均按计划跳过" (Invoke-GateVerify -PlanJson $planRustSkipped -EvidenceJson $evidenceRustSkipped)
+  $jobsGithubSkippedMatrixPlaceholder = @'
+{
+  "jobs": [
+    { "name": "Rust (${{ matrix.platform.id }})", "conclusion": "skipped", "started_at": null },
+    { "name": "Rust Format Check", "conclusion": "skipped", "started_at": null },
+    { "name": "Mobile Web/PWA Typecheck & Build", "conclusion": "skipped", "started_at": null }
+  ]
+}
+'@
+  Assert-Pass "通过：GitHub 计划外矩阵 job 保留未展开占位符" (Invoke-GateVerify -PlanJson $planRustSkipped -EvidenceJson $evidenceRustSkipped -JobsJson $jobsGithubSkippedMatrixPlaceholder)
 
   $evidenceDetectFailed = @'
 {
