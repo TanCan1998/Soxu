@@ -1965,6 +1965,65 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
     Assert-Check ($expectedBlock.body -notmatch '(?m)^\s*(&\s*)?(cargo|pnpm|gitleaks)\b') "往返 step「$($expectedBlock.name)」不得包含构建工具执行行"
   }
 
+  $rtIsWindows = [System.Environment]::OSVersion.Platform -eq 'Win32NT'
+  $rtStubBin = Join-Path $rtTemp 'stub-bin'
+  New-Item -ItemType Directory -Path $rtStubBin -Force | Out-Null
+  $rtStubLog = Join-Path $rtTemp 'stub-calls.log'
+  Set-Content -LiteralPath $rtStubLog -Value '' -Encoding utf8 -NoNewline
+  $rtStubVersions = [ordered]@{
+    rustc = 'rustc 1.99.1-stub'
+    cargo = 'cargo 1.99.1-stub'
+    node  = 'v26.13.1-stub'
+    pnpm  = '12.21.0-stub'
+  }
+
+  function New-ToolVersionStub {
+    param(
+      [Parameter(Mandatory = $true)][string]$Directory,
+      [Parameter(Mandatory = $true)][string]$Tool,
+      [Parameter(Mandatory = $true)][string]$Version,
+      [Parameter(Mandatory = $true)][string]$CallLog,
+      [switch]$Posix
+    )
+    if ($Posix) {
+      $path = Join-Path $Directory $Tool
+      $posixLog = $CallLog.Replace('\', '/')
+      $template = @'
+#!/bin/sh
+echo "{0} $@" >> "{1}"
+echo "{2}"
+exit 0
+'@
+      $content = $template.Replace('{0}', $Tool).Replace('{1}', $posixLog).Replace('{2}', $Version)
+      Set-Content -LiteralPath $path -Value $content -Encoding utf8 -NoNewline
+      if (-not $rtIsWindows) { & chmod +x $path }
+      return $path
+    }
+    $path = Join-Path $Directory "$Tool.cmd"
+    $lines = @(
+      '@echo off'
+      "echo $Tool %*>>`"$CallLog`""
+      "echo $Version"
+      'exit /b 0'
+    )
+    Set-Content -LiteralPath $path -Value (($lines -join "`r`n") + "`r`n") -Encoding ascii -NoNewline
+    return $path
+  }
+
+  foreach ($stubTool in $rtStubVersions.Keys) {
+    $stubPath = New-ToolVersionStub -Directory $rtStubBin -Tool $stubTool -Version $rtStubVersions[$stubTool] -CallLog $rtStubLog -Posix:(-not $rtIsWindows)
+    Assert-Check (Test-Path -LiteralPath $stubPath -PathType Leaf) "受控版本桩 $stubTool 必须创建成功（$stubPath）"
+  }
+  Assert-Check (([array]$rtStubVersions.Keys).Count -eq 4) "受控版本桩必须覆盖 rustc/cargo/node/pnpm 四个版本查询"
+
+  $rtPwshExe = if ($rtIsWindows) { Join-Path $PSHOME 'pwsh.exe' } else { Join-Path $PSHOME 'pwsh' }
+  Assert-Check (Test-Path -LiteralPath $rtPwshExe -PathType Leaf) "受控 PATH 需要可定位的 pwsh 可执行文件（$rtPwshExe）"
+  $rtRestrictedPath = if ($rtIsWindows) {
+    (@($rtStubBin, $PSHOME, (Join-Path $env:SystemRoot 'System32')) -join ';')
+  } else {
+    (@($rtStubBin, $PSHOME, '/usr/bin', '/bin') -join ':')
+  }
+
   $rtEnv = @{
     GATE_PLAN              = $evPlan
     DETECT_RESULT          = 'success'
@@ -1996,9 +2055,14 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
     $wrapperPath = Join-Path $rtTemp ("wrapper-" + [Guid]::NewGuid().ToString("N") + ".ps1")
     $wrapperText = "`$ErrorActionPreference = 'Stop'`n. '$escaped'`nif (Test-Path -LiteralPath variable:\LASTEXITCODE) { exit `$LASTEXITCODE }`n"
     Set-Content -LiteralPath $wrapperPath -Value $wrapperText -Encoding utf8 -NoNewline
+    $previousPath = [System.Environment]::GetEnvironmentVariable('PATH')
+    [System.Environment]::SetEnvironmentVariable('PATH', $rtRestrictedPath)
     Push-Location $repoRoot
-    try { $out = (& pwsh -NoProfile -File $wrapperPath 2>&1 | Out-String); $code = $LASTEXITCODE }
-    finally { Pop-Location }
+    try { $out = (& $rtPwshExe -NoProfile -File $wrapperPath 2>&1 | Out-String); $code = $LASTEXITCODE }
+    finally {
+      Pop-Location
+      [System.Environment]::SetEnvironmentVariable('PATH', $previousPath)
+    }
     return [pscustomobject]@{ Code = $code; Output = $out }
   }
 
@@ -2042,11 +2106,88 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
           Assert-Check ([string]$producedDoc.identity.checkoutSha -eq $script:testSha) "「$($block.name)」证据必须绑定 checkoutSha"
           if ($block.name -eq 'Finalize sanitized platform evidence') {
             Assert-Check ([string]$producedDoc.kind -eq 'soxu-ci-evidence/platform/v1' -and [string]$producedDoc.platform -eq 'windows') "平台证据必须使用 platform 类型与真实平台 id"
+            Assert-Check ([string]$producedDoc.toolchain.rust -match 'stub' -and [string]$producedDoc.toolchain.cargo -match 'stub') "平台证据的 rust/cargo 版本必须来自受控桩而不是宿主工具"
           } else {
             Assert-Check ([string]$producedDoc.kind -eq 'soxu-ci-evidence/job/v1') "作业证据必须使用 job 类型（$($block.name)）"
           }
+          if ($block.name -eq 'Finalize sanitized mobile web evidence') {
+            Assert-Check ([string]$producedDoc.toolchain.node -match 'stub' -and [string]$producedDoc.toolchain.pnpm -match 'stub') "移动端证据的 node/pnpm 版本必须来自受控桩（无宿主 pnpm 也可完成）"
+            Assert-Check ([string]$producedDoc.toolchain.pnpm -eq '12.21.0-stub') "移动端证据的 pnpm 版本必须与桩声明值一致（实际 $($producedDoc.toolchain.pnpm)）"
+          }
+          if ($block.name -eq 'Finalize sanitized format evidence') {
+            Assert-Check ([string]$producedDoc.toolchain.rust -match 'stub') "格式作业证据的 rustc 版本必须来自受控桩"
+          }
         }
       }
+    }
+
+    $stubCalls = ''
+    if (Test-Path -LiteralPath $rtStubLog) { $stubCalls = [string](Get-Content -LiteralPath $rtStubLog -Raw -Encoding utf8) }
+    foreach ($stubTool in @('rustc', 'cargo', 'node', 'pnpm')) {
+      Assert-Check ($stubCalls -match "(?m)^$stubTool\b") "受控版本桩 $stubTool 必须被真实 run 块调用（桩日志：$($stubCalls.Trim())）"
+    }
+    Assert-Check ($stubCalls -match '(?m)^pnpm --version') "移动端 Finalize 块必须以 pnpm --version 形式查询版本"
+
+    $previousPathForProbe = [System.Environment]::GetEnvironmentVariable('PATH')
+    [System.Environment]::SetEnvironmentVariable('PATH', $rtRestrictedPath)
+    try {
+      $probeOut = (& $rtPwshExe -NoProfile -Command "(pnpm --version)" 2>&1 | Out-String).Trim()
+      $probeCode = $LASTEXITCODE
+    } finally {
+      [System.Environment]::SetEnvironmentVariable('PATH', $previousPathForProbe)
+    }
+    Assert-Check ($probeCode -eq 0) "受限 PATH 下 pnpm 必须可执行（实际 exit $probeCode：$probeOut）"
+    Assert-Check ($probeOut -eq '12.21.0-stub') "受限 PATH 下 pnpm 必须解析到受控桩（实际：$probeOut）"
+
+    $noStubPath = if ($rtIsWindows) {
+      (@($PSHOME, (Join-Path $env:SystemRoot 'System32')) -join ';')
+    } else {
+      (@($PSHOME, '/usr/bin', '/bin') -join ':')
+    }
+    $previousPathForNoStub = [System.Environment]::GetEnvironmentVariable('PATH')
+    [System.Environment]::SetEnvironmentVariable('PATH', $noStubPath)
+    try { $noStubOut = (& $rtPwshExe -NoProfile -Command "(pnpm --version)" 2>&1 | Out-String).Trim() } finally {
+      [System.Environment]::SetEnvironmentVariable('PATH', $previousPathForNoStub)
+    }
+    Assert-Check ($noStubOut -ne '12.21.0-stub') "无桩目录时不得出现桩值，证明桩值只来自桩目录（实际：$noStubOut）"
+
+    $posixStubDir = Join-Path $rtTemp 'stub-bin-posix'
+    New-Item -ItemType Directory -Path $posixStubDir -Force | Out-Null
+    $posixStubLog = Join-Path $rtTemp 'stub-calls-posix.log'
+    Set-Content -LiteralPath $posixStubLog -Value '' -Encoding utf8 -NoNewline
+    $posixPnpm = New-ToolVersionStub -Directory $posixStubDir -Tool 'pnpm' -Version $rtStubVersions['pnpm'] -CallLog $posixStubLog -Posix
+    Assert-Check ([System.IO.Path]::GetFileName($posixPnpm) -eq 'pnpm') "POSIX 桩必须是无扩展名的 pnpm（实际 $([System.IO.Path]::GetFileName($posixPnpm))）"
+    $posixHead = (Get-Content -LiteralPath $posixPnpm -TotalCount 1)
+    Assert-Check ($posixHead -eq '#!/bin/sh') "POSIX 桩必须以 #!/bin/sh 开头（实际：$posixHead）"
+    if ($null -eq $script:bashPath) {
+      if ($RequireBash) {
+        Assert-Check $false "Unix 子进程桩验证要求可用的 shell，但当前环境未找到。"
+      } else {
+        Write-Host "::warning::未找到可用于 POSIX 桩验证的 bash，跳过该条（CI 中必须通过）。" -ForegroundColor Yellow
+      }
+    } else {
+      $posixPathItem = (Get-PosixPath $posixStubDir)
+      if ($rtIsWindows) {
+        $rtBashDir = Split-Path $script:bashPath -Parent
+        $rtCygpath = @(
+          (Join-Path $rtBashDir 'cygpath.exe'),
+          (Join-Path $rtBashDir '..\usr\bin\cygpath.exe'),
+          (Join-Path $rtBashDir '..\..\usr\bin\cygpath.exe')
+        ) | ForEach-Object { [System.IO.Path]::GetFullPath($_) } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+        if ($null -ne $rtCygpath) {
+          $posixPathItem = (& $rtCygpath -u $posixStubDir).Trim()
+        } elseif ($posixPathItem -match '^([A-Za-z]):/(.*)$') {
+          $posixPathItem = '/' + $Matches[1].ToLowerInvariant() + '/' + $Matches[2]
+        }
+      }
+      Assert-Check ($posixPathItem -match '^/' -and $posixPathItem -notmatch '^[A-Za-z]:') "POSIX PATH 项必须是 / 开头且不含盘符冒号（实际：$posixPathItem）"
+      $posixPath = "${posixPathItem}:/usr/bin:/bin"
+      $posixRun = Invoke-Bash @(('-c'), "PATH='$posixPath' pnpm --version") $rtTemp
+      Assert-Check ($posixRun.Code -eq 0) "POSIX 桩在 Unix 子进程中必须可执行（实际 exit $($posixRun.Code)：$($posixRun.Output.Trim())）"
+      Assert-Check ($posixRun.Output.Trim() -eq '12.21.0-stub') "POSIX 桩必须输出固定版本（实际：$($posixRun.Output.Trim())）"
+      $posixCalls = ''
+      if (Test-Path -LiteralPath $posixStubLog) { $posixCalls = [string](Get-Content -LiteralPath $posixStubLog -Raw -Encoding utf8) }
+      Assert-Check ($posixCalls -match '(?m)^pnpm --version') "POSIX 桩必须真实记录调用（实际：$($posixCalls.Trim())）"
     }
 
     # 突变回归：哈希表 splatting 退回字符串数组 splatting。主判据是真实退出码非零，
