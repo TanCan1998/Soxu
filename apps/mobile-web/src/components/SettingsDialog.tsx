@@ -51,7 +51,7 @@ import {
 } from "@/lib/preferences";
 import { detectMacPlatform, formatShortcut } from "@/lib/useAdaptiveViewport";
 import { cn } from "@/lib/utils";
-import { CLI_OPTIONS } from "@/mock-data";
+import { STATIC_AGENT_PROFILES } from "@/lib/agent-capabilities";
 import type { PermissionLevel } from "@/types";
 
 export type SettingsSectionId = "appearance" | "fonts" | "magpie" | "git" | "security" | "mobile" | "about";
@@ -751,24 +751,27 @@ export function SettingsDialog({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {CLI_OPTIONS.map((c) => (
-                  <div
-                    key={c.id}
-                    className={cn(
-                      "rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] px-3 py-2.5 flex items-center justify-between",
-                      !c.available && "opacity-50",
-                    )}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <AgentIcon agent={c.id} className="h-4 w-4 shrink-0" />
-                      <div>
-                        <div className="text-xs font-semibold soxu-mono">{c.id}</div>
-                        <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)]">命令名: {c.bin}</div>
+                {Object.values(STATIC_AGENT_PROFILES).map((p) => {
+                  const c = { id: p.id, bin: p.id, available: true };
+                  return (
+                    <div
+                      key={c.id}
+                      className={cn(
+                        "rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] px-3 py-2.5 flex items-center justify-between",
+                        !c.available && "opacity-50",
+                      )}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <AgentIcon agent={c.id} className="h-4 w-4 shrink-0" />
+                        <div>
+                          <div className="text-xs font-semibold soxu-mono">{c.id}</div>
+                          <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)]">命令名: {c.bin}</div>
+                        </div>
                       </div>
+                      <Badge variant={c.available ? "accent" : "neutral"}>{c.available ? p.displayName : "未安装"}</Badge>
                     </div>
-                    <Badge variant={c.available ? "accent" : "neutral"}>{c.available ? `v${c.ver}` : "未安装"}</Badge>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

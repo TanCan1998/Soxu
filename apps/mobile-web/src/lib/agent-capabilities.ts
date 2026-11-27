@@ -1,4 +1,4 @@
-import { MODEL_OPTIONS } from "@/mock-data";
+import type { AgentCapabilityDescriptor, ModelDescriptor } from "@/lib/daemon-protocol";
 import type { PermissionLevel, TurnBehavior } from "@/types";
 
 export interface PermissionMeta {
@@ -35,7 +35,11 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "auto/gemini-4-hydrogen": 256000,
 };
 
-export const AGENT_CAPABILITIES: Record<string, AgentCapabilityProfile> = {
+/**
+ * Daemon 快照未接入时的静态能力兜底目录（与 soxu-core default_agent_catalog 同源对齐）。
+ * 真实 installed/version 状态由 Daemon snapshot.agents 供给。
+ */
+export const STATIC_AGENT_PROFILES: Record<string, AgentCapabilityProfile> = {
   agy: {
     id: "agy",
     displayName: "Agy",
@@ -148,8 +152,45 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilityProfile> = {
   },
 };
 
+/** Daemon 快照供给的模型目录（供选择器渲染）；空时选择器走静态模型兜底。 */
+export const STATIC_MODEL_OPTIONS: { id: string; tier: string; note: string; thinkingOptions: string[] }[] = [
+  { id: "group/gpt-6.2-astra", tier: "复杂架构", note: "协同路由", thinkingOptions: ["medium", "high", "xhigh"] },
+  { id: "group/claude-opus-5.5", tier: "复杂架构", note: "协同路由", thinkingOptions: ["medium", "high", "max"] },
+  { id: "gemini-4-carbon", tier: "复杂架构", note: "原生直连", thinkingOptions: ["high", "max"] },
+  { id: "group/gpt-6.2-sol", tier: "主力开发", note: "协同路由", thinkingOptions: ["low", "medium", "high"] },
+  { id: "group/claude-sonnet-5.5", tier: "主力开发", note: "协同路由", thinkingOptions: ["low", "medium", "high"] },
+  { id: "auto/deepseek-v4.1-flash-1017", tier: "轻量巡检", note: "协同路由", thinkingOptions: ["low", "medium"] },
+  { id: "auto/gemini-4-hydrogen", tier: "轻量巡检", note: "协同路由", thinkingOptions: ["low", "medium"] },
+];
+
+/** 把 Daemon 快照的 AgentCapabilityDescriptor 转换为前端能力档案。 */
+export function profileFromDescriptor(d: AgentCapabilityDescriptor): AgentCapabilityProfile {
+  return {
+    id: d.agent_id,
+    displayName: d.display_name,
+    supportedModels: d.supported_models,
+    permissions: d.permissions.map((p) => ({
+      id: p.id,
+      label: p.label,
+      desc: p.description,
+      tone: p.tone,
+    })),
+    supportsThinking: d.supports_thinking,
+    supportsLiveSteer: d.supports_live_steer,
+  };
+}
+
+export function profileFromModelDescriptors(models: ModelDescriptor[]): typeof STATIC_MODEL_OPTIONS {
+  return models.map((m) => ({
+    id: m.model_id,
+    tier: m.tier,
+    note: m.note,
+    thinkingOptions: m.thinking_options,
+  }));
+}
+
 export function getAgentProfile(agentId: string): AgentCapabilityProfile {
-  return AGENT_CAPABILITIES[agentId] ?? AGENT_CAPABILITIES.codex;
+  return STATIC_AGENT_PROFILES[agentId] ?? STATIC_AGENT_PROFILES.codex;
 }
 
 export function getPermissionMeta(agentId: string, perm: PermissionLevel): PermissionMeta {
@@ -159,8 +200,8 @@ export function getPermissionMeta(agentId: string, perm: PermissionLevel): Permi
 
 export function getAgentModels(agentId: string) {
   const profile = getAgentProfile(agentId);
-  const filtered = MODEL_OPTIONS.filter((m) => profile.supportedModels.includes(m.id));
-  return filtered.length > 0 ? filtered : MODEL_OPTIONS;
+  const filtered = STATIC_MODEL_OPTIONS.filter((m) => profile.supportedModels.includes(m.id));
+  return filtered.length > 0 ? filtered : STATIC_MODEL_OPTIONS;
 }
 
 export function reconcileAgentCapabilities(params: {
@@ -193,7 +234,7 @@ export function reconcileAgentCapabilities(params: {
     notes.push(`权限已自适应调整为「${fallbackPerm.label}」`);
   }
 
-  const modelMeta = MODEL_OPTIONS.find((m) => m.id === nextModel) ?? models[0];
+  const modelMeta = STATIC_MODEL_OPTIONS.find((m) => m.id === nextModel) ?? models[0];
   let nextThinking = params.currentThinking;
   if (profile.supportsThinking && !modelMeta.thinkingOptions.includes(nextThinking)) {
     nextThinking = modelMeta.thinkingOptions[0] ?? "medium";

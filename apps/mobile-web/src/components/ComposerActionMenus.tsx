@@ -40,12 +40,12 @@ import {
   getAgentModels,
   getAgentProfile,
   getPermissionMeta,
+  STATIC_AGENT_PROFILES,
   THINKING_LABELS,
 } from "@/lib/agent-capabilities";
 import { useI18n } from "@/lib/i18n";
 import { formatShortcut } from "@/lib/useAdaptiveViewport";
 import { cn } from "@/lib/utils";
-import { CLI_OPTIONS } from "@/mock-data";
 import type {
   ComposerChip,
   ComposerChipKind,
@@ -549,7 +549,12 @@ export function HandoffConfigPanel({
   onDone,
 }: ComposerHandoffMenuProps & { onDone: () => void }) {
   const { t } = useI18n();
-  const availableClis = CLI_OPTIONS.filter((c) => c.available);
+  const availableClis = Object.values(STATIC_AGENT_PROFILES).map((p) => ({
+    id: p.id,
+    bin: p.id,
+    ver: "",
+    available: true,
+  }));
   const defaultAgent =
     selectedHandoff?.targetAgent ?? availableClis.find((c) => c.id !== currentCli)?.id ?? currentCli;
 
@@ -841,7 +846,8 @@ export function AgentModelConfigPanel({
       <div className="space-y-1.5">
         <div className="text-[11px] font-medium text-[var(--soxu-text-tertiary)]">原生代理驱动</div>
         <div className="grid grid-cols-2 gap-1.5">
-          {CLI_OPTIONS.map((c) => {
+          {Object.values(STATIC_AGENT_PROFILES).map((p) => {
+            const c = { id: p.id, bin: p.id, ver: "", available: true };
             const active = cli === c.id;
             return (
               <button
@@ -862,7 +868,7 @@ export function AgentModelConfigPanel({
                   <span className="soxu-mono font-medium truncate">{c.id}</span>
                 </span>
                 <span className="text-[10px] text-[var(--soxu-text-tertiary)] shrink-0">
-                  {c.available ? `v${c.ver}` : "未装"}
+                  {c.available ? c.ver || p.displayName : "未装"}
                 </span>
               </button>
             );

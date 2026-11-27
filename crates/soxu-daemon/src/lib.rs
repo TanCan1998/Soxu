@@ -6,8 +6,10 @@ pub mod pairing;
 pub mod server;
 pub mod state;
 pub mod store;
+pub mod web_assets;
 
 pub use native_assets::{NativeAssetError, NativeAssetGuard};
 pub use server::build_router;
 pub use state::DaemonState;
 pub use store::SqliteStore;
+pub use web_assets::build_web_assets_router;

@@ -1,3 +1,10 @@
+/**
+ * 桌面单文件预览（desktop.html → design-system/soxu/preview.html）专用演示数据。
+ *
+ * 仅被 `DesktopWorkbench` 设计预览消费；移动端真实客户端（main.tsx）已全面
+ * 切换至 Daemon WS 真实链路（`lib/daemon-*`），严禁从本文件导入数据。
+ */
+
 import type {
   ApprovalItem,
   ArtifactItem,
@@ -12,7 +19,7 @@ import type {
   ScriptItem,
   TurnMessage,
   WorkspaceItem,
-} from "./types.ts";
+} from "@/types";
 
 export const INITIAL_WORKSPACES: WorkspaceItem[] = [
   {

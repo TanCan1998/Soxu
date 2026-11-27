@@ -74,11 +74,29 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   THINKING_LABELS,
+  STATIC_AGENT_PROFILES,
   getAgentModels,
   getAgentProfile,
   getPermissionMeta,
   reconcileAgentCapabilities,
 } from "@/lib/agent-capabilities";
+import {
+  DaemonClient,
+  claimPairing,
+  clearStoredPairing,
+  consumeOfferFromLocation,
+  loadStoredPairing,
+  saveStoredPairing,
+  type ConnectionPhase,
+  type StoredPairing,
+} from "@/lib/daemon-client";
+import {
+  applyEventToPatch,
+  mapSnapshot,
+  pickDefaultSession,
+  upsertMappedTurn,
+} from "@/lib/daemon-store";
+import { type EventEnvelope, type ServerHello } from "@/lib/daemon-protocol";
 import { I18nProvider, useI18n } from "@/lib/i18n";
 import {
   applyPreferencesToDom,
@@ -90,21 +108,48 @@ import {
 import { formatShortcut, isImeComposing, useAdaptiveViewport } from "@/lib/useAdaptiveViewport";
 import { cn } from "@/lib/utils";
 import "./index.css";
-import {
-  CLI_OPTIONS,
-  INITIAL_APPROVALS,
-  INITIAL_ARTIFACT,
-  INITIAL_ASK,
-  INITIAL_DIFF_FILES,
-  INITIAL_LIVE_STEPS,
-  INITIAL_QUICK_CHATS,
-  INITIAL_SCHEDULES,
-  INITIAL_SCRIPTS,
-  INITIAL_TURNS,
-  INITIAL_WORKSPACES,
-  MOBILE_QUICK_CHIPS,
-  NATIVE_HISTORY,
-} from "./mock-data";
+
+/** 真实链路下未由 Daemon 供给的模块级占位：等对应协议能力接入后自然替换。 */
+const EMPTY_DIFF_FILES: import("./types").DiffFileItem[] = [];
+const EMPTY_LIVE_STEPS: LiveStepItem[] = [];
+const EMPTY_SCRIPTS: ScriptItem[] = [];
+const EMPTY_SCHEDULES: ScheduleItem[] = [];
+const EMPTY_ARTIFACT: ArtifactItem = {
+  id: "empty",
+  title: "暂无活跃产物",
+  kind: "plan",
+  path: "",
+  summary: "当前会话尚未产出可审阅的结构化产物。",
+  status: "draft",
+  content: [],
+};
+const EMPTY_ASK: AskQuestionState = {
+  id: "",
+  prompt: "当前会话暂无待确认的结构化提问",
+  options: [],
+  selectedId: "",
+  customNote: "",
+  submitted: false,
+};
+const MOBILE_QUICK_CHIPS = {
+  running: [
+    { id: "qc-check", label: "先跑 check-all 别急着提交", mode: "steer" as const },
+    { id: "qc-stop-risk", label: "遇高危改动先暂停汇报", mode: "steer" as const },
+    { id: "qc-aoci", label: "收尾对齐本地认知索引", mode: "queue" as const },
+  ],
+  idle: [
+    { id: "qc-summary", label: "总结本轮改动与潜在风险", mode: "steer" as const },
+    { id: "qc-tests", label: "运行全工作区增量门禁", mode: "steer" as const },
+    { id: "qc-commit", label: "生成 Git Emoji 提交预览", mode: "steer" as const },
+  ],
+};
+
+const CLI_OPTIONS: import("./types").CliOption[] = Object.values(STATIC_AGENT_PROFILES).map((p) => ({
+  id: p.id,
+  bin: p.id,
+  ver: "",
+  available: true,
+}));
 import type {
   ApprovalItem,
   ArtifactItem,
@@ -192,27 +237,27 @@ function MobileAppInner({
 
   const [activeTab, setActiveTab] = useState<MobileTab>("session");
   const [inboxSubMode, setInboxSubMode] = useState<"triage" | "approvals">("triage");
-  const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(INITIAL_WORKSPACES);
-  const [quickChats, setQuickChats] = useState<QuickChatItem[]>(INITIAL_QUICK_CHATS);
+  const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>([]);
+  const [quickChats, setQuickChats] = useState<QuickChatItem[]>([]);
   const [targetKind, setTargetKind] = useState<"workspace" | "quick">("workspace");
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("wks-m2");
-  const [selectedQuickChatId, setSelectedQuickChatId] = useState<string>("chat-arch");
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const [selectedQuickChatId, setSelectedQuickChatId] = useState<string>("");
   const [bucketFilter, setBucketFilter] = useState<"all" | WorkspaceBucket>("all");
   const [openProjects, setOpenProjects] = useState<Record<string, boolean>>({ Soxu: true, Magpie: true });
   const [archivedOpen, setArchivedOpen] = useState(false);
 
-  const [approvals, setApprovals] = useState<ApprovalItem[]>(INITIAL_APPROVALS);
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [approvalSubTab, setApprovalSubTab] = useState<"pending" | "history">("pending");
-  const [askQuestion, setAskQuestion] = useState<AskQuestionState>(INITIAL_ASK);
-  const [turns, setTurns] = useState<TurnMessage[]>(INITIAL_TURNS);
-  const [liveSteps, setLiveSteps] = useState<LiveStepItem[]>(INITIAL_LIVE_STEPS);
+  const [askQuestion, setAskQuestion] = useState<AskQuestionState>(EMPTY_ASK);
+  const [turns, setTurns] = useState<TurnMessage[]>([]);
+  const [liveSteps, setLiveSteps] = useState<LiveStepItem[]>(EMPTY_LIVE_STEPS);
   const [stepsOpen, setStepsOpen] = useState(false);
-  const [activeArtifact, setActiveArtifact] = useState<ArtifactItem>(INITIAL_ARTIFACT);
-  const [scripts, setScripts] = useState<ScriptItem[]>(INITIAL_SCRIPTS);
-  const [schedules, setSchedules] = useState<ScheduleItem[]>(INITIAL_SCHEDULES);
+  const [activeArtifact, setActiveArtifact] = useState<ArtifactItem>(EMPTY_ARTIFACT);
+  const [scripts, setScripts] = useState<ScriptItem[]>(EMPTY_SCRIPTS);
+  const [schedules, setSchedules] = useState<ScheduleItem[]>(EMPTY_SCHEDULES);
   const [magpieMode, setMagpieMode] = useState<"magpie_managed" | "standalone_native">("magpie_managed");
   const [daemonOnline, setDaemonOnline] = useState<boolean>(false);
-  const [seqCursor, setSeqCursor] = useState<number>(1056);
+  const [seqCursor, setSeqCursor] = useState<number>(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [lostControlNote, setLostControlNote] = useState<string | null>(null);
 
@@ -256,7 +301,7 @@ function MobileAppInner({
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
   const [rightInspectorTab, setRightInspectorTab] = useState<"diff" | "artifact" | "scripts">("diff");
-  const [selectedDiffFilePath, setSelectedDiffFilePath] = useState<string>(INITIAL_DIFF_FILES[0].path);
+  const [selectedDiffFilePath, setSelectedDiffFilePath] = useState<string>("");
   const [diffFilter, setDiffFilter] = useState<string>("");
   const [diffBase, setDiffBase] = useState<"uncommitted" | "main" | "checkpoint">("uncommitted");
   const [searchQuery, setSearchQuery] = useState("");
@@ -265,6 +310,21 @@ function MobileAppInner({
   const [pairCode, setPairCode] = useState<string>("");
   const [newBranchName, setNewBranchName] = useState<string>("feat/19-mobile-remote");
   const [newQuickTitle, setNewQuickTitle] = useState<string>("");
+
+  // ---------- 真实 Daemon 链路状态 ----------
+  // pairing 为 null 表示未认证（展示引导页）；非 null 后由 client effect 建立 WS。
+  const [pairing, setPairing] = useState<StoredPairing | null>(() => loadStoredPairing());
+  const [connPhase, setConnPhase] = useState<ConnectionPhase>("offline");
+  const [connDetail, setConnDetail] = useState<string | null>(null);
+  const [offerHint, setOfferHint] = useState<string | null>(null);
+  const [pairError, setPairError] = useState<string | null>(null);
+  const [pairingBusy, setPairingBusy] = useState(false);
+  const clientRef = useRef<DaemonClient | null>(null);
+  const [sessionsState, setSessionsState] = useState<import("@/lib/daemon-protocol").SessionSummary[]>([]);
+  const sessionsStateRef = useRef<import("@/lib/daemon-protocol").SessionSummary[]>([]);
+  sessionsStateRef.current = sessionsState;
+  // 6 位码配对目标端点：默认当前页面来源（经 rust-embed 伺服时即 daemon 本身），可手动改写
+  const [daemonEndpoint, setDaemonEndpoint] = useState<string>(() => window.location.origin);
 
   useEffect(() => {
     const resolved = applyPreferencesToDom(prefs);
@@ -294,6 +354,94 @@ function MobileAppInner({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, []);
+
+  // ---------- 真实 Daemon 链路：#offer= 自动配对 / WS 连接 / 增量事件应用 ----------
+
+  // 1. 首次挂载时检测 #offer= 片段（扫码进入），自动消费一次性令牌完成配对
+  useEffect(() => {
+    const offer = consumeOfferFromLocation();
+    if (!offer) return;
+    setOfferHint(`检测到配对链接（守护进程指纹 ${offer.daemon_fingerprint.slice(0, 8)}…），正在自动配对…`);
+    setPairingBusy(true);
+    claimPairing(offer.endpoint_url, { kind: "offer_token", value: offer.one_time_token })
+      .then((claimed) => {
+        const next: StoredPairing = {
+          endpoint_url: offer.endpoint_url,
+          bearer_token: claimed.bearer_token,
+          device_id: claimed.device_id,
+          daemon_fingerprint: claimed.daemon_fingerprint,
+        };
+        saveStoredPairing(next);
+        setPairing(next);
+        setOfferHint(null);
+        flashToast("已通过扫码链接完成配对");
+      })
+      .catch((err: unknown) => {
+        setOfferHint(null);
+        setPairError(err instanceof Error ? err.message : "扫码配对失败");
+      })
+      .finally(() => setPairingBusy(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 2. 已配对时建立 WS 连接：握手快照 → 实时事件应用（含增量追平由 Daemon 按 after_seq 完成）
+  useEffect(() => {
+    if (!pairing) return;
+    const client = new DaemonClient(
+      pairing,
+      {
+        onPhase: (phase, detail) => {
+          setConnPhase(phase);
+          setConnDetail(detail ?? null);
+          setDaemonOnline(phase === "online");
+        },
+        onServerHello: (hello: ServerHello) => {
+          const mapped = mapSnapshot(hello.snapshot);
+          setWorkspaces(mapped.workspaces);
+          setQuickChats(mapped.quickChats);
+          setApprovals(mapped.approvals);
+          setAskQuestion(mapped.askQuestion);
+          setSessionsState(hello.snapshot.sessions);
+          setMagpieMode(hello.magpie_detected ? "magpie_managed" : "standalone_native");
+          setSeqCursor((prev) => Math.max(prev, hello.latest_seq));
+          const first = pickDefaultSession(hello.snapshot.sessions);
+          if (first) {
+            setTargetKind(first.target.kind === "workspace" ? "workspace" : "quick");
+            if (first.target.kind === "workspace") setSelectedWorkspaceId(first.target.workspace_id);
+            else setSelectedQuickChatId(first.target.chat_id);
+          }
+        },
+        onCatchUpEvents: () => {},
+        onLiveEvent: (env: EventEnvelope) => {
+          setSeqCursor((prev) => Math.max(prev, env.seq));
+          const patch = applyEventToPatch(env, {});
+          if (patch.workspaces) setWorkspaces(patch.workspaces);
+          if (patch.quickChats) setQuickChats(patch.quickChats);
+          if (patch.approvals) setApprovals(patch.approvals);
+          if (patch.askQuestion) setAskQuestion(patch.askQuestion);
+          if (patch.sessionMessage) {
+            const { session_id, message } = patch.sessionMessage;
+            const sess = sessionsStateRef.current.find((s) => s.session_id === session_id);
+            const isCurrent = sess
+              ? sess.target.kind === "workspace"
+                ? sess.target.workspace_id === selectedWorkspaceId
+                : sess.target.chat_id === selectedQuickChatId
+              : false;
+            if (isCurrent) setTurns((cur) => upsertMappedTurn(cur, message));
+          }
+        },
+      },
+      0,
+    );
+    clientRef.current = client;
+    client.connect();
+    return () => {
+      client.close();
+      clientRef.current = null;
+    };
+    // pairing 变化（新配对/解除）时重建连接；选中会话变化不重建
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairing]);
 
   useEffect(() => {
     const onAltPerm = (e: KeyboardEvent) => {
@@ -358,12 +506,12 @@ function MobileAppInner({
 
   const filteredDiffFiles = useMemo(() => {
     const q = diffFilter.trim().toLowerCase();
-    if (!q) return INITIAL_DIFF_FILES;
-    return INITIAL_DIFF_FILES.filter((f) => f.path.toLowerCase().includes(q));
+    if (!q) return EMPTY_DIFF_FILES;
+    return EMPTY_DIFF_FILES.filter((f) => f.path.toLowerCase().includes(q));
   }, [diffFilter]);
 
   const activeDiffFile =
-    filteredDiffFiles.find((f) => f.path === selectedDiffFilePath) ?? filteredDiffFiles[0] ?? INITIAL_DIFF_FILES[0];
+    filteredDiffFiles.find((f) => f.path === selectedDiffFilePath) ?? filteredDiffFiles[0] ?? EMPTY_DIFF_FILES[0];
 
   const projectGroups = Array.from(
     filteredWorkspaces.reduce((map, w) => {
@@ -379,8 +527,8 @@ function MobileAppInner({
     ...workspaces.filter((w) => w.archived).map((w) => ({ kind: "workspace" as const, id: w.id, title: `${w.project} / ${w.branch}`, sub: w.diffStat })),
   ];
 
-  const totalDiffAdded = useMemo(() => INITIAL_DIFF_FILES.reduce((acc, f) => acc + f.added, 0), []);
-  const totalDiffDeleted = useMemo(() => INITIAL_DIFF_FILES.reduce((acc, f) => acc + f.deleted, 0), []);
+  const totalDiffAdded = useMemo(() => EMPTY_DIFF_FILES.reduce((acc, f) => acc + f.added, 0), []);
+  const totalDiffDeleted = useMemo(() => EMPTY_DIFF_FILES.reduce((acc, f) => acc + f.deleted, 0), []);
   const doneLiveSteps = liveSteps.filter((s) => s.status === "done").length;
   const activeLiveStep = liveSteps.find((s) => s.status === "in_progress") ?? liveSteps[0];
 
@@ -397,11 +545,33 @@ function MobileAppInner({
     : undefined;
 
   function simulateSeqCatchup() {
-    setSeqCursor((prev) => {
-      const next = prev + 17;
-      flashToast(`事件流增量追平完成：游标 #${prev} 至 #${next}`);
-      return next;
-    });
+    // 真实链路：向 Daemon 请求 after_seq 增量事件追平（不再伪造游标跳动）
+    const client = clientRef.current;
+    if (!client || connPhase !== "online") {
+      flashToast("当前未连接守护服务，无法追平事件流");
+      return;
+    }
+    const from = client.currentSeq;
+    client
+      .rpc({ method: "catch_up_events", params: { after_seq: from, limit: 500 } })
+      .then((resp) => {
+        if (!resp.ok || resp.result?.kind !== "events") {
+          flashToast("追平请求失败，请稍后重试");
+          return;
+        }
+        const { events, latest_seq } = resp.result.data;
+        for (const env of events) {
+          const patch = applyEventToPatch(env, {});
+          if (patch.workspaces) setWorkspaces(patch.workspaces);
+          if (patch.quickChats) setQuickChats(patch.quickChats);
+          if (patch.approvals) setApprovals(patch.approvals);
+          if (patch.askQuestion) setAskQuestion(patch.askQuestion);
+          setSeqCursor((prev) => Math.max(prev, env.seq));
+        }
+        setSeqCursor((prev) => Math.max(prev, latest_seq));
+        flashToast(`事件流增量追平完成：#${from} → #${latest_seq}（${events.length} 条）`);
+      })
+      .catch(() => flashToast("追平请求失败，请稍后重试"));
   }
 
   function handleSelectCli(nextCliId: string, override?: { model?: string; thinking?: string }, keepSheetOpen = false) {
@@ -1794,7 +1964,7 @@ function MobileAppInner({
             title="点击模拟断线重连后游标增量追平"
           >
             <div className="text-[11px] soxu-mono soxu-tabular text-[var(--soxu-text-tertiary)] truncate">
-              {daemonOnline ? t("mobile.daemonOnline") : t("mobile.remoteClient")} · {t("mobile.cursorPrefix", { seq: seqCursor })}
+              {daemonOnline ? t("mobile.daemonOnline") : connDetail ? `${t("mobile.remoteClient")} · ${connDetail}` : t("mobile.remoteClient")} · {t("mobile.cursorPrefix", { seq: seqCursor })}
             </div>
             <div className="text-[11.5px] soxu-mono text-[var(--soxu-text-secondary)] truncate max-w-[200px]">
               {activeScopeTitle}
@@ -2432,7 +2602,7 @@ function MobileAppInner({
                   }}
                   className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] whitespace-nowrap border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)] hover:border-[var(--soxu-border-strong)] cursor-pointer transition-colors shrink-0"
                 >
-                  <span>{INITIAL_DIFF_FILES.length} 个文件已更改</span>
+                  <span>{filteredDiffFiles.length} 个文件已更改</span>
                   <span className="soxu-mono soxu-tabular text-[var(--soxu-semantic-success)]">+{totalDiffAdded}</span>
                   <span className="soxu-mono soxu-tabular text-[var(--soxu-semantic-danger)]">-{totalDiffDeleted}</span>
                 </button>
@@ -2781,6 +2951,83 @@ function MobileAppInner({
       </div>
     </aside>
   );
+
+  // 未认证：全屏配对引导页（设计规范 05 · 3.1：扫码降级 + 6 位码表单 + 引导添加主屏幕）
+  if (!pairing) {
+    return (
+      <div
+        className="h-dvh flex flex-col items-center justify-center gap-6 bg-[var(--soxu-surface-canvas)] text-[var(--soxu-text-primary)] px-6 soxu-safe-top soxu-safe-bottom"
+        style={{ "--soxu-kb-inset": "0px" } as React.CSSProperties}
+      >
+        <div className="flex flex-col items-center gap-2 text-center">
+          <span className="text-2xl font-bold tracking-tight">{t("brand.name")}</span>
+          <span className="text-sm text-[var(--soxu-text-secondary)]">移动遥控尚未与守护服务配对</span>
+          <span className="text-xs text-[var(--soxu-text-tertiary)] max-w-[300px] leading-relaxed">
+            在桌面端打开「扫码配对」后，用系统相机扫描二维码即可一键完成配对；或直接输入 6 位一次性配对码。
+          </span>
+        </div>
+
+        {offerHint && (
+          <div className="w-full max-w-[340px] rounded-xl p-3 text-xs bg-[var(--soxu-semantic-accent-soft)] text-[var(--soxu-semantic-accent)] text-center">
+            {offerHint}
+          </div>
+        )}
+        {pairingBusy && <div className="text-xs text-[var(--soxu-text-tertiary)]">正在与守护服务握手…</div>}
+        {pairError && (
+          <div className="w-full max-w-[340px] rounded-xl p-3 text-xs bg-[var(--soxu-semantic-danger-soft)] text-[var(--soxu-semantic-danger)]">{pairError}</div>
+        )}
+
+        <div className="w-full max-w-[340px] flex flex-col gap-2.5">
+          <input
+            type="text"
+            inputMode="url"
+            value={daemonEndpoint}
+            onChange={(e) => setDaemonEndpoint(e.target.value.trim())}
+            placeholder="守护服务地址（例如 http://192.168.1.42:7698）"
+            className="w-full rounded-xl px-3 py-2.5 text-sm soxu-mono bg-[var(--soxu-surface-composer)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)] outline-none"
+          />
+          <input
+            type="text"
+            inputMode="numeric"
+            value={pairCode}
+            onChange={(e) => setPairCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+            placeholder="输入 6 位一次性配对码（例如 849217）"
+            className="w-full rounded-xl px-3 py-2.5 text-base soxu-mono tracking-[0.2em] bg-[var(--soxu-surface-composer)] border border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)] outline-none"
+          />
+          <Button
+            variant="default"
+            size="lg"
+            disabled={pairCode.length !== 6 || pairingBusy}
+            onClick={() => {
+              setPairingBusy(true);
+              setPairError(null);
+              claimPairing(daemonEndpoint, { kind: "six_digit_code", value: pairCode })
+                .then((claimed) => {
+                  const next: StoredPairing = {
+                    endpoint_url: daemonEndpoint,
+                    bearer_token: claimed.bearer_token,
+                    device_id: claimed.device_id,
+                    daemon_fingerprint: claimed.daemon_fingerprint,
+                  };
+                  saveStoredPairing(next);
+                  setPairing(next);
+                  setPairCode("");
+                  flashToast("已校验指纹并建立安全连接");
+                })
+                .catch((err: unknown) => setPairError(err instanceof Error ? err.message : "配对失败"))
+                .finally(() => setPairingBusy(false));
+            }}
+          >
+            {pairingBusy ? "正在配对…" : "验证指纹并上线"}
+          </Button>
+        </div>
+
+        <div className="text-[11px] text-[var(--soxu-text-tertiary)] text-center max-w-[300px] leading-relaxed">
+          配对成功后建议将本页添加到主屏幕，以独立全屏 PWA 运行；访问凭据仅保存在本机。
+        </div>
+      </div>
+    );
+  }
 
   return (
     <TooltipProvider delayDuration={220}>
@@ -3169,31 +3416,90 @@ function MobileAppInner({
           )}
 
           {sheet === "pair" && (
-            <SheetContent title="扫码与配对码连接守护服务" subtitle="当前示例地址：127.0.0.1:7698" tall>
+            <SheetContent title="扫码与配对码连接守护服务" subtitle={pairing ? `已配对：${pairing.endpoint_url}` : "输入桌面端展示的 6 位一次性配对码"} tall>
               <div className="rounded-xl p-3 bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)] text-xs space-y-2">
                 <div className="font-semibold">一次性安全凭据配对</div>
                 <p className="text-[var(--soxu-text-tertiary)] m-0">
                   配对握手参数仅停留于本地链接片段中，不会上传或暴露在服务端日志中。
                 </p>
               </div>
-              <input
-                type="text"
-                value={pairCode}
-                onChange={(e) => setPairCode(e.target.value)}
-                placeholder="输入 6 位一次性配对码（例如 849 217）"
-                className="w-full rounded-xl px-3 py-2.5 text-base bg-[var(--soxu-surface-composer)] border border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)] outline-none"
-              />
-              <Button
-                variant="default"
-                size="lg"
-                onClick={() => {
-                  setDaemonOnline(true);
-                  setSheet(null);
-                  flashToast("已校验指纹并建立安全连接");
-                }}
-              >
-                验证指纹并上线
-              </Button>
+              {pairError && (
+                <div className="rounded-xl p-3 text-xs bg-[var(--soxu-semantic-danger-soft)] text-[var(--soxu-semantic-danger)]">{pairError}</div>
+              )}
+              {pairing ? (
+                <>
+                  <div className="text-xs text-[var(--soxu-text-secondary)]">
+                    设备 ID：<code className="soxu-mono">{pairing.device_id}</code>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="lg"
+                    onClick={() => {
+                      // 解除配对：吊销 daemon 侧设备 + 清除本机凭据
+                      const client = clientRef.current;
+                      const revoke = client
+                        ? client.rpc({ method: "revoke_paired_device", params: { device_id: pairing.device_id } }).catch(() => undefined)
+                        : Promise.resolve(undefined);
+                      revoke.finally(() => {
+                        clearStoredPairing();
+                        setPairing(null);
+                        setConnPhase("offline");
+                        setDaemonOnline(false);
+                        setSheet(null);
+                        flashToast("已解除配对并清除本机凭据");
+                      });
+                    }}
+                  >
+                    解除配对并清除本机凭据
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    inputMode="url"
+                    value={daemonEndpoint}
+                    onChange={(e) => setDaemonEndpoint(e.target.value.trim())}
+                    placeholder="守护服务地址（例如 http://192.168.1.42:7698）"
+                    className="w-full rounded-xl px-3 py-2.5 text-sm soxu-mono bg-[var(--soxu-surface-composer)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)] outline-none"
+                  />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={pairCode}
+                    onChange={(e) => setPairCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                    placeholder="输入 6 位一次性配对码（例如 849217）"
+                    className="w-full rounded-xl px-3 py-2.5 text-base soxu-mono tracking-[0.2em] bg-[var(--soxu-surface-composer)] border border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)] outline-none"
+                  />
+                  <Button
+                    variant="default"
+                    size="lg"
+                    disabled={pairCode.length !== 6 || pairingBusy || !daemonEndpoint}
+                    onClick={() => {
+                      setPairingBusy(true);
+                      setPairError(null);
+                      claimPairing(daemonEndpoint, { kind: "six_digit_code", value: pairCode })
+                        .then((claimed) => {
+                          const next: StoredPairing = {
+                            endpoint_url: daemonEndpoint,
+                            bearer_token: claimed.bearer_token,
+                            device_id: claimed.device_id,
+                            daemon_fingerprint: claimed.daemon_fingerprint,
+                          };
+                          saveStoredPairing(next);
+                          setPairing(next);
+                          setPairCode("");
+                          setSheet(null);
+                          flashToast("已校验指纹并建立安全连接");
+                        })
+                        .catch((err: unknown) => setPairError(err instanceof Error ? err.message : "配对失败"))
+                        .finally(() => setPairingBusy(false));
+                    }}
+                  >
+                    {pairingBusy ? "正在配对…" : "验证指纹并上线"}
+                  </Button>
+                </>
+              )}
             </SheetContent>
           )}
 
@@ -3229,32 +3535,9 @@ function MobileAppInner({
 
           {sheet === "history" && (
             <SheetContent title="导入本机原生代理历史" subtitle="只读扫描本地会话记录，支持原位续接或分叉至新工作树" tall>
-              {NATIVE_HISTORY.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-xl p-3 flex items-center justify-between gap-2 bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)]"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold truncate">{item.title}</div>
-                    <div className="flex items-center gap-1.5 text-xs soxu-mono text-[var(--soxu-text-tertiary)] truncate">
-                      <AgentIcon agent={item.cli} className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">
-                        {item.cli} · {item.project} · {item.updatedAt} · {item.turns} 轮
-                      </span>
-                    </div>
-                  </div>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setSheet(null);
-                      flashToast(`已只读导入原生历史：${item.title}`);
-                    }}
-                  >
-                    导入
-                  </Button>
-                </div>
-              ))}
+              <div className="rounded-xl p-6 text-center text-xs text-[var(--soxu-text-tertiary)] bg-[var(--soxu-surface-card-muted)] border border-[var(--soxu-border-subtle)]">
+                原生会话历史扫描尚未接入：待守护进程历史导入能力交付后在此展示。
+              </div>
             </SheetContent>
           )}
 

@@ -1,6 +1,7 @@
 //! Axum HTTP 与 WebSocket 双向 RPC / `afterSeq` 增量追平服务端。
 
 use crate::state::DaemonState;
+use crate::web_assets::build_web_assets_router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header, uri::Authority};
@@ -28,13 +29,15 @@ pub struct WsQuery {
 
 /// 构建完整守护进程 HTTP + WebSocket 路由表。
 pub fn build_router(state: Arc<DaemonState>) -> Router {
-    Router::new()
-        .route("/api/health", get(health_handler))
-        .route("/api/snapshot", get(snapshot_handler))
-        .route("/api/events", get(events_handler))
-        .route("/api/rpc", post(rpc_handler))
-        .route("/ws", get(ws_handler))
-        .with_state(state)
+    build_web_assets_router().merge(
+        Router::new()
+            .route("/api/health", get(health_handler))
+            .route("/api/snapshot", get(snapshot_handler))
+            .route("/api/events", get(events_handler))
+            .route("/api/rpc", post(rpc_handler))
+            .route("/ws", get(ws_handler))
+            .with_state(state),
+    )
 }
 
 fn extract_bearer(headers: &HeaderMap, query_token: Option<&str>) -> Option<String> {
