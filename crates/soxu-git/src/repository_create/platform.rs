@@ -5,7 +5,9 @@
 //! 因此 Windows 身份仅在"同一进程持有目录句柄链"期间用于检测替换，不宣称与 Linux 等价。
 
 use std::ffi::OsStr;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(any(target_os = "linux", windows))]
+use std::fs::OpenOptions;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -333,6 +335,11 @@ fn open_leaf(path: &Path) -> Result<DirectoryIdentity, RepositoryCreateError> {
     native_identity(&file)
 }
 
+/// 以受控原语打开目录句柄。
+///
+/// Linux 用 `O_DIRECTORY | O_NOFOLLOW`，Windows 以不含 DELETE 的共享模式持有；
+/// 两者都按句柄而非路径核对目录身份。
+#[cfg(any(target_os = "linux", windows))]
 fn open_handle(path: &Path) -> Result<File, RepositoryCreateError> {
     let mut options = OpenOptions::new();
     options.read(true);
@@ -348,14 +355,18 @@ fn open_handle(path: &Path) -> Result<File, RepositoryCreateError> {
             .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
-    {
-        return Err(RepositoryCreateError::UnsupportedPlatform(
-            "本平台没有受控目录句柄实现",
-        ));
-    }
-    #[cfg(any(target_os = "linux", windows))]
     options.open(path).map_err(RepositoryCreateError::Io)
+}
+
+/// 没有受控目录句柄原语的平台（如 Darwin）：一律 fail-closed 拒绝。
+///
+/// 这里不退化到普通 `open`：普通打开无法保证 `O_NOFOLLOW` 与不共享删除，
+/// 也就无法给出本条链要求的目录身份证明，放开即等于放宽零写入契约。
+#[cfg(not(any(target_os = "linux", windows)))]
+fn open_handle(_path: &Path) -> Result<File, RepositoryCreateError> {
+    Err(RepositoryCreateError::UnsupportedPlatform(
+        "本平台没有受控目录句柄实现",
+    ))
 }
 
 /// 拒绝符号链接、junction 与其他 reparse point。
