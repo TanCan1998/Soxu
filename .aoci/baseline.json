@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-27T06:06:20Z",
+  "updated_at": "2026-11-27T09:20:46Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "6c80dd51fb25cc246d7044df91db950288eee7988b4e72a1d0bcd3667b4b4722",
-      "size": 93469,
-      "normalized_sha256": "6c80dd51fb25cc246d7044df91db950288eee7988b4e72a1d0bcd3667b4b4722"
+      "sha256": "98ff17342e8816a5add279ecfc808abebd6a15ceec770cc9bc31fed05a650c98",
+      "size": 93551,
+      "normalized_sha256": "98ff17342e8816a5add279ecfc808abebd6a15ceec770cc9bc31fed05a650c98"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -845,9 +845,9 @@
     },
     "crates/soxu-git/tests/diff.rs": {
       "role": "observe",
-      "sha256": "9c8d5ac7c75135c37a2a8e87b27314e245bba046ea62521a36404bdb58f274c0",
-      "size": 40537,
-      "normalized_sha256": "9c8d5ac7c75135c37a2a8e87b27314e245bba046ea62521a36404bdb58f274c0"
+      "sha256": "e32c148f8e7fd2d507fdb7e00b183a20aee1a2d0cd533ca2e6a207069c7f27ca",
+      "size": 40553,
+      "normalized_sha256": "e32c148f8e7fd2d507fdb7e00b183a20aee1a2d0cd533ca2e6a207069c7f27ca"
     },
     "crates/soxu-git/tests/fixed_diff.rs": {
       "role": "observe",
@@ -857,9 +857,9 @@
     },
     "crates/soxu-git/tests/probe.rs": {
       "role": "observe",
-      "sha256": "fd7bad9c107ece8d42db42778cbe6898560b74263c5f0ceb30d63428f3ded85f",
-      "size": 19339,
-      "normalized_sha256": "fd7bad9c107ece8d42db42778cbe6898560b74263c5f0ceb30d63428f3ded85f"
+      "sha256": "44fda890c23a841530c301dfd56764b3cb876b384cbe90f8a4c3f0380a2bfe44",
+      "size": 19360,
+      "normalized_sha256": "44fda890c23a841530c301dfd56764b3cb876b384cbe90f8a4c3f0380a2bfe44"
     },
     "crates/soxu-git/tests/project.rs": {
       "role": "observe",
@@ -869,9 +869,9 @@
     },
     "crates/soxu-git/tests/repository_create.rs": {
       "role": "observe",
-      "sha256": "8b9d1dea39209d72669a84464f88169f58c28d2c4acf7a1d7f250bc197192bee",
-      "size": 47785,
-      "normalized_sha256": "8b9d1dea39209d72669a84464f88169f58c28d2c4acf7a1d7f250bc197192bee"
+      "sha256": "9d1ebb3dae1ad3855ad095e0e4d0cbe876ecbf27d3556d00fa435fa21c9f84f3",
+      "size": 55925,
+      "normalized_sha256": "9d1ebb3dae1ad3855ad095e0e4d0cbe876ecbf27d3556d00fa435fa21c9f84f3"
     },
     "crates/soxu-git/tests/status.rs": {
       "role": "observe",
@@ -893,9 +893,9 @@
     },
     "crates/soxu-git/tests/worktrees.rs": {
       "role": "observe",
-      "sha256": "df63f3214088eb964c8eee06d0cd87db7de7021330418e1504400c87b14bfac2",
-      "size": 22960,
-      "normalized_sha256": "df63f3214088eb964c8eee06d0cd87db7de7021330418e1504400c87b14bfac2"
+      "sha256": "18383df5aac911543252ee2676ab7c936830e3efddccb005940126763f0b4d95",
+      "size": 22976,
+      "normalized_sha256": "18383df5aac911543252ee2676ab7c936830e3efddccb005940126763f0b4d95"
     },
     "crates/soxu-magpie/Cargo.toml": {
       "role": "index",
@@ -1139,15 +1139,15 @@
     },
     "docs/ops/LESSONS.md": {
       "role": "index",
-      "sha256": "80dfbed850a337e71c586a91f7f7e6247e5dddf55ef5ee7707b9903cbbca7ad2",
-      "size": 26945,
-      "normalized_sha256": "80dfbed850a337e71c586a91f7f7e6247e5dddf55ef5ee7707b9903cbbca7ad2"
+      "sha256": "b17391b847a8104406c22afe48b475d31d06f501a2bef49c5bb747459ed2f057",
+      "size": 32272,
+      "normalized_sha256": "b17391b847a8104406c22afe48b475d31d06f501a2bef49c5bb747459ed2f057"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "ded67c0a492f42ba3f3d43e0c87311483544f803cf664dcf383291682757765f",
-      "size": 59164,
-      "normalized_sha256": "ded67c0a492f42ba3f3d43e0c87311483544f803cf664dcf383291682757765f"
+      "sha256": "4cce4ed92cd0127153eff1d502cc6f3239d8611318becd7d2a8d0c5a85ab81c3",
+      "size": 71780,
+      "normalized_sha256": "4cce4ed92cd0127153eff1d502cc6f3239d8611318becd7d2a8d0c5a85ab81c3"
     },
     "docs/user/getting-started.md": {
       "role": "index",
