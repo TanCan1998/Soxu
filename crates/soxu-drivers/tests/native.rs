@@ -28,6 +28,10 @@ impl Scratch {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&path).expect("create isolated fixture");
+        // 原生夹具以 `getcwd()` 的物理路径校对工作目录，Unix 上系统临时目录可能是
+        // 别名，测试根须取自真实路径；Windows 保留原路径以满足 Node cwd 契约。
+        #[cfg(unix)]
+        let path = path.canonicalize().expect("canonicalize isolated fixture");
         Self(path)
     }
 

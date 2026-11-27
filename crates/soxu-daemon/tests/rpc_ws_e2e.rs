@@ -1,6 +1,9 @@
 //! `soxu-daemon` HTTP / WebSocket 端到端集成测试（真实 TCP 监听 + SQLite 持久恢复）。
 
+mod common;
+
 use chrono::Utc;
+use common::fixture_root;
 use futures_util::{SinkExt, StreamExt};
 use soxu_daemon::{DaemonState, NativeAssetGuard, SqliteStore, build_router};
 use soxu_drivers::{DriverError, NativeCliKind, NativeDriver};
@@ -283,14 +286,15 @@ async fn spawn_guarded_daemon(
     Arc<DaemonState>,
     tokio::task::JoinHandle<()>,
 ) {
-    let asset = dir.path().join("hooks.json");
+    let root = fixture_root(dir);
+    let asset = root.join("hooks.json");
     std::fs::write(&asset, b"trusted").expect("write trusted fixture");
     let driver = native_fixture(NativeCliKind::Codex, "guarded.cjs").with_env(
         "SOXU_TEST_LAUNCH_LOG",
-        Some(dir.path().join("launch.log").into_os_string()),
+        Some(root.join("launch.log").into_os_string()),
     );
     let guard = NativeAssetGuard::new(
-        dir.path().to_owned(),
+        root.clone(),
         [(PathBuf::from("hooks.json"), b"trusted".to_vec())],
     )
     .expect("declare trusted asset");
@@ -302,7 +306,7 @@ async fn spawn_guarded_daemon(
         DaemonState::open(Some(dir.path()), &format!("http://{addr}"), false)
             .expect("open fixture")
             .with_native_driver_set(
-                dir.path().join("quick-chats"),
+                root.join("quick-chats"),
                 [(NativeCliKind::Codex, Ok(driver))],
             )
             .expect("register fixture")
@@ -340,6 +344,7 @@ async fn create_guarded_session(addr: std::net::SocketAddr, state: &DaemonState)
 #[tokio::test]
 async fn native_asset_guard_rechecks_resume_before_spawn_and_persistence() {
     let dir = TempDir::new().expect("isolated guarded fixture");
+    let root = fixture_root(&dir);
     let (addr, state, handle) = spawn_guarded_daemon(&dir).await;
     let session_id = create_guarded_session(addr, &state).await;
     let (mut ws, _) = connect_ws(
@@ -362,31 +367,27 @@ async fn native_asset_guard_rechecks_resume_before_spawn_and_persistence() {
             .ok
     );
     wait_for_ws_event(&mut ws, done).await;
-    std::fs::write(dir.path().join("hooks.json"), b"allowed").expect("same-length tampering");
+    std::fs::write(root.join("hooks.json"), b"allowed").expect("same-length tampering");
     let denied = post_rpc(addr, submit_native(&session_id, "tampered")).await;
     assert_eq!(
         denied.error.expect("guard error").code,
         ErrorCode::DriverUnavailable
     );
-    std::fs::rename(
-        dir.path().join("hooks.json"),
-        dir.path().join("saved-hooks.json"),
-    )
-    .expect("missing asset");
+    std::fs::rename(root.join("hooks.json"), root.join("saved-hooks.json")).expect("missing asset");
     assert!(
         !post_rpc(addr, submit_native(&session_id, "missing"))
             .await
             .ok
     );
-    std::fs::write(dir.path().join("hooks.json"), b"trusted").expect("restore asset");
-    std::fs::create_dir(dir.path().join("quick-chats/.agents")).expect("ancestor project override");
+    std::fs::write(root.join("hooks.json"), b"trusted").expect("restore asset");
+    std::fs::create_dir(root.join("quick-chats/.agents")).expect("ancestor project override");
     assert!(
         !post_rpc(addr, submit_native(&session_id, "project-override"))
             .await
             .ok
     );
     assert_eq!(
-        std::fs::read_to_string(dir.path().join("launch.log")).expect("spawn audit"),
+        std::fs::read_to_string(root.join("launch.log")).expect("spawn audit"),
         "first\nresume\n"
     );
     assert_eq!(
@@ -406,6 +407,7 @@ async fn native_asset_guard_rechecks_resume_before_spawn_and_persistence() {
 #[tokio::test]
 async fn native_asset_guard_rechecks_automatic_fifo_launch() {
     let dir = TempDir::new().expect("isolated guarded fixture");
+    let root = fixture_root(&dir);
     let (addr, state, handle) = spawn_guarded_daemon(&dir).await;
     let session_id = create_guarded_session(addr, &state).await;
     let (mut ws, _) = connect_ws(
@@ -433,10 +435,10 @@ async fn native_asset_guard_rechecks_automatic_fifo_launch() {
             ..
         })
     ));
-    std::fs::write(dir.path().join("hooks.json"), b"allowed").expect("tamper before dequeue");
+    std::fs::write(root.join("hooks.json"), b"allowed").expect("tamper before dequeue");
     wait_for_ws_event(&mut ws, |event| matches!(event, DaemonEvent::ErrorRaised { error, .. } if error.summary_zh == "原生启动资产或快聊目录未通过可信校验")).await;
     assert_eq!(
-        std::fs::read_to_string(dir.path().join("launch.log")).expect("spawn audit"),
+        std::fs::read_to_string(root.join("launch.log")).expect("spawn audit"),
         "delayed\n"
     );
     assert_eq!(
@@ -446,7 +448,7 @@ async fn native_asset_guard_rechecks_automatic_fifo_launch() {
             .len(),
         2
     );
-    std::fs::write(dir.path().join("hooks.json"), b"trusted").expect("restore guard");
+    std::fs::write(root.join("hooks.json"), b"trusted").expect("restore guard");
     assert!(
         post_rpc(addr, submit_native(&session_id, "after-restore"))
             .await
@@ -457,7 +459,7 @@ async fn native_asset_guard_rechecks_automatic_fifo_launch() {
     }
     wait_for_ws_event(&mut ws, |event| matches!(event, DaemonEvent::SessionUpdated(session) if session.bucket == WorkspaceBucket::Done)).await;
     assert_eq!(
-        std::fs::read_to_string(dir.path().join("launch.log")).expect("restored spawn audit"),
+        std::fs::read_to_string(root.join("launch.log")).expect("restored spawn audit"),
         "delayed\nqueued\nafter-restore\n"
     );
     handle.abort();

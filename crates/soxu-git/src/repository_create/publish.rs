@@ -213,6 +213,10 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("soxu-rc-publish-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).expect("临时根");
+        // 生产路径校验拒绝含链接的祖先，Unix 上夹具根须取自规范化后的真实路径。
+        #[cfg(unix)]
+        let root = root.canonicalize().expect("规范化临时根");
         let staged = root.join("staged");
         let target = root.join("target");
         std::fs::create_dir_all(staged.join(".git").join("objects")).expect("staged .git");

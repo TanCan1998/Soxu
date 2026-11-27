@@ -19,6 +19,10 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::Relaxed),
         ));
         fs::create_dir(&path).expect("创建夹具文件或目录");
+        // `WorktreeDirectory::open` 拒绝含链接的祖先，Unix 上的系统临时目录可能是
+        // 别名，因此夹具根创建后再规范化，后续一律使用同一真实根；Windows 保留原路径。
+        #[cfg(unix)]
+        let path = path.canonicalize().expect("规范化夹具根");
         fs::create_dir(path.join("worktree")).expect("创建夹具文件或目录");
         fs::write(path.join("worktree/.git"), b"gitdir: fixture").expect("创建夹具文件或目录");
         fs::create_dir(path.join("magpie")).expect("创建夹具文件或目录");

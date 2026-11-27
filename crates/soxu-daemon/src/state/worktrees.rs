@@ -530,8 +530,13 @@ mod tests {
     #[test]
     fn verified_directory_fixture_only_becomes_ready_after_context_preparation() {
         let fixture = tempfile::tempdir().expect("夹具操作应成功");
-        let target = fixture.path().join("worktree");
-        let magpie = fixture.path().join("magpie");
+        // `WorktreeDirectory::open` 会拒绝含链接的祖先，Unix 上的夹具根须取自真实路径。
+        #[cfg(unix)]
+        let fixture_root = fixture.path().canonicalize().expect("夹具操作应成功");
+        #[cfg(windows)]
+        let fixture_root = fixture.path().to_path_buf();
+        let target = fixture_root.join("worktree");
+        let magpie = fixture_root.join("magpie");
         fs::create_dir(&target).expect("夹具操作应成功");
         fs::create_dir(&magpie).expect("夹具操作应成功");
         fs::write(target.join(".git"), b"gitdir: fixture").expect("夹具操作应成功");

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-27T03:52:29Z",
+  "updated_at": "2026-11-27T05:04:01Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "6f400f1a8bbdd484fb489d18ed648a4bd7f1acbfe819a7f8ddc10dec652e96ea",
-      "size": 92385,
-      "normalized_sha256": "6f400f1a8bbdd484fb489d18ed648a4bd7f1acbfe819a7f8ddc10dec652e96ea"
+      "sha256": "4debaab8d30a098610b582a9d1a5cf107ef5c4333efc80405cb0409d235f9afa",
+      "size": 92424,
+      "normalized_sha256": "4debaab8d30a098610b582a9d1a5cf107ef5c4333efc80405cb0409d235f9afa"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -515,9 +515,9 @@
     },
     "crates/soxu-daemon/src/state/worktrees.rs": {
       "role": "index",
-      "sha256": "70ffdce5d20b2679f202dfa7a399ac10eb30fe3811662e5438aa7e90a0bbd7f3",
-      "size": 22724,
-      "normalized_sha256": "70ffdce5d20b2679f202dfa7a399ac10eb30fe3811662e5438aa7e90a0bbd7f3"
+      "sha256": "06c4d34debc29ea6c9565b803bda28669d81cd1131693b837fb397d652eb0f91",
+      "size": 23024,
+      "normalized_sha256": "06c4d34debc29ea6c9565b803bda28669d81cd1131693b837fb397d652eb0f91"
     },
     "crates/soxu-daemon/src/store.rs": {
       "role": "index",
@@ -525,17 +525,23 @@
       "size": 25362,
       "normalized_sha256": "752ceb24bc23bdade3197ddcce07148204be71cb048954a9c1391302367951f0"
     },
+    "crates/soxu-daemon/tests/common/mod.rs": {
+      "role": "observe",
+      "sha256": "8628379bd81d661d60c040bdb15366974ee5fd0eb5db2ec4ec2135c21004c8aa",
+      "size": 1457,
+      "normalized_sha256": "8628379bd81d661d60c040bdb15366974ee5fd0eb5db2ec4ec2135c21004c8aa"
+    },
     "crates/soxu-daemon/tests/native_assets.rs": {
       "role": "observe",
-      "sha256": "9dbbd40128e0b929ccf99bf308a76da8efdb4776bc2e79626f9301869d5a8b4b",
-      "size": 5831,
-      "normalized_sha256": "9dbbd40128e0b929ccf99bf308a76da8efdb4776bc2e79626f9301869d5a8b4b"
+      "sha256": "d64c3348ee25bc017cd3b27035ec478c6655193de4d472b8a298493234d7a9fc",
+      "size": 5928,
+      "normalized_sha256": "d64c3348ee25bc017cd3b27035ec478c6655193de4d472b8a298493234d7a9fc"
     },
     "crates/soxu-daemon/tests/rpc_ws_e2e.rs": {
       "role": "observe",
-      "sha256": "6b63b256ea52a039996007c106ba8f74accc268f398be342f1bc21cb419f0208",
-      "size": 84242,
-      "normalized_sha256": "6b63b256ea52a039996007c106ba8f74accc268f398be342f1bc21cb419f0208"
+      "sha256": "6c3e70520446adbb847e4b0726c16831786bb9b26b8e7e5c645ae7b24a628ee8",
+      "size": 84270,
+      "normalized_sha256": "6c3e70520446adbb847e4b0726c16831786bb9b26b8e7e5c645ae7b24a628ee8"
     },
     "crates/soxu-daemon/tests/worktree_lifecycle.rs": {
       "role": "observe",
@@ -599,9 +605,9 @@
     },
     "crates/soxu-drivers/tests/native.rs": {
       "role": "observe",
-      "sha256": "eca811f4eabdd3728cc596187e5f3a397b4294d7573a76b63edb6285eed1147b",
-      "size": 25922,
-      "normalized_sha256": "eca811f4eabdd3728cc596187e5f3a397b4294d7573a76b63edb6285eed1147b"
+      "sha256": "b630d422dcb324eec6965918ab1903aedfd4d39aaab5a02997bcbddbe2e2c7ae",
+      "size": 26238,
+      "normalized_sha256": "b630d422dcb324eec6965918ab1903aedfd4d39aaab5a02997bcbddbe2e2c7ae"
     },
     "crates/soxu-git/Cargo.toml": {
       "role": "index",
@@ -713,9 +719,9 @@
     },
     "crates/soxu-git/src/repository_create/checkout.rs": {
       "role": "index",
-      "sha256": "52a70f7a4f1637cbe863745653fd6af35cba58ec384134f6e5262b3d8d4901a2",
-      "size": 28184,
-      "normalized_sha256": "52a70f7a4f1637cbe863745653fd6af35cba58ec384134f6e5262b3d8d4901a2"
+      "sha256": "e1b6fbcfa0f28539fc588f6b72f97bea054eac3657eb9991949673026049d76c",
+      "size": 28702,
+      "normalized_sha256": "e1b6fbcfa0f28539fc588f6b72f97bea054eac3657eb9991949673026049d76c"
     },
     "crates/soxu-git/src/repository_create/clone.rs": {
       "role": "index",
@@ -743,9 +749,9 @@
     },
     "crates/soxu-git/src/repository_create/publish.rs": {
       "role": "index",
-      "sha256": "6469cfc67b1110440ec60dae2231299b2a0a942c8383ef8bd308a951bc5255d2",
-      "size": 11881,
-      "normalized_sha256": "6469cfc67b1110440ec60dae2231299b2a0a942c8383ef8bd308a951bc5255d2"
+      "sha256": "bcee39074a0429802a82df597af951b8e12609808b3ef5ba0f475b3811acec06",
+      "size": 12140,
+      "normalized_sha256": "bcee39074a0429802a82df597af951b8e12609808b3ef5ba0f475b3811acec06"
     },
     "crates/soxu-git/src/repository_create/sandbox.rs": {
       "role": "index",
@@ -863,9 +869,9 @@
     },
     "crates/soxu-git/tests/repository_create.rs": {
       "role": "observe",
-      "sha256": "04b3e3271b6ed0e19cd87d7258bccb4d45a152e1e2dcb01a44e0d435a34cf13d",
-      "size": 47525,
-      "normalized_sha256": "04b3e3271b6ed0e19cd87d7258bccb4d45a152e1e2dcb01a44e0d435a34cf13d"
+      "sha256": "8b9d1dea39209d72669a84464f88169f58c28d2c4acf7a1d7f250bc197192bee",
+      "size": 47785,
+      "normalized_sha256": "8b9d1dea39209d72669a84464f88169f58c28d2c4acf7a1d7f250bc197192bee"
     },
     "crates/soxu-git/tests/status.rs": {
       "role": "observe",
@@ -929,9 +935,9 @@
     },
     "crates/soxu-magpie/tests/worktree_context.rs": {
       "role": "observe",
-      "sha256": "90e51cba3646781b9236b7f6f44a8363a52e96d5c6a5f925d938ecd0005e69db",
-      "size": 7577,
-      "normalized_sha256": "90e51cba3646781b9236b7f6f44a8363a52e96d5c6a5f925d938ecd0005e69db"
+      "sha256": "6463a96189f2a226913ac1d47af55afd0a43caafcfec1a609a5aaaaa3010a3b4",
+      "size": 7892,
+      "normalized_sha256": "6463a96189f2a226913ac1d47af55afd0a43caafcfec1a609a5aaaaa3010a3b4"
     },
     "crates/soxu-protocol/Cargo.toml": {
       "role": "index",
@@ -1133,15 +1139,15 @@
     },
     "docs/ops/LESSONS.md": {
       "role": "index",
-      "sha256": "478b73944d6860b27f4136634aa57b6e45fa67e070ff02635ff3711391513410",
-      "size": 23639,
-      "normalized_sha256": "478b73944d6860b27f4136634aa57b6e45fa67e070ff02635ff3711391513410"
+      "sha256": "f9c5f9c74ad404eedf3e06c42c41803113202aa0d41e92ae4af0ca8402e9d647",
+      "size": 26322,
+      "normalized_sha256": "f9c5f9c74ad404eedf3e06c42c41803113202aa0d41e92ae4af0ca8402e9d647"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "e206ab1a3e47142b248ff7399a632d694a4edc08a3cdf4344d7ec483a393b5b6",
-      "size": 46144,
-      "normalized_sha256": "e206ab1a3e47142b248ff7399a632d694a4edc08a3cdf4344d7ec483a393b5b6"
+      "sha256": "c160e3c41eb9d97f9806e0629265ee36259cfbf0cb166e8c376a7371d611996d",
+      "size": 52429,
+      "normalized_sha256": "c160e3c41eb9d97f9806e0629265ee36259cfbf0cb166e8c376a7371d611996d"
     },
     "docs/user/getting-started.md": {
       "role": "index",

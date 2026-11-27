@@ -30,6 +30,10 @@ impl Fixture {
         let root =
             std::env::temp_dir().join(format!("soxu-rc-{tag}-{}-{unique}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
+        fs::create_dir(&root).expect("夹具临时根");
+        // 生产路径校验拒绝含链接的祖先，Unix 上夹具根须取自规范化后的真实路径。
+        #[cfg(unix)]
+        let root = root.canonicalize().expect("规范化夹具根");
         fs::create_dir_all(root.join("parent")).expect("受控父根");
         fs::create_dir_all(root.join("state")).expect("协调域");
         private_directory(&root.join("state"));
