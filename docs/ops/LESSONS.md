@@ -22,7 +22,7 @@
 | `L-001` | 并行构建 | 禁用 `mise run`，须注入 `mise env --json`（`MISE_DISABLE_TOOLS=java,maven`）再覆写独立 `$env:CARGO_TARGET_DIR` | `L3 · Seen 3×` | `AGENTS.md` / `SKILL.md` / `CODE_STANDARDS.md` |
 | `L-002` | WSL/Linux 复验 | 前置真实 Rust/Node `bin` 绕开 `mise` shims 并独立 cache；不在 WSL 内跑 `git` | `L3 · Seen 2×` | `SKILL.md` / 本文 |
 | `L-003` | Pi 子代理选型 | 先用 `pi --list-models` 核实，优先高稳定自动路由组 `magpie/auto/deepseek-v4.1-flash-1017` | `L2 · Seen 2×` | 派发默认预设 / 本文 |
-| `L-004` | AOCI stdio MCP | `$env:TEMP` 独立 `.mjs` 首包发 `id: 1` `initialize`；Overview 截断按合同停链走定向检索；不动 `.aoci/config.json` | `L3 · Seen 3×` | `SKILL.md` / 本文 |
+| `L-004` | AOCI stdio MCP | `$env:TEMP` 独立 `.mjs` 首包发 `id: 1` `initialize`；**Overview 截断即停该链**（禁读落地溢出/Search/Entry/scope/源码补 Challenge），source-bound 续做与完整认知验证严格区分 | `L3 · Seen 3×` | `SKILL.md` / 本文 |
 | `L-005` | AOCI 审查署名 | `scope acknowledge --reviewed-by` 统一用 `soxu-agent-<issue>`，严禁个人用户名 | `L2 · Seen 2×` | `SKILL.md` / 本文 |
 | `L-006` | 双平台真机门禁 | 含条件编译/文件系统/工作树/进程语义的变更，合入前必跑 WSL 全仓 Clippy + 目标集成测试 | `L3 · Seen 2×` | `CODE_STANDARDS.md` / 本文 |
 | `L-007` | 阻塞即时上报 | 遇冻结模块缺陷或两轮排查未果立刻发 `[BLOCKED / NEED-DECISION]`，主控拆单或 `steer` | `L3 · Seen 3×` | `AGENTS.md` / `SKILL.md` / `CODE_STANDARDS.md` |
@@ -31,6 +31,10 @@
 | `L-010` | PR 关联与防竞态合入 | PR 正文裸写 `Closes #<num>` 不套反引号；合入强制带 `--match-head-commit <reviewed_sha>` | `L3 · Seen 1×` | `CODE_STANDARDS.md` / `SKILL.md` / 本文 |
 | `L-011` | `.ps1` UTF-8 防乱码 | 中文 Windows 无终端宿主默认 CP936；读写 `git` 输出的门禁脚本开头必设 `Console/OutputEncoding = UTF8` | `L3 · Seen 1×` | `check-all.ps1` / `verify-commits-and-privacy.ps1` |
 | `L-012` | Pi 上下文与缓存 | 项目级 `.pi/settings.json` 必设 `autoload: false` + `["!**"]` 禁 `context-mode` 防 `.pi/npm/` 漂移，且 `trust.json` 覆 worktrees | `L3 · Seen 1×` | `.pi/settings.json` / `.gitignore` / `SKILL.md` |
+| `L-013` | 平台矩阵告警 | `-D warnings` 只译当前平台分支；macOS 目标必跑 `cargo clippy --target aarch64-apple-darwin` 交叉证据，不加 `#[allow]`、不移栽 Linux 原语 | `L2 · Seen 1×` | 本文 / 波次验收 |
+| `L-014` | 测试夹具后台维护 | 夹具 Git 命令必须与生产只读入口同源加 `-c maintenance.auto=false -c gc.auto=0`；回归用 trace2 `child_start`/`child_exit`，启动与退出须同 `sid` + 同 `child_id`；正向对照加 `*autoDetach=false`，只按观察到的同进程退出证据表述，不认定后代已回收 | `L2 · Seen 1×` | 本文 / 波次验收 |
+| `L-015` | 管道退出码 | `cargo ... \| tail` 拿到的是 `tail` 的 0；WSL/Linux 验证脚本必 `set -euo pipefail` 或查 `${PIPESTATUS[0]}`，重跑前 `--no-run` 重建并核对二进制 SHA/mtime | `L2 · Seen 1×` | 本文 / 波次验收 |
+| `L-016` | 测试内子进程等待 | 观察“某子进程是否被派生”时，受测进程 stdin/stdout/stderr 全 `Stdio::null()`，证据只从 trace2 读；等待用 `spawn`+`try_wait`+截止+`kill`+回收窗口，五态可区分（成功/非零退出/超时/观察异常/回收未确认）；禁 `output()` 无界收集 | `L2 · Seen 1×` | 本文 / 波次验收 |
 
 ---
 
@@ -53,7 +57,7 @@
 
 ### `L-004` AOCI stdio MCP 稳定初始化握手与宿主截断降级协议
 - **场景与根因**（`Seen 3× (2026-11-26)`）：内联 `node -e` 易引文冲突且缺少首包 `id: 1` `initialize` 会挂起；宿主插件下 `aoci_overview` 可能被截断。
-- **预防动作**：`$env:TEMP` 独立 `.mjs`/Python 脚本严格发 `id: 1` `initialize` → `notifications/initialized` → `tools/call`；Overview 截断时按合同中止并改走定向 `aoci_search` + 源码核对，严禁改 `.aoci/config.json`。
+- **预防动作**：`$env:TEMP` 独立 `.mjs`/Python 脚本严格发 `id: 1` `initialize` → `notifications/initialized` → `tools/call`；`aoci_overview` 出现 `continuation_required=false` 以外的截断信号（Host 截断、缺块、乱序、cursor 失败、Index/chunk 变化）时，**立即停止本次认知链**：禁止读取落地溢出文件，禁止用 `aoci_search` / `aoci_get_entries` / 改 `scope` / 读源码回补 Challenge，也禁止自行调小 `overview_delivery.chunk_tokens` 后自动重开（只提示用户）。截断后可继续 source-bound 调查与工程，但不得声称已具备完整系统认知；完整认知验证必须由一次干净的完整传输重新完成。严禁改 `.aoci/config.json`。
 - **验证方式**：`aoci_maintain`、`aoci_update_entry` 与 `aoci verify`/`check` 可重复通过；**状态**：活跃。
 
 ### `L-005` AOCI `scope acknowledge` 审查署名脱敏规范
@@ -96,10 +100,30 @@
 - **预防动作**：在仓内 `.pi/settings.json` 设 `"autoload": false` 与 `"extensions": ["!**"]` / `"skills": ["!**"]` 复用全局包禁用 `npm:context-mode`（缺 `autoload: false` 会触发 Pi 在工作树安装 `.pi/npm/` 并引发 AOCI `missing` 漂移），配合 `.gitignore` 忽略 `/.pi/npm/`，改由 AOCI + CodeGraph + 作用域门禁与独立探索会话协作；同步确认本机 Pi `trust.json` 已信任仓库与 worktrees 祖先目录。
 - **验证方式**：AOCI `verify`/`check` 对齐、新工作树 `setup-worktree.ps1` 就绪且 Pi 启动不触发 `ctx_*` 拒读循环；**状态**：活跃（已同步写入 `ADR-010`）。
 
+### `L-013` 平台矩阵告警只在目标平台编译时可见，必须交叉 Clippy 取证
+- **场景与根因**（`Seen 1× (2026-11-27)`）：`cargo clippy ... -- -D warnings` 只编译当前主机的 `cfg` 分支。`soxu-git` 的 `open_handle` 在 `#[cfg(not(any(target_os = "linux", windows)))]` 分支上留下未使用参数与 `needless_return`，Windows/Linux 本地与远端都不报警，直到 `macos-15` ARM64 原生 Runner 才暴露；反之 Linux 专属告警在 Windows 同样隐形。
+- **预防动作**：涉及平台条件编译的 crate 合入前必查 `rustup target list --installed`，并用 `cargo clippy -p <crate> --all-targets --target aarch64-apple-darwin --locked -- -D warnings` 补交叉编译证据。修法必须按 `cfg` 拆函数、保持 `UnsupportedPlatform` 等 fail-closed 语义，禁止 `#[allow]` 掩盖、禁止把 Linux 原语（`O_NOFOLLOW`/`O_DIRECTORY`）放宽到 Darwin。
+- **验证方式**：交叉 Clippy 零告警 + 远端对应平台 Runner 原生门禁；报告中严格区分「交叉编译证据」与「真机执行」，不得把前者写成后者。**状态**：活跃。
+
+### `L-014` 测试夹具的 Git 命令必须与生产只读入口同源禁用后台维护
+- **场景与根因**（`Seen 1× (2026-11-27)`）：run `45914578287` 的 Ubuntu 24.04 任务上，`binary_and_non_utf8_text_keep_distinct_output_contracts` 的整树快照只差 `.git/objects/maintenance.lock` 的增删与 `.git/objects` 的 mtime。根因是**夹具自己的 `git commit`** 派生了 detached `git maintenance run --auto`（trace2 可见 `child_start` 带 `--detach`），它持有 `objects/maintenance.lock` 并推进目录 mtime，与快照断言并发写。生产只读入口（`probe.rs`、`checkpoint/git.rs`、`repository_create/sandbox.rs`）都已用 `-c maintenance.auto=false -c gc.auto=0` 关闭，夹具漏了这套同源守卫。
+- **预防动作**：把守卫集中到夹具 Git 命令的唯一构造点（单一 `command_with` helper）。回归用 `GIT_TRACE2_EVENT` 的 `child_start`/`child_exit` 直接断言行为，不用 `sleep`、不删断言、不靠反复重跑；正向对照必须追加 `-c maintenance.autoDetach=false -c gc.autoDetach=false`（已验证 Git 2.53/2.56 均支持），让提交同步等待维护结束，并以**同 `sid` + 同 `child_id`** 的 `child_exit` 核实对照确实等到了该维护子进程退出；只表述对照实际观察到的退出证据，不认定其后代进程已全部回收。对照必须用**有界等待 + 无管道收集**（见 `L-016`），不得用 `Command::output()` 等可能派生子进程的命令。注意 `gc.auto=0` 单独并不足以阻止派生（Linux Git 2.53 实测仍派生），`maintenance.auto=false` 才是关键；对照只翻 `maintenance.auto=true`，`gc.auto` 保持 `0`，不要为了“让维护真跑一下”去开 `gc.auto`。
+- **验证方式**：删掉夹具守卫后回归用例如期失败（`started: true, detached: true`），恢复后受测字节 SHA-256 不变并通过；修复前旧实现重跑 40 次全部通过，证明重跑不能作为修复证据。**状态**：活跃。
+
+### `L-015` 管道会吞掉子进程退出码，重跑前必须重建二进制
+- **场景与根因**（`Seen 1× (2026-11-27)`）：`cargo test ... | tail` 的退出码是 `tail` 的 `0`，编译或测试失败会被静默当作成功；另一次竞态重复实验中，回退实验后恢复源码却没有重新构建，直接跑到了回退实验遗留的旧二进制，得出「全仓套件 8/8 失败」的错误结论。后者是操作疏漏，不是工具缺陷：`cargo test` 已按 mtime 判断，只是当时没有触发重建。
+- **预防动作**：WSL/Linux 验证脚本统一 `set -euo pipefail` 或显式检查 `${PIPESTATUS[0]}`；先重定向到日志文件、单独检查退出码、再 `tail` 日志。做过任何源码回退/恢复实验后，重复实验前必显式显示 `cargo test --no-run` 输出并打印二进制 `mtime` 与 SHA-256，确认跑的是当前源码。
+- **验证方式**：每一步都留下 `exit=0` 逐条痕迹，且旧二进制误判不再出现。**状态**：活跃。
+
+### `L-016` 测试内子进程必须无管道、有界等待，失败证据必须有界脱敏
+- **场景与根因**（`Seen 1× (2026-11-27)`）：PR `#91` 原 head 的 Windows `rust-check`（run `45917865092` job `140241392408`）在 `Run scoped unit & integration tests` 触到 30 分钟 job 级上限后 cancelled，且 job/run 日志均 `log not found`，远端无任何 per-binary 粒度。同范围本地运行（`-p soxu-daemon -p soxu-git`）**未复现**该超时（原候选 `111s`、最终源码 `94s`），因此远端超时仍属未定因。本条针对的是本用例阳性对照自身的、可独立证实的风险：旧实现刻意重新打开后台维护，并用 `Command::output()` 无界收集 stdout/stderr；`output()` 要读到管道所有写端关闭，一旦有继承写端的子/孙进程存活就会永久阻塞，表现为 step 永不结束、日志无后续行。
+- **预防动作**：凡“观察某子进程是否被派生”的用例，受测进程一律 `stdin(Stdio::null())` 与 `stdout/stderr` 不接管道，证据只从 trace2 文件读；等待改成 `spawn` + `try_wait` 轮询 + 截止时间 + 超时 `kill` + 回收窗口，并让“成功 / 非零退出 / 超时 / 观察异常 / 回收未确认”五种结局可分别判定（`try_wait` 自身失败也必须走 kill + 有界回收，不得直接丢弃可能存活的直接子进程）。作为证据的事件必须**按发出进程 `sid` 绑定**：`child_id` 只是该进程内部的子进程序号，启动与退出必须同 `sid` + 同 `child_id` 才算闭环，否则会把后一层 Git 子进程的同号事件误当成顶层维护进程已结束（依据 Git 官方 `api-trace2.html` 的 Event 语义）。超时只允许声称回收**直接子进程**，不得写成对后代进程的证明。断言失败信息只输出布尔与计数摘要，**禁止**在 CI 转储原始 trace2 或整份环境。
+- **验证方式**：移除夹具守卫后用例确定性失败且 `0.3s` 内结束；把期限临时改成 `0` 得到 `timed_out` 且 `0.14s` 结束；把 `sid` 绑定退回只看 `child_id` 时负例用例失败；恢复字节后 SHA-256 一致。**状态**：活跃。
+
 ---
 
 ## 四、已自动化防呆归档区
 
 > 当「活跃规则速查表」中的经验已被仓库脚本或自动化测试完全机器防呆且连续两个波次零复发后，将其迁入本区归档，以保持主控日常上下文精干。
 
-- *暂无已迁出归档项（当前 `L-001` ~ `L-012` 处于活跃巡检期）。*
+- *暂无已迁出归档项（当前 `L-001` ~ `L-016` 处于活跃巡检期）。*
