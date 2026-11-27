@@ -6,7 +6,9 @@
   [string]$ChangedFilesPath = "",
   [switch]$IncludeWorkingTree,
   [switch]$Full,
-  [ValidateSet("auto", "local", "pull_request", "push", "manual")]
+  # CI-C 明确入口：只有显式请求才追加 Intel 平台实例，普通 -Full 不再推导 Intel。
+  [switch]$IncludeIntel,
+  [ValidateSet("auto", "local", "pull_request", "push", "manual", "release")]
   [string]$Event = "auto",
   # 仓库根覆盖：默认本脚本所在仓库，仅供夹具测试指到临时工作区。
   [string]$RepoRoot = "",
@@ -36,6 +38,21 @@ $RustBaselinePlatform = "windows"
 $CrossHostConsumerPackages = @(
   "soxu-cli", "soxu-daemon", "soxu-desktop", "soxu-drivers", "soxu-git", "soxu-magpie"
 )
+
+# 平台目录是计划与证据共用的稳定身份表。计划只选择平台 id，runner 标签与 CPU 架构
+# 一律由本表派生，因此计划无法自造 runner 或冒充架构。键序即矩阵实例的确定性顺序。
+$PlatformCatalog = [ordered]@{
+  "windows"     = [ordered]@{ id = "windows"; os = "windows"; arch = "x64"; runner = "windows-2025" }
+  "linux"       = [ordered]@{ id = "linux"; os = "linux"; arch = "x64"; runner = "ubuntu-24.04" }
+  "macos-arm64" = [ordered]@{ id = "macos-arm64"; os = "macos"; arch = "arm64"; runner = "macos-15" }
+  "macos-intel" = [ordered]@{ id = "macos-intel"; os = "macos"; arch = "x64"; runner = "macos-15-intel" }
+}
+$PlatformOrder = @($PlatformCatalog.Keys)
+
+# 架构敏感路径：目前为空。repository_create 的 /proc/self/fd、Windows reparse 加固与
+# Darwin 写入拒绝都是 OS 契约，由常规 Windows/Linux/macOS ARM64 三平台矩阵覆盖，不得
+# 当成 CPU 架构敏感规则。只有出现可定位、可复现的 CPU 架构差异证据时才在本表登记。
+$ArchSensitivePathPrefixes = @()
 # 基础设施文件变更直接触发全量门禁。
 $InfraFullPaths = @(
   "mise.toml",
@@ -493,7 +510,9 @@ function Read-StructuredChangedFiles {
 
 $mode = "auto"
 $fullScope = [bool]$Full
-$intelRequested = [bool]$Full
+# Intel 只由显式入口（full-with-intel）或正式发版入口请求，不由普通 -Full 推导。
+$intelRequested = [bool]$IncludeIntel
+$releaseEntryRequested = $false
 $resolvedBaseRef = ""
 $headRefValue = $HeadRef
 $mergeBaseSha = ""
@@ -542,10 +561,17 @@ if (-not $fullScope) {
 
     switch ($effectiveEvent) {
       "manual" {
+        # 手动全量只提升工作区范围，不隐式追加 Intel；Intel 须显式 -IncludeIntel。
         $mode = "full"
         $fullScope = $true
-        $intelRequested = $true
         Add-Reason "manual_full"
+      }
+      "release" {
+        # 正式发版入口（tag 发版）：全量范围 + Intel 原生验证。
+        $mode = "full"
+        $fullScope = $true
+        $releaseEntryRequested = $true
+        Add-Reason "release_entry_full"
       }
       "push" {
         $mode = "push"
@@ -865,16 +891,50 @@ if ($runMobileWeb) {
   [void]$requiredPlatforms.Add("linux")
 }
 $releaseTouched = $changedFiles -contains ".github/workflows/release.yml"
-# Intel 平台只由手动全量与架构敏感入口显式请求；不能从“改了 release.yml”
-# 这类文件修改推导出当前应运行 Intel。发布专项仍在治理 job 内运行。
-if ($intelRequested) {
-  [void]$requiredPlatforms.Add("macos-intel")
-  Add-Reason "intel_platform:manual_full"
+
+# Intel 平台只由显式入口或架构敏感变化请求；不能从“改了 release.yml”这类文件修改、
+# 也不能从通用 -Full 推导出当前应运行 Intel。Intel 是 Rust 矩阵实例，rust=false 时无意义。
+if ($runRust) {
+  if (-not $intelRequested) {
+    if ($releaseEntryRequested) {
+      $intelRequested = $true
+      Add-Reason "intel_platform:release_entry"
+    } elseif ($ArchSensitivePathPrefixes.Count -gt 0) {
+      foreach ($path in $changedFiles) {
+        $sensitive = @($ArchSensitivePathPrefixes | Where-Object {
+            $path -eq $_ -or $path.StartsWith($_, [StringComparison]::Ordinal)
+          })
+        if ($sensitive.Count -gt 0) {
+          $intelRequested = $true
+          Add-Reason "intel_platform:arch_sensitive:$path"
+          break
+        }
+      }
+    }
+  } elseif ($intelRequested) {
+    Add-Reason "intel_platform:explicit_request"
+  }
+  if ($intelRequested) { [void]$requiredPlatforms.Add("macos-intel") }
+} elseif ($intelRequested) {
+  # 显式请求但未触及 Rust：不产生无意义的 Intel 实例，只留可追溯原因。
+  $intelRequested = $false
+  Add-Reason "intel_not_applicable:rust_disabled"
+}
+
+# Rust 矩阵实例集：只有 rust=true 才有矩阵，且严格按平台目录键序输出，
+# 因此 requiredPlatforms 里由 PWA-only 引入的 linux 不会凭空开启 Rust 矩阵。
+$rustPlatforms = [System.Collections.Generic.List[string]]::new()
+if ($runRust) {
+  foreach ($platformId in $PlatformOrder) {
+    if ($requiredPlatforms.Contains($platformId)) { $rustPlatforms.Add($platformId) }
+  }
 }
 
 $requiredJobs = [System.Collections.Generic.List[string]]::new()
 $requiredJobs.Add("detect-changes")
 $requiredJobs.Add("governance-and-privacy")
+# 纯 Rust 格式检查在 Ubuntu 上只跑一次，不随平台矩阵复制。
+if ($runRust) { $requiredJobs.Add("rust-format") }
 if ($runRust) { $requiredJobs.Add("rust-check") }
 if ($runMobileWeb) { $requiredJobs.Add("mobile-web-check") }
 $requiredJobs.Add("ci-gate")
@@ -910,6 +970,17 @@ $result = [ordered]@{
   seedPackages         = @($seedPackages)
   affectedPackages     = @($affectedPackages)
   requiredPlatforms    = @($requiredPlatforms)
+  # Rust 矩阵实例集：CI Gate 逐个平台要求“各有且仅有一份已通过证据”。
+  platforms            = @($rustPlatforms)
+  # 矩阵展开表：id/runner/os/arch 全部由平台目录派生，工作流只消费不自造。
+  # rust=false 时保留基线单实例，避免 GitHub 因空矩阵拒绝展开作业。
+  platformMatrix       = @(
+    if ($rustPlatforms.Count -gt 0) {
+      foreach ($platformId in $rustPlatforms) { $PlatformCatalog[$platformId] }
+    } else {
+      $PlatformCatalog["windows"]
+    }
+  )
   requiredJobs         = @($requiredJobs)
   testProfiles         = @($testProfiles)
   fallbackReasons      = @($fallbackReasons)

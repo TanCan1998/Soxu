@@ -25,11 +25,13 @@ function Invoke-Detect {
     [string]$BaseRef = "",
     [string]$HeadRef = "",
     [switch]$IncludeWorkingTree,
+    [switch]$IncludeIntel,
     [string]$EventName = ""
   )
   $params = @{}
   if ($Paths.Count -gt 0) { $params.ChangedFiles = $Paths }
   if ($Full) { $params.Full = $true }
+  if ($IncludeIntel) { $params.IncludeIntel = $true }
   if (-not [string]::IsNullOrEmpty($ChangedFilesJson)) { $params.ChangedFilesJson = $ChangedFilesJson }
   if (-not [string]::IsNullOrEmpty($ChangedFilesPathFile)) { $params.ChangedFilesPath = $ChangedFilesPathFile }
   if (-not [string]::IsNullOrEmpty($RepoRootOverride)) { $params.RepoRoot = $RepoRootOverride }
@@ -199,24 +201,59 @@ try {
 
   Assert-Condition (
     $releaseDocs.requiredPlatforms.Count -eq 0 -and
+    $releaseDocs.platforms.Count -eq 0 -and
     ($releaseDocs.testProfiles -contains "release-contract") -and
+    ($releaseDocs.requiredJobs -notcontains "rust-format") -and
     ($releaseDocs.requiredJobs -notcontains "rust-check") -and
     ($releaseDocs.requiredJobs -notcontains "mobile-web-check")
   ) "单改 release.yml 只在治理 job 跑发布专项，不推导 Intel 平台也不启动 Rust/PWA"
+
+  # repository_create 的 /proc/self/fd、Windows reparse 加固与 Darwin 写入拒绝都是 OS 契约，
+  # 由常规 Windows/Linux/macOS ARM64 三平台覆盖，不得当成 CPU 架构敏感规则去拉 Intel。
+  foreach ($osPath in @(
+      "crates/soxu-git/src/repository_create/clone.rs",
+      "crates/soxu-git/src/repository_create/platform.rs",
+      "crates/soxu-git/tests/repository_create.rs",
+      "crates/soxu-git/src/checkpoint/platform.rs",
+      "crates/soxu-git/src/worktree_lifecycle/identity.rs",
+      "crates/soxu-daemon/src/native_assets.rs"
+    )) {
+    $osOnly = Invoke-Detect @($osPath)
+    Assert-Condition (
+      $osOnly.rust -and
+      $osOnly.platforms -join ',' -eq "windows,linux,macos-arm64" -and
+      (-not ($osOnly.requiredPlatforms -contains "macos-intel")) -and
+      @($osOnly.reasons | Where-Object { $_ -like "intel_platform:*" }).Count -eq 0
+    ) "$osPath 属 OS 契约，按常规三平台验证且不触发 Intel"
+  }
 
   Assert-Condition ($git.requiredPlatforms -contains "windows" -and $git.requiredPlatforms -contains "linux" -and $git.requiredPlatforms -contains "macos-arm64" -and (-not ($git.requiredPlatforms -contains "macos-intel"))) "soxu-git 消费者闭包要求 Linux 与 ARM64 macOS，但文件修改不推导 Intel"
 
   Assert-Condition ($cargoRoot.requiredPlatforms -contains "linux" -and $cargoRoot.requiredPlatforms -contains "macos-arm64") "工作区级 Rust 变更要求 Linux 与 ARM64 macOS"
 
-  Assert-Condition ($explicitFull.requiredPlatforms -contains "macos-intel") "手动全量显式请求 Intel macOS"
+  Assert-Condition ($explicitFull.requiredPlatforms -contains "windows" -and $explicitFull.requiredPlatforms -contains "linux" -and $explicitFull.requiredPlatforms -contains "macos-arm64" -and (-not ($explicitFull.requiredPlatforms -contains "macos-intel"))) "普通 -Full 只提升工作区范围，不推导 Intel 平台"
+
+  Assert-Condition ($explicitFull.platforms -join ',' -eq "windows,linux,macos-arm64") "普通 -Full 的 Rust 矩阵实例固定为三平台且顺序确定"
+
+  # Intel 只保留两条入口：显式 full-with-intel 与正式发版（tag）入口。
+  $fullWithIntel = Invoke-Detect -Paths @("README.md") -Full -IncludeIntel
+  Assert-Condition ($fullWithIntel.requiredPlatforms -contains "macos-intel" -and $fullWithIntel.platforms -contains "macos-intel") "显式 full-with-intel 入口追加 Intel 矩阵实例"
+
+  $releaseEntry = Invoke-Detect -EventName "release"
+  Assert-Condition ($releaseEntry.full -and ($releaseEntry.requiredPlatforms -contains "macos-intel") -and ($releaseEntry.platforms -contains "macos-intel")) "正式发版入口提升全量并要求 Intel"
+
+  $intelWithoutRust = Invoke-Detect -Paths @("docs/ops/PROGRESS.md") -IncludeIntel
+  Assert-Condition ((-not $intelWithoutRust.rust) -and (-not ($intelWithoutRust.requiredPlatforms -contains "macos-intel")) -and @($intelWithoutRust.reasons | Where-Object { $_ -eq "intel_not_applicable:rust_disabled" }).Count -eq 1) "未触及 Rust 时显式 Intel 请求不产生无意义实例，并留下可追溯原因"
 
   Assert-Condition ($web.requiredPlatforms -contains "linux" -and (-not ($web.requiredPlatforms -contains "windows"))) "纯 PWA 变更只要求 Linux runner"
+
+  Assert-Condition ($web.platforms.Count -eq 0) "纯 PWA 变更的 requiredPlatforms 可含 linux，但不得因此开开 Rust 矩阵"
 
   Assert-Condition ($git.testProfiles -contains "cargo-clippy" -and $git.testProfiles -contains "cargo-test" -and (-not ($git.testProfiles -contains "design-tokens"))) "Rust 变更的测试配置只含 Rust 相关 profile"
 
   Assert-Condition ($docs.testProfiles.Count -eq 1 -and $docs.testProfiles[0] -eq "governance-and-privacy") "纯文档变更只配置治理与隐私 profile"
 
-  Assert-Condition (@($git.requiredJobs) -join ',' -eq "detect-changes,governance-and-privacy,rust-check,ci-gate") "必跑 job 集合与顺序确定，且 PWA 未触及时不列入"
+  Assert-Condition (@($git.requiredJobs) -join ',' -eq "detect-changes,governance-and-privacy,rust-format,rust-check,ci-gate") "必跑 job 集合与顺序确定，含独立 rust-format，且 PWA 未触及时不列入"
 
   # -------------------------------------------------------------------------
   # 三、Git 基准语义：无效/全零基准、本地工作区、merge base、push 完整树
@@ -291,6 +328,32 @@ try {
     $pr.changedFiles[0] -eq "docs/feature.md" -and
     $pr.mergeBase -ne ""
   ) "PR 以 merge base 求差，不把基准分支后续提交算进 PR 范围"
+
+  # workflow_dispatch 默认 scope 入口的真实参数组合：检测器的 Event 只有
+  # auto/local/pull_request/push/manual/release，auto 不开工作区模式时就进入 range 语义。
+  $dispatchRepo = New-GitFixture "git-dispatch-scope"
+  Write-FixtureFile $dispatchRepo "docs/base.md" "base"
+  $dispatchBase = Commit-Fixture $dispatchRepo "base"
+  Invoke-GitIn $dispatchRepo @("update-ref", "refs/remotes/origin/main", $dispatchBase) | Out-Null
+  Invoke-GitIn $dispatchRepo @("checkout", "-q", "-b", "feature") | Out-Null
+  Write-FixtureFile $dispatchRepo "docs/branch.md" "branch"
+  Commit-Fixture $dispatchRepo "branch" | Out-Null
+
+  $dispatch = Invoke-Detect -RepoRootOverride $dispatchRepo -EventName "auto" -BaseRef "origin/main" -HeadRef "HEAD"
+  Assert-Condition (
+    $dispatch.mode -eq "range" -and
+    ($dispatch.changedFiles -contains "docs/branch.md") -and
+    (-not ($dispatch.changedFiles -contains "docs/base.md"))
+  ) "workflow_dispatch 默认 scope 用 -Event auto -BaseRef origin/main -HeadRef HEAD 真实跑通 range 语义"
+
+  # 未声明的 Event 取值必须被拒绝，防止工作流里再写回不存在的契约。
+  $rangeRejected = $false
+  try { Invoke-Detect -RepoRootOverride $cleanRepo -EventName "range" | Out-Null } catch { $rangeRejected = $true }
+  Assert-Condition $rangeRejected "检测器拒绝未声明的 -Event range"
+
+  $ciWorkflowText = Get-Content -LiteralPath (Join-Path $repoRoot ".github/workflows/ci.yml") -Raw -Encoding utf8
+  Assert-Condition ($ciWorkflowText -notmatch 'detect-check-scope\.ps1[^\n]*-Event range') "ci.yml 不得使用检测器未声明的 -Event range"
+  Assert-Condition ($ciWorkflowText -match 'detect-check-scope\.ps1 -Event auto -BaseRef "origin/main" -HeadRef HEAD -Json') "ci.yml 的 workflow_dispatch 默认 scope 使用 -Event auto 加显式基准"
 
   # 删除、重命名、逗号、非 ASCII 与空白路径
   $renameRepo = New-GitFixture "git-rename"

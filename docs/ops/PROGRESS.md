@@ -17,7 +17,7 @@
 - **`main` 已合入 `#76` / PR `#77`（`ea9f345`）。** 完成按改动域与 Cargo 反向依赖分级的抗压 CI、`scripts/detect-check-scope.ps1` 门禁分流、`.github/workflows/release.yml` 与公开联动发版仓库 `TanCan1998/soxu-releases`。
 - **`main` 已合入 `#78` / PR `#79`（`481ed70`）与 PR `#81`（`0e969b6`）。** 项目级 `.pi/settings.json` 以 `autoload: false` 关闭 `context-mode`，派发脚本放行 `python 3.13` 并注入 `PYTHONUTF8=1`，同时修复 `detect-check-scope.ps1` 双括号 `[[bin]]` 误解析导致 `soxu-cli` 包名漏检的缺陷。
 - **`main` 已合入 `#80` / PR `#82`（`e9504d6`）。** 收窄 Linux 真机已检出 Worktree 诊断的 `pending` 放行条件，为 `project.rs` 补跨挂载点 stderr 严格白名单，并修复两处历史 Linux Clippy 告警。
-- **CI 抗压波次：`#83`（CI-A）已合入，`#86`（CI-B）待合入。** `#83` / PR `#85`（`a86024e`）交付 `ci-gate-plan/v1` 固定 job 契约、`Plan` / `Verify` 同源推导对账与发布资产白名单，已通过远端 CI 合入 `main` 并归档工作区。审核候选提交 `2216417` 的 run `45906220407` 是审核快照，合入后主线 run `45906614204` 核验的正是 CI-B 的派发基线 `a86024e`，两者是分开记录的两条证据。`#86`（CI-B）在 `feat/86-ci-b-change-scope` 交付 `schemaVersion: 1` 结构化变更计划、Cargo 元数据反向闭包、Git NUL 差异与基准语义、平台/必跑 job/测试配置推导，并保留 CI-A 的严格门禁对账与路径契约保真，等待主控复验与合入。
+- **CI 抗压波次：`#83`（CI-A）、`#86`（CI-B）已合入，`#88`（CI-C）在办。** `#83` / PR `#85`（`a86024e`）交付 `ci-gate-plan/v1` 固定 job 契约、`Plan` / `Verify` 同源推导对账与发布资产白名单，已通过远端 CI 合入 `main` 并归档工作区。审核候选提交 `2216417` 的 run `45906220407` 是审核快照，合入后主线 run `45906614204` 核验的正是 CI-B 的派发基线 `a86024e`，两者是分开记录的两条证据。`#86`（CI-B）已锁候选 `62c346f` 由 PR `#87` 合入 `main`（`8c01a53`），工作区 `wks_8bf43dd1b64bca90` 已归档；PR run `45909853439` 在 Ubuntu 26.04 实测 56 项检测器回归、202 项门禁断言与 POSIX 字面反斜杠用例，Windows Rust 门禁 156 通过、5 忽略。`#88`（CI-C）在工作区 `wks_7296ea2a4568da18` / 分支 `feat/88-ci-c-platform-matrix` 承接三平台动态矩阵与逐平台验收证据。
 - **CI 波次后续顺序**：CI-C 承接三平台动态矩阵的实际 job 执行与证据聚合，CI-D 后接；CI-E/F 与 CI-D 写入面正交。未经核验的原生测试与正式发布仍列为待办。
 - **M3 两份设计已合入 `main`。** `#57` 的显式 Init/Clone 与损坏恢复二次授权见 [仓库初始化、克隆与工作树恢复](../dev/git-init-clone-and-recovery.md)。`#58` 的轮次 Checkpoint 快照、先建 Safety Snapshot 再 Rewind 和文件级结构化提交见 [检查点、回退与结构化提交](../dev/git-checkpoint-rewind-commit.md)。
 - 仓库已启用合并自动删支（`delete_branch_on_merge = true`）与 Paseo Worktree 回收。
@@ -113,12 +113,13 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 三路均通过远端 CI 合入 `main`，工作区已归档、本地与远端分支已回收。`#69` 的 WSL `Ubuntu-26.04` 真机收尾验证（Rust `1.99.1`、独立 `CARGO_TARGET_DIR`）记录在 3.2 节；其原生二进制与相关原生测试未在本轮门禁中复跑，仍列为待办。
 
-#### 在办波次：CI 抗压（`#83` 已合入，`#86` 待合入）
+#### 在办波次：CI 抗压（`#83`、`#86` 已合入，`#88` 在办）
 
 | Issue / 任务 | 分支 / Paseo 工作区 | 状态 | Owned Paths |
 | :--- | :--- | :--- | :--- |
 | `#83` / PR `#85` CI-A 变更范围门禁与发布契约 | `feat/83-ci-a-strict-gate` / `wks_87a6a683f132b176` | 已合入 `a86024e`，工作区已归档 | `.github/workflows/ci.yml`、`scripts/verify-ci-gate.ps1`、`scripts/test-ci-gate.ps1`、AOCI |
-| `#86` CI-B 范围检测、Cargo Metadata 与测试计划 | `feat/86-ci-b-change-scope` / `wks_8bf43dd1b64bca90` | 执行中，等待主控复验与合入 | `scripts/detect-check-scope.ps1`、`scripts/test-check-scope.ps1`、`scripts/check-all.ps1`、`scripts/verify-ci-gate.ps1`、`scripts/test-ci-gate.ps1`、`ci.yml` 检测器接线、本看板、AOCI |
+| `#86` / PR `#87` CI-B 范围检测、Cargo Metadata 与测试计划 | `feat/86-ci-b-change-scope` / `wks_8bf43dd1b64bca90` | 已锁候选 `62c346f` 合入 `8c01a53`，工作区已归档 | `scripts/detect-check-scope.ps1`、`scripts/test-check-scope.ps1`、`scripts/check-all.ps1`、`scripts/verify-ci-gate.ps1`、`scripts/test-ci-gate.ps1`、`ci.yml` 检测器接线、本看板、AOCI |
+| `#88` CI-C 跨平台矩阵与逐平台验收证据 | `feat/88-ci-c-platform-matrix` / `wks_7296ea2a4568da18` | 执行中，等待主控复验与合入 | `.github/workflows/ci.yml` 矩阵与证据接线、`scripts/detect-check-scope.ps1` 平台/Intel 判据、`scripts/verify-ci-gate.ps1` 计划契约与证据对账、`scripts/collect-ci-evidence.ps1`、`scripts/test-check-scope.ps1`、`scripts/test-ci-gate.ps1`、本看板、AOCI |
 
 ### 3.2 已合入交付与验收证据边界
 
@@ -164,10 +165,10 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 主控复验并合入 `#86`（CI-B），随后按 **CI-C → CI-D** 顺序推进；CI-E/F 与 CI-D 写入面正交，可并行排期但不能共用同一工作树。
-2. CI-C 要把 CI-B 的结构化计划（`requiredPlatforms` / `requiredJobs` / `testProfiles` 与 `baseSha` / `headSha` / `checkoutSha`）接到真实三平台动态矩阵执行与证据聚合；动态矩阵可以按需扩展 job 契约，但必须保留 `CI Gate` 检查名、必跑只认 `success` 的严格证据与失败闭合，不得为接入矩阵而削弱对账。
+1. 主控复验并合入 `#88`（CI-C），随后按 **CI-D → CI-E/F** 顺序推进；CI-E/F 与 CI-D 写入面正交，可并行排期但不能共用同一工作树。
+2. CI-C 把 CI-B 的结构化计划（`platforms` / `platformMatrix` / `requiredPlatforms` / `requiredJobs` / `testProfiles` 与 `baseSha` / `headSha` / `checkoutSha`）接到真实三平台动态矩阵执行与逐平台证据聚合：每个平台一个 Rust 矩阵实例、依赖/Clippy/测试共用一个构建目录，纯 Rust 格式检查在 Ubuntu 上跑一次；`CI Gate` 检查名、必跑只认 `success` 的严格证据与失败闭合保持不变，不为接入矩阵而削弱对账。
 3. Git 后续候选继续按契约与共享写入范围排序：`#57-2` 只读恢复预览（恢复执行须另经二次授权）、`#58-D` 先建 Safety Snapshot 再执行 Rewind、`#58-E` 文件级结构化提交的预检与执行；`direct` MCP 运行时挂载与 Worktree 内写权限另排期，涉及 `soxu-protocol` 的变更先走独立契约 PR。
-4. 未经核验的原生测试、正式发布与 Intel 平台发版入口仍列为待办；Intel 只能由架构敏感、手动完整或发版入口显式请求，不从文件变更推导。
+4. 未经核验的跨平台原生测试与正式发版仍列为待办。Intel 只保留两条入口：显式 `full-with-intel` 手动入口与正式发版（tag）入口；普通 `-Full` 不含 Intel，也不从文件路径或 `release.yml` 修改推导。`repository_create` 的 `/proc/self/fd`、Windows reparse 加固与 Darwin 写入拒绝属 OS 契约，由常规 Windows/Linux/macOS ARM64 三平台覆盖。
 5. 在非 Windows 宿主补测 `#49`、`#51`、`#56`、`#69` 的真实注册、固定提交检出、宿主接入、路由重试与 Worktree 原生会话。`#69` 的 Linux 专属 `mod linux` 用例未在真实 Linux 宿主编译或运行（本机 WSL 启动返回 ERROR_BAD_EXE_FORMAT 且缺少 x86_64-linux-gnu-gcc），需留待 Linux 宿主补测。Windows 原生目录身份与 DACL 持续授权另行决策。
 6. `#26` 隔离只读快聊已合入。Daemon 托管快聊的项目目录入口继续关闭，后续另行验收项目配置来源、启动竞态和运行期隔离。Copilot 项目钩子安全、遥测、历史导入、附件、移交、更高权限及移动端投递另排验收。M2 和 M3 均仍有未交付范围。
 

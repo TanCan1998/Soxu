@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$Verifier = "",
   [switch]$RequireBash
 )
@@ -183,9 +183,12 @@ function New-PlanJson {
     [bool]$ScopeSelfTest = $false,
     [bool]$Full = $false,
     [object[]]$ChangedFiles = @("crates/soxu-git/src/probe.rs"),
+    # 平台矩阵实例集：默认与检测器的三平台常规覆盖一致。
+    [object[]]$Platforms = @("windows", "linux", "macos-arm64"),
     [bool]$SelfTest = $false,
     [bool]$ReleaseContract = $false,
     [object[]]$RustInstances = $null,
+    [switch]$OmitRustInstances,
     [string]$DependsOnRust = "rust",
     [string]$Version = "ci-gate-plan/v1",
     [int]$ScopeSchemaVersion = 0,
@@ -194,8 +197,12 @@ function New-PlanJson {
     [switch]$OmitSelfTest,
     [switch]$OmitScope,
     [switch]$OmitGate,
-    [switch]$OmitChangedFiles
+    [switch]$OmitChangedFiles,
+    # scope.platforms 可与 instances 分开篡改，用于构造“计划删平台”绕过用例。
+    [object[]]$ScopePlatforms = $null,
+    [switch]$OmitPlatforms
   )
+  $effectiveScopePlatforms = if ($null -ne $ScopePlatforms) { @($ScopePlatforms) } elseif ($Rust) { @($Platforms) } else { @() }
   $plan = [ordered]@{ version = $Version; detector = "detect-changes" }
   # 路径契约必须与 scope 推导一致：版本化 scope 原样保留，旧 scope 归一化反斜杠。
   $derivedContract = if ($ScopeSchemaVersion -ge 1) { "repo-relative/v1" } else { "repo-relative/legacy" }
@@ -205,10 +212,16 @@ function New-PlanJson {
 
   $rustJob = [ordered]@{ id = "rust-check"; required = $RustRequired }
   if ($DependsOnRust -ne "omit") { $rustJob["depends_on"] = $DependsOnRust }
-  if ($null -ne $RustInstances) { $rustJob["instances"] = @($RustInstances) }
+  $effectivePlatforms = if (-not $Rust) { @() } else { @($Platforms) }
+  if ($null -ne $RustInstances) {
+    $rustJob["instances"] = @($RustInstances)
+  } elseif ($RustRequired -and -not $OmitRustInstances -and $effectivePlatforms.Count -gt 0) {
+    $rustJob["instances"] = @($effectivePlatforms)
+  }
 
   $plan["jobs"] = @(
     [ordered]@{ id = "governance-and-privacy"; required = $GovernanceRequired }
+    [ordered]@{ id = "rust-format"; required = $RustRequired; depends_on = "rust" }
     $rustJob
     [ordered]@{ id = "mobile-web-check"; required = $MobileRequired; depends_on = "mobile_web" }
   )
@@ -223,6 +236,7 @@ function New-PlanJson {
       paseoOrchestration = $Paseo
       checkScopeSelfTest = $ScopeSelfTest
     }
+    if (-not $OmitPlatforms) { $scope["platforms"] = @($effectiveScopePlatforms) }
     if ($ScopeSchemaVersion -ge 1) { $scope["schemaVersion"] = $ScopeSchemaVersion }
     if (-not $OmitChangedFiles) {
       $scopeFiles = if ($ScopeSchemaVersion -ge 1) {
@@ -246,9 +260,12 @@ function New-ScopeJson {
     [bool]$Paseo = $false,
     [bool]$ScopeSelfTest = $false,
     [object[]]$ChangedFiles = @("crates/soxu-git/src/probe.rs"),
+    # 平台矩阵实例集：与检测器一致，rust=false 时为空。
+    [object[]]$Platforms = $null,
     [int]$ScopeSchemaVersion = 0,
     [switch]$OmitChangedFiles
   )
+  $scopePlatforms = if ($null -ne $Platforms) { @($Platforms) } elseif ($Rust) { @("windows", "linux", "macos-arm64") } else { @() }
   $scope = [ordered]@{
     full               = $Full
     rust               = $Rust
@@ -256,6 +273,7 @@ function New-ScopeJson {
     mobileWeb          = $MobileWeb
     paseoOrchestration = $Paseo
     checkScopeSelfTest = $ScopeSelfTest
+    platforms          = @($scopePlatforms)
   }
   if ($ScopeSchemaVersion -ge 1) { $scope["schemaVersion"] = $ScopeSchemaVersion }
   if (-not $OmitChangedFiles) { $scope["changedFiles"] = @($ChangedFiles) }
@@ -440,12 +458,165 @@ function Assert-ReleaseRejection([string]$Name, $Result, [string]$Marker) {
     "$Name → 校验失败前已触发 create/edit/upload（桩日志：$($Result.StubLog.Trim())）"
 }
 
-# 证据夹具
+# ---------------------------------------------------------------------------
+# CI-C 平台证据对账夹具：证据是脱敏 JSON，阶段、runner 观测与 attempt 绑定均需可造。
+# ---------------------------------------------------------------------------
+$script:testRunId = "45899688832"
+$script:testAttempt = "2"
+$script:testSha = ("a" * 40) -join ""
+# 主控在真实 run 的 /attempts/2 端点核对到的起点（复用 job 仍停在早于它的时间）。
+$script:testAttemptStart = "2026-11-27T21:52:40Z"
+$script:evidenceRunnerCatalog = @{
+  "windows"     = @{ label = "windows-2025"; os = "windows"; arch = "x64" }
+  "linux"       = @{ label = "ubuntu-24.04"; os = "linux"; arch = "x64" }
+  "macos-arm64" = @{ label = "macos-15"; os = "macos"; arch = "arm64" }
+  "macos-intel" = @{ label = "macos-15-intel"; os = "macos"; arch = "x64" }
+}
+
+function Get-TextSha256([string]$Text) {
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ([System.BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '').ToLowerInvariant()
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+function New-StageRecord {
+  param(
+    [string]$Name,
+    [string]$Status = "passed",
+    [int]$ExitCode = 0,
+    $CountsKnown = $false,
+    $Counts = $null,
+    [switch]$OmitCountsFlag
+  )
+  $record = [ordered]@{
+    name = $Name; command = "cargo $($Name -replace '^cargo-', '')"; status = $Status
+    exitCode = $ExitCode; durationMs = 1200
+  }
+  if (-not $OmitCountsFlag) { $record["countsKnown"] = $CountsKnown }
+  $record["counts"] = $Counts
+  return $record
+}
+
+function New-PlatformStages {
+  param(
+    [string]$Status = "passed",
+    [int]$ExitCode = 0,
+    [bool]$TestCountsKnown = $true,
+    [int]$Passed = 156
+  )
+  $testCounts = if ($TestCountsKnown) {
+    [ordered]@{ passed = $Passed; failed = 0; ignored = 5; measured = 0; filtered = 0 }
+  } else {
+    $null
+  }
+  return @(
+    (New-StageRecord -Name "cargo-fetch" -Status $Status -ExitCode $ExitCode)
+    (New-StageRecord -Name "cargo-clippy" -Status $Status -ExitCode $ExitCode)
+    (New-StageRecord -Name "cargo-test" -Status $Status -ExitCode $ExitCode -CountsKnown $TestCountsKnown -Counts $testCounts)
+  )
+}
+
+function New-PlatformEvidenceDoc {
+  param(
+    [string]$Platform = "windows",
+    [string]$RunId = $script:testRunId,
+    [string]$RunAttempt = $script:testAttempt,
+    [string]$CheckoutSha = $script:testSha,
+    [string]$PlanDigest = "",
+    [string]$RunnerLabel = "",
+    [string]$Os = "",
+    [string]$Arch = "",
+    [string]$ResultStatus = "passed",
+    [string]$CompletedAt = "2026-11-27T22:05:00Z",
+    [string]$StartedAt = "2026-11-27T21:53:10Z",
+    $Stages = $null
+  )
+  $catalog = $script:evidenceRunnerCatalog[$Platform]
+  $labelValue = if ([string]::IsNullOrEmpty($RunnerLabel)) { $catalog.label } else { $RunnerLabel }
+  $osValue = if ([string]::IsNullOrEmpty($Os)) { $catalog.os } else { $Os }
+  $archValue = if ([string]::IsNullOrEmpty($Arch)) { $catalog.arch } else { $Arch }
+  [object[]]$stageRows = $null
+  if ($null -ne $Stages) { $stageRows = @($Stages) } else { $stageRows = @(New-PlatformStages) }
+  return [ordered]@{
+    schemaVersion = 1
+    kind          = "soxu-ci-evidence/platform/v1"
+    run           = [ordered]@{ id = $RunId; attempt = $RunAttempt; repository = "TanCan1998/Soxu"; event = "pull_request" }
+    plan          = [ordered]@{ digest = $PlanDigest }
+    identity      = [ordered]@{ baseSha = ("b" * 40) -join ""; headSha = ("c" * 40) -join ""; checkoutSha = $CheckoutSha; workflowRef = "stub/mirror/.github/workflows/ci.yml@refs/heads/main" }
+    runner        = [ordered]@{ label = $labelValue; os = $osValue; arch = $archValue }
+    platform      = $Platform
+    job           = ""
+    toolchain     = [ordered]@{ rust = "rustc 1.99.1"; cargo = "cargo 1.99.1"; node = ""; pnpm = "" }
+    timing        = [ordered]@{ startedAt = $StartedAt; completedAt = $CompletedAt }
+    stages        = $stageRows
+    result        = [ordered]@{ status = $ResultStatus; reason = "" }
+  }
+}
+
+function New-MatrixJobRow {
+  param(
+    [string]$Platform,
+    [string]$Conclusion = "success",
+    [string]$StartedAt = "2026-11-27T21:53:05Z",
+    [string]$CompletedAt = "2026-11-27T22:05:00Z"
+  )
+  # 注意：jobs 列表会把沿用（复用）的 job 也标 run_attempt=2，所以只能靠原始时间分辨。
+  return [ordered]@{
+    name = "Rust ($Platform)"; conclusion = $Conclusion; status = "completed"
+    started_at = $StartedAt; completed_at = $CompletedAt; run_attempt = 2
+  }
+}
+
+function New-JobsJson([object[]]$Rows) {
+  return (@{ total_count = $Rows.Count; jobs = @($Rows) } | ConvertTo-Json -Depth 8)
+}
+
+function Invoke-GateEvidence {
+  param(
+    [string]$PlanJson,
+    [object[]]$Documents = @(),
+    [string]$JobsJson = $null,
+    [string]$RunId = $script:testRunId,
+    [string]$RunAttempt = $script:testAttempt,
+    [string]$CheckoutSha = $script:testSha,
+    [string]$AttemptStartedAt = $script:testAttemptStart,
+    [string]$VerifierOverride = ""
+  )
+  $dir = Join-Path $tempRoot ("evidence-" + [Guid]::NewGuid().ToString("N"))
+  New-Item -ItemType Directory -Path $dir -Force | Out-Null
+  $index = 0
+  foreach ($document in $Documents) {
+    $index++
+    $sub = Join-Path $dir ("artifact-" + $index)
+    New-Item -ItemType Directory -Path $sub -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $sub "evidence.json") -Value ($document | ConvertTo-Json -Depth 12) -Encoding utf8 -NoNewline
+  }
+  $arguments = @(
+    "-Mode", "Evidence", "-EvidenceDir", $dir,
+    "-PlanPath", (Save-Fixture ("plan-evidence-" + [Guid]::NewGuid().ToString("N")) $PlanJson),
+    "-RunId", $RunId, "-RunAttempt", $RunAttempt, "-CheckoutSha", $CheckoutSha
+  )
+  if (-not [string]::IsNullOrWhiteSpace($AttemptStartedAt)) { $arguments += @("-AttemptStartedAt", $AttemptStartedAt) }
+  if ($null -ne $JobsJson) { $arguments += @("-JobsPath", (Save-Fixture ("jobs-" + [Guid]::NewGuid().ToString("N")) $JobsJson)) }
+  $target = if ([string]::IsNullOrWhiteSpace($VerifierOverride)) { $verifierPath } else { $VerifierOverride }
+  return Invoke-Script $target $arguments
+}
+
+# 证据夹具：作业键集合必须与固定 job 契约一致（含 CI-C 新增的 rust-format）。
 $evidenceBaseline = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
-  "rust-check": "success",
+  "rust-format": "success",
+  "rust-check": { "instances": [
+    { "id": "windows", "status": "success" },
+    { "id": "linux", "status": "success" },
+    { "id": "macos-arm64", "status": "success" }
+  ] },
   "mobile-web-check": "skipped"
 }
 '@
@@ -454,6 +625,7 @@ $evidenceRustSkipped = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
+  "rust-format": "skipped",
   "rust-check": "skipped",
   "mobile-web-check": "skipped"
 }
@@ -463,7 +635,12 @@ $evidenceGovSkipped = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "skipped",
-  "rust-check": "success",
+  "rust-format": "success",
+  "rust-check": { "instances": [
+    { "id": "windows", "status": "success" },
+    { "id": "linux", "status": "success" },
+    { "id": "macos-arm64", "status": "success" }
+  ] },
   "mobile-web-check": "skipped"
 }
 '@
@@ -472,9 +649,11 @@ $evidenceMultiPartial = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
+  "rust-format": "success",
   "rust-check": { "instances": [
-    { "id": "ubuntu-latest", "status": "success" },
-    { "id": "windows-latest", "status": "failure" }
+    { "id": "windows", "status": "failure" },
+    { "id": "linux", "status": "success" },
+    { "id": "macos-arm64", "status": "success" }
   ] },
   "mobile-web-check": "skipped"
 }
@@ -484,8 +663,10 @@ $evidenceMultiMissing = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
+  "rust-format": "success",
   "rust-check": { "instances": [
-    { "id": "ubuntu-latest", "status": "success" }
+    { "id": "windows", "status": "success" },
+    { "id": "linux", "status": "success" }
   ] },
   "mobile-web-check": "skipped"
 }
@@ -495,9 +676,12 @@ $evidenceMultiDuplicate = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
+  "rust-format": "success",
   "rust-check": { "instances": [
-    { "id": "ubuntu-latest", "status": "success" },
-    { "id": "ubuntu-latest", "status": "success" }
+    { "id": "windows", "status": "success" },
+    { "id": "windows", "status": "success" },
+    { "id": "linux", "status": "success" },
+    { "id": "macos-arm64", "status": "success" }
   ] },
   "mobile-web-check": "skipped"
 }
@@ -507,10 +691,23 @@ $evidenceMultiStatusInvalid = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
+  "rust-format": "success",
   "rust-check": { "instances": [
-    { "id": "ubuntu-latest", "status": 200 },
-    { "id": "windows-latest", "status": "success" }
+    { "id": "windows", "status": 200 },
+    { "id": "linux", "status": "success" },
+    { "id": "macos-arm64", "status": "success" }
   ] },
+  "mobile-web-check": "skipped"
+}
+'@
+
+# 矩阵作业被折叠为单一字符串：不再区分平台，必须拒绝。
+$evidenceMultiFolded = @'
+{
+  "detect-changes": "success",
+  "governance-and-privacy": "success",
+  "rust-format": "success",
+  "rust-check": "success",
   "mobile-web-check": "skipped"
 }
 '@
@@ -518,7 +715,8 @@ $evidenceMultiStatusInvalid = @'
 $planBaseline = New-PlanJson
 $planRustSkipped = New-PlanJson -Rust $false -RustScope "none" -RustRequired $false -ChangedFiles @("docs/ops/PROGRESS.md")
 $planMobileRequired = New-PlanJson -Rust $false -RustScope "none" -RustRequired $false -MobileWeb $true -MobileRequired $true -ChangedFiles @("apps/mobile-web/src/main.tsx")
-$planMultiInstance = New-PlanJson -RustInstances @("ubuntu-latest", "windows-latest")
+# 两/三平台矩阵：证据实例集必须与计划完全一致，少一个平台就是缺项。
+$planMultiInstance = New-PlanJson
 
 try {
   # ============ 一、证据与状态对账 ============
@@ -529,6 +727,7 @@ try {
 {
   "detect-changes": "failure",
   "governance-and-privacy": "skipped",
+  "rust-format": "skipped",
   "rust-check": "skipped",
   "mobile-web-check": "skipped"
 }
@@ -539,16 +738,22 @@ try {
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
-  "rust-check": "cancelled",
+  "rust-format": "success",
+  "rust-check": { "instances": [
+    { "id": "windows", "status": "cancelled" },
+    { "id": "linux", "status": "success" },
+    { "id": "macos-arm64", "status": "success" }
+  ] },
   "mobile-web-check": "skipped"
 }
 '@
-  Assert-Fail "失败：必跑任务取消" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceCancelled) 'required_not_success:rust-check=cancelled'
+  Assert-Fail "失败：必跑实例被取消" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceCancelled) 'required_not_success:rust-check/windows=cancelled'
 
   $evidenceMobileFailed = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
+  "rust-format": "skipped",
   "rust-check": "skipped",
   "mobile-web-check": "failure"
 }
@@ -559,16 +764,22 @@ try {
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
-  "rust-check": "ok",
+  "rust-format": "success",
+  "rust-check": { "instances": [
+    { "id": "windows", "status": "ok" },
+    { "id": "linux", "status": "success" },
+    { "id": "macos-arm64", "status": "success" }
+  ] },
   "mobile-web-check": "skipped"
 }
 '@
-  Assert-Fail "失败：非法状态串" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceInvalidStatus) 'status_invalid:rust-check=ok'
+  Assert-Fail "失败：非法状态串" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceInvalidStatus) 'status_invalid:rust-check/windows=ok'
 
   $evidenceMissingJob = @'
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
+  "rust-format": "success",
   "mobile-web-check": "skipped"
 }
 '@
@@ -578,6 +789,7 @@ try {
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
+  "rust-format": "success",
   "rust-check": "success",
   "mobile-web-check": "skipped",
   "lint-check": "success"
@@ -589,19 +801,29 @@ try {
 {
   "detect-changes": "success",
   "governance-and-privacy": "success",
-  "rust-check": "success",
+  "rust-format": "success",
+  "rust-check": { "instances": [
+    { "id": "windows", "status": "success" },
+    { "id": "linux", "status": "success" },
+    { "id": "macos-arm64", "status": "success" }
+  ] },
   "mobile-web-check": "success"
 }
 '@
   Assert-Fail "失败：计划未要求却运行成功（计划与证据冲突）" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceMobileSuccessConflict) 'plan_evidence_conflict:mobile-web-check'
 
-  # 多实例证据：缺项、部分失败、重复证据、非字符串状态都必须拒绝
-  Assert-Fail "失败：多实例部分失败" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiPartial) 'required_not_success:rust-check/windows-latest=failure'
-  Assert-Fail "失败：多实例证据缺项" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiMissing) 'instance_missing:rust-check/windows-latest'
-  Assert-Fail "失败：多实例重复证据" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiDuplicate) 'instance_duplicate:rust-check/ubuntu-latest'
-  Assert-Fail "失败：多实例被折叠为单一状态" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceBaseline) 'multi_instance_evidence_missing:rust-check'
-  Assert-Fail "失败：单实例计划收到多实例证据" (Invoke-GateVerify -PlanJson $planBaseline -EvidenceJson $evidenceMultiPartial) 'evidence_shape_invalid:rust-check'
-  Assert-Fail "失败：实例状态非字符串" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiStatusInvalid) 'instance_status_invalid:rust-check/ubuntu-latest'
+  # 多实例证据：缺项、部分失败、重复证据、非字符串状态、折叠为单值都必须拒绝
+  Assert-Fail "失败：多实例部分失败" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiPartial) 'required_not_success:rust-check/windows=failure'
+  Assert-Fail "失败：多实例证据缺项" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiMissing) 'instance_missing:rust-check/macos-arm64'
+  Assert-Fail "失败：多实例重复证据" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiDuplicate) 'instance_duplicate:rust-check/windows'
+  Assert-Fail "失败：多实例被折叠为单一状态" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiFolded) 'multi_instance_evidence_missing:rust-check'
+  Assert-Fail "失败：实例状态非字符串" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiStatusInvalid) 'instance_status_invalid:rust-check/windows'
+
+  # 计划实例集不得被篡改：删平台、不声明实例、scope 与 instances 不同源都必须拒绝。
+  $planInstancesDropped = New-PlanJson -RustInstances @("windows", "linux")
+  Assert-Fail "失败：计划删除平台实例" (Invoke-GateVerify -PlanJson $planInstancesDropped -EvidenceJson $evidenceMultiMissing) 'plan_instances_conflict:rust-check'
+  Assert-Fail "失败：计划未声明矩阵实例" (Invoke-GateVerify -PlanJson (New-PlanJson -OmitRustInstances) -EvidenceJson $evidenceBaseline) 'plan_instances_missing:rust-check'
+  Assert-Fail "失败：scope 删除平台" (Invoke-GateVerify -PlanJson (New-PlanJson -ScopePlatforms @("windows", "linux")) -EvidenceJson $evidenceMultiPartial) 'plan_instances_conflict:rust-check'
 
   # ============ 二、计划契约：不得靠改写计划削弱门禁 ============
   # 绕过 1：把无条件必跑的治理任务改成非必跑
@@ -624,6 +846,7 @@ try {
     "mobileWeb": false,
     "paseoOrchestration": false,
     "checkScopeSelfTest": false,
+    "platforms": [],
     "changedFiles": ["docs/ops/PROGRESS.md"]
   }
 }
@@ -671,7 +894,7 @@ try {
   ],
   "selfTest": false,
   "releaseContract": false,
-  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["crates/soxu-git/src/probe.rs"] }
+  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "platforms": ["windows", "linux", "macos-arm64"], "changedFiles": ["crates/soxu-git/src/probe.rs"] }
 }
 '@
   Assert-Fail "失败：实例声明含空串" (Invoke-GateVerify -PlanJson $planInstancesWithEmpty -EvidenceJson $evidenceMultiMissing) 'plan_instances_invalid:rust-check'
@@ -688,7 +911,7 @@ try {
   ],
   "selfTest": false,
   "releaseContract": false,
-  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["crates/soxu-git/src/probe.rs"] }
+  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "platforms": ["windows", "linux", "macos-arm64"], "changedFiles": ["crates/soxu-git/src/probe.rs"] }
 }
 '@
   Assert-Fail "失败：实例声明为数字" (Invoke-GateVerify -PlanJson $planInstancesWithNumber -EvidenceJson $evidenceMultiMissing) 'plan_instances_invalid:rust-check'
@@ -705,7 +928,7 @@ try {
   ],
   "selfTest": false,
   "releaseContract": false,
-  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["crates/soxu-git/src/probe.rs"] }
+  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "platforms": ["windows", "linux", "macos-arm64"], "changedFiles": ["crates/soxu-git/src/probe.rs"] }
 }
 '@
   Assert-Fail "失败：实例声明为 null" (Invoke-GateVerify -PlanJson $planInstancesNull -EvidenceJson $evidenceMultiMissing) 'plan_instances_null:rust-check'
@@ -722,7 +945,7 @@ try {
   "jobs": [],
   "selfTest": false,
   "releaseContract": false,
-  "scope": { "full": false, "rust": false, "rustScope": "none", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["docs/ops/PROGRESS.md"] }
+  "scope": { "full": false, "rust": false, "rustScope": "none", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "platforms": [], "changedFiles": ["docs/ops/PROGRESS.md"] }
 }
 '@
   Assert-Fail "失败：计划作业为空" (Invoke-GateVerify -PlanJson $planEmptyJobs -EvidenceJson $evidenceBaseline) 'plan_jobs_empty'
@@ -740,7 +963,7 @@ try {
   ],
   "selfTest": false,
   "releaseContract": false,
-  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["crates/soxu-git/src/probe.rs"] }
+  "scope": { "full": false, "rust": true, "rustScope": "crates", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "platforms": ["windows", "linux", "macos-arm64"], "changedFiles": ["crates/soxu-git/src/probe.rs"] }
 }
 '@
   Assert-Fail "失败：计划重复作业" (Invoke-GateVerify -PlanJson $planDuplicateJob -EvidenceJson $evidenceBaseline) 'plan_job_duplicate:rust-check'
@@ -757,7 +980,7 @@ try {
   ],
   "selfTest": false,
   "releaseContract": false,
-  "scope": { "full": false, "rust": false, "rustScope": "none", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "changedFiles": ["docs/ops/PROGRESS.md"] }
+  "scope": { "full": false, "rust": false, "rustScope": "none", "mobileWeb": false, "paseoOrchestration": false, "checkScopeSelfTest": false, "platforms": [], "changedFiles": ["docs/ops/PROGRESS.md"] }
 }
 '@
   Assert-Fail "失败：计划必跑标记不是布尔" (Invoke-GateVerify -PlanJson $planRequiredNotBoolean -EvidenceJson $evidenceBaseline) 'plan_job_required_invalid:governance-and-privacy'
@@ -925,6 +1148,310 @@ try {
 '@
   Assert-Fail "失败：版本化 scope 接受绝对路径" (Invoke-PlanMode $scopeVersionedAbsolute) 'CI-GATE-ERROR' 2
 
+  # ============ 三·二、CI-C 平台证据对账（Evidence 模式） ============
+  $evPlan = (New-PlanJson).Trim()
+  $evDigest = Get-TextSha256 $evPlan
+  $evPlatforms = @("windows", "linux", "macos-arm64")
+
+  $goodDocs = @(foreach ($p in $evPlatforms) { New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest })
+  $goodJobs = New-JobsJson @(foreach ($p in $evPlatforms) { New-MatrixJobRow $p })
+
+  Assert-Pass "证据通过：三平台均有 fetch/clippy/test 通过阶段且矩阵 job 绿" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $goodDocs -JobsJson $goodJobs)
+
+  # 计数未知是合法表态：不伪造 0，也不因此失败。
+  $unknownCountsDocs = @(foreach ($p in $evPlatforms) {
+      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -Stages (New-PlatformStages -TestCountsKnown $false)
+    })
+  Assert-Pass "证据通过：测试计数未知（countsKnown=false）不伪造 0" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $unknownCountsDocs -JobsJson $goodJobs)
+
+  # 主控发现：仅有身份、runner 和 result.status=passed、完全没有 stages 的 JSON 不得通过。
+  # 注意：空数组作为未声明参数传入会被绑成 $null，所以直接就地赋空数组。
+  $emptyStagesDocs = @(foreach ($p in $evPlatforms) {
+      $doc = New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest
+      $doc["stages"] = @()
+      $doc
+    })
+  Assert-Fail "证据失败：空 stages 且 jobs 全绿" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $emptyStagesDocs -JobsJson $goodJobs) 'evidence_stages_empty:windows'
+
+  $missingStageDocs = @(foreach ($p in $evPlatforms) {
+      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -Stages @(
+        (New-StageRecord -Name 'cargo-fetch')
+        (New-StageRecord -Name 'cargo-clippy')
+      )
+    })
+  Assert-Fail "证据失败：缺少 test 阶段" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $missingStageDocs -JobsJson $goodJobs) 'evidence_stage_missing:windows/cargo-test'
+
+  $duplicateStageDocs = @(foreach ($p in $evPlatforms) {
+      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -Stages (@(New-PlatformStages) + @(New-StageRecord -Name 'cargo-clippy'))
+    })
+  Assert-Fail "证据失败：阶段重复上报" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $duplicateStageDocs -JobsJson $goodJobs) 'evidence_stage_duplicate:windows/cargo-clippy'
+
+  $failedStageDocs = @(foreach ($p in $evPlatforms) {
+      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -ResultStatus 'failed' -Stages @(
+        (New-StageRecord -Name 'cargo-fetch')
+        (New-StageRecord -Name 'cargo-clippy')
+        (New-StageRecord -Name 'cargo-test' -Status 'test_failed' -ExitCode 101 -CountsKnown $true -Counts ([ordered]@{ passed = 150; failed = 6; ignored = 5; measured = 0; filtered = 0 }))
+      )
+    })
+  $failedStageResult = Invoke-GateEvidence -PlanJson $evPlan -Documents $failedStageDocs -JobsJson (New-JobsJson @(foreach ($p in $evPlatforms) { New-MatrixJobRow $p -Conclusion 'failure' }))
+  Assert-Fail "证据失败：测试阶段失败" $failedStageResult 'evidence_stage_not_passed:windows/cargo-test=test_failed'
+  Assert-Fail "证据失败：失败阶段退出码非零" $failedStageResult 'evidence_stage_exit_code:windows/cargo-test=101'
+
+  $noFlagDocs = @(foreach ($p in $evPlatforms) {
+      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -Stages @(
+        (New-StageRecord -Name 'cargo-fetch')
+        (New-StageRecord -Name 'cargo-clippy')
+        (New-StageRecord -Name 'cargo-test' -OmitCountsFlag)
+      )
+    })
+  Assert-Fail "证据失败：缺少计数表态（countsKnown）" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $noFlagDocs -JobsJson $goodJobs) 'evidence_stage_counts_flag_invalid:windows/cargo-test'
+
+  $claimKnownNoCountsDocs = @(foreach ($p in $evPlatforms) {
+      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -Stages @(
+        (New-StageRecord -Name 'cargo-fetch')
+        (New-StageRecord -Name 'cargo-clippy')
+        (New-StageRecord -Name 'cargo-test' -CountsKnown $true -Counts $null)
+      )
+    })
+  Assert-Fail "证据失败：声明已统计但无计数" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $claimKnownNoCountsDocs -JobsJson $goodJobs) 'evidence_stage_counts_missing:windows/cargo-test'
+
+  $unknownButCountedDocs = @(foreach ($p in $evPlatforms) {
+      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -Stages @(
+        (New-StageRecord -Name 'cargo-fetch')
+        (New-StageRecord -Name 'cargo-clippy')
+        (New-StageRecord -Name 'cargo-test' -CountsKnown $false -Counts ([ordered]@{ passed = 0; failed = 0; ignored = 0; measured = 0; filtered = 0 }))
+      )
+    })
+  Assert-Fail "证据失败：计数未知却填了 0" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $unknownButCountedDocs -JobsJson $goodJobs) 'evidence_stage_counts_conflict:windows/cargo-test'
+
+  # 平台集合：缺项、重复、未知平台
+  $missingPlatform = Invoke-GateEvidence -PlanJson $evPlan -Documents @($goodDocs[0], $goodDocs[1]) -JobsJson $goodJobs
+  Assert-Fail "证据失败：缺少必要平台" $missingPlatform 'evidence_platform_missing:macos-arm64'
+  Assert-Check ($missingPlatform.Output.Contains('CI-C-EVIDENCE-GUIDANCE')) "证据缺少平台时必须提示全量重跑（实际输出：$($missingPlatform.Output.Trim()))"
+
+  Assert-Fail "证据失败：同一平台多份证据" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents ($goodDocs + @($goodDocs[0])) -JobsJson $goodJobs) 'evidence_platform_duplicate:windows'
+
+  Assert-Fail "证据失败：未知平台证据" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents ($goodDocs + @((New-PlatformEvidenceDoc -Platform 'freebsd' -PlanDigest $evDigest))) -JobsJson $goodJobs) 'evidence_platform_unknown:freebsd'
+
+  # 事件身份：sha / attempt / 计划摘要
+  Assert-Fail "证据失败：checkout SHA 不一致" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents @(New-PlatformEvidenceDoc -Platform 'windows' -PlanDigest $evDigest -CheckoutSha (("d" * 40) -join ""), $goodDocs[1], $goodDocs[2]) -JobsJson $goodJobs) 'evidence_sha_mismatch'
+
+  Assert-Fail "证据失败：attempt 不一致" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents @(New-PlatformEvidenceDoc -Platform 'windows' -PlanDigest $evDigest -RunAttempt '1', $goodDocs[1], $goodDocs[2]) -JobsJson $goodJobs) 'evidence_attempt_mismatch'
+
+  Assert-Fail "证据失败：计划摘要不一致" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents @(New-PlatformEvidenceDoc -Platform 'windows' -PlanDigest ("0" * 64), $goodDocs[1], $goodDocs[2]) -JobsJson $goodJobs) 'evidence_plan_mismatch'
+
+  # Runner 观测：label / OS / arch 都必须与平台目录一致，不得用交叉编译或 Rosetta 冒充
+  Assert-Fail "证据失败：runner 标签与平台不符" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents @(New-PlatformEvidenceDoc -Platform 'windows' -PlanDigest $evDigest -RunnerLabel 'ubuntu-24.04', $goodDocs[1], $goodDocs[2]) -JobsJson $goodJobs) 'evidence_runner_mismatch:windows'
+
+  Assert-Fail "证据失败：OS 观测与平台不符" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents @(New-PlatformEvidenceDoc -Platform 'windows' -PlanDigest $evDigest -Os 'linux', $goodDocs[1], $goodDocs[2]) -JobsJson $goodJobs) 'evidence_runner_os_mismatch:windows'
+
+  Assert-Fail "证据失败：ARM64 被当成 Intel" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents @(New-PlatformEvidenceDoc -Platform 'macos-arm64' -PlanDigest $evDigest -Arch 'x64', $goodDocs[0], $goodDocs[1]) -JobsJson $goodJobs) 'evidence_runner_arch_mismatch:macos-arm64'
+
+  # 结果状态：部分失败、取消、未跑都不得充当通过
+  Assert-Fail "证据失败：平台结果非 passed" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents @(New-PlatformEvidenceDoc -Platform 'windows' -PlanDigest $evDigest -ResultStatus 'partial', $goodDocs[1], $goodDocs[2]) -JobsJson $goodJobs) 'evidence_not_passed:windows=partial'
+
+  # 部分重跑：复用前 attempt 的证据必须失败关闭，并提示全量重跑
+  $reusedDocs = @(foreach ($p in $evPlatforms) {
+      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -CompletedAt '2026-11-27T21:40:12Z' -StartedAt '2026-11-27T21:38:00Z'
+    })
+  $reusedResult = Invoke-GateEvidence -PlanJson $evPlan -Documents $reusedDocs -JobsJson $goodJobs
+  Assert-Fail "证据失败：沿用前 attempt 的已完成时间" $reusedResult 'evidence_from_previous_attempt'
+  Assert-Check ($reusedResult.Output.Contains('CI-C-EVIDENCE-GUIDANCE')) "复用旧证据时必须提示全量重跑（实际输出：$($reusedResult.Output.Trim()))"
+
+  Assert-Fail "证据失败：缺 attempt 起点无法区分新旧执行" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $goodDocs -JobsJson $goodJobs -AttemptStartedAt '') 'attempt_started_at_missing'
+
+  Assert-Fail "证据失败：证据目录为空" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents @() -JobsJson $goodJobs) 'evidence_dir_empty'
+
+  # 原始矩阵 job 汇总：缺项、重复、计划外、非成功都必须拒绝
+  Assert-Fail "证据失败：矩阵 job 缺平台实例" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $goodDocs -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows'), (New-MatrixJobRow 'linux')))) 'matrix_job_missing:macos-arm64'
+
+  Assert-Fail "证据失败：矩阵 job 非成功" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $goodDocs -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows' -Conclusion 'failure'), (New-MatrixJobRow 'linux'), (New-MatrixJobRow 'macos-arm64')))) 'matrix_job_not_success:windows=failure'
+
+  Assert-Fail "证据失败：出现计划外平台实例" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $goodDocs -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows'), (New-MatrixJobRow 'linux'), (New-MatrixJobRow 'macos-arm64'), (New-MatrixJobRow 'macos-intel')))) 'matrix_job_unplanned:macos-intel'
+
+  # 关键防伪：jobs 列表会把沿用项也标成当前 attempt，只能靠开始时间分辨。
+  Assert-Fail "证据失败：矩阵 job 开始时间早于本次 attempt" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $goodDocs -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows' -StartedAt '2026-11-27T21:40:02Z'), (New-MatrixJobRow 'linux'), (New-MatrixJobRow 'macos-arm64')))) 'matrix_job_from_previous_attempt:windows'
+
+  # 无需要平台证据时（rust 未触发）不得因空证据目录失败
+  Assert-Pass "证据通过：rust 未触发时不要求平台证据" `
+    (Invoke-GateEvidence -PlanJson ((New-PlanJson -Rust $false -RustScope "none" -RustRequired $false -ChangedFiles @("docs/ops/PROGRESS.md")).Trim()) -Documents @() -JobsJson (New-JobsJson @()))
+
+  # 突变敏感度：移除阶段完整性校验后空 stages 必须重新通过
+  $verifierTextForStages = Get-Content -LiteralPath $verifierPath -Raw -Encoding utf8
+  $stageMarker = '    Test-PlatformStages $doc $platformId $errors'
+  Assert-Check ($verifierTextForStages.Contains($stageMarker)) "突变测试锚点缺失：Evidence 模式应调用阶段校验"
+  if ($verifierTextForStages.Contains($stageMarker)) {
+    $stageMutantPath = Join-Path $tempRoot "verify-ci-gate-stage-mutant.ps1"
+    Set-Content -LiteralPath $stageMutantPath -Value $verifierTextForStages.Replace($stageMarker, '    # 突变：临时移除阶段完整性校验') -Encoding utf8 -NoNewline
+    Assert-Pass "突变敏感度：移除阶段校验后空 stages 证据重新通过" `
+      (Invoke-GateEvidence -PlanJson $evPlan -Documents $emptyStagesDocs -JobsJson $goodJobs -VerifierOverride $stageMutantPath)
+  }
+
+  # ============ 三·三、采集器真实往返：Stage→Stage→Stage→Finalize ============
+  # 每一步都起独立进程，与工作流实际调用形态一致：上一轮写入必须能被下一轮读回。
+  $collectorPath = Join-Path $repoRoot "scripts/collect-ci-evidence.ps1"
+  Assert-Check (Test-Path -LiteralPath $collectorPath -PathType Leaf) "采集器脚本必须存在"
+
+  $collectDir = Join-Path $tempRoot ("collector-" + [Guid]::NewGuid().ToString("N"))
+  New-Item -ItemType Directory -Path $collectDir -Force | Out-Null
+  $collectStages = Join-Path $collectDir "stages.json"
+  $fetchLog = Join-Path $collectDir "fetch.log"
+  $clippyLog = Join-Path $collectDir "clippy.log"
+  $testLog = Join-Path $collectDir "test.log"
+  Set-Content -LiteralPath $fetchLog -Value "Updating crates.io index" -NoNewline -Encoding utf8
+  Set-Content -LiteralPath $clippyLog -Value "Finished dev profile target(s)" -NoNewline -Encoding utf8
+  $testLogBody = @(
+    "running 3 tests"
+    "test result: ok. 156 passed; 0 failed; 5 ignored; 0 measured; 2 filtered out; finished in 1.20s"
+    "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s"
+  ) -join "`n"
+  Set-Content -LiteralPath $testLog -Value $testLogBody -NoNewline -Encoding utf8
+
+  $stageSpecs = @(
+    @{ Name = "cargo-fetch"; Log = $fetchLog; Command = "cargo fetch --locked" }
+    @{ Name = "cargo-clippy"; Log = $clippyLog; Command = "cargo clippy --workspace --all-targets --locked -- -D warnings" }
+    @{ Name = "cargo-test"; Log = $testLog; Command = "cargo test --workspace --locked" }
+  )
+  $stageIndex = 0
+  foreach ($spec in $stageSpecs) {
+    $stageIndex++
+    $stageResult = Invoke-Script $collectorPath @(
+      "-Mode", "Stage", "-StagesPath", $collectStages, "-Name", $spec.Name,
+      "-Command", $spec.Command, "-ExitCode", "0", "-DurationMs", "1500", "-LogPath", $spec.Log
+    )
+    Assert-Check ($stageResult.Code -eq 0) "采集器第 $stageIndex 阶段 $($spec.Name) 必须成功（实际 exit $($stageResult.Code)：$($stageResult.Output.Trim())）"
+  }
+
+  $recordedStages = @()
+  if (Test-Path -LiteralPath $collectStages) {
+    $recordedStages = @((Get-Content -LiteralPath $collectStages -Raw -Encoding utf8) | ConvertFrom-Json -Depth 12)
+  }
+  Assert-Check ($recordedStages.Count -eq 3) "采集器必须累计三个阶段而不是互相覆盖（实际 $($recordedStages.Count)）"
+  $recordedNames = @($recordedStages | ForEach-Object { $_.name }) -join ','
+  Assert-Check ($recordedNames -eq "cargo-fetch,cargo-clippy,cargo-test") "阶段名称与顺序必须保持调用顺序（实际 $recordedNames）"
+
+  $testStage = @($recordedStages | Where-Object { $_.name -eq "cargo-test" })[0]
+  Assert-Check ($null -ne $testStage -and $testStage.countsKnown -eq $true) "cargo-test 必须解析出真实计数而不是标成未知"
+  if ($null -ne $testStage) {
+    Assert-Check (
+      $testStage.counts.passed -eq 168 -and $testStage.counts.failed -eq 0 -and
+      $testStage.counts.ignored -eq 5 -and $testStage.counts.filtered -eq 2
+    ) "cargo-test 计数必须汇总全部 test result 行（实际 $($testStage.counts | ConvertTo-Json -Compress)）"
+  }
+  $fetchStage = @($recordedStages | Where-Object { $_.name -eq "cargo-fetch" })[0]
+  Assert-Check ($null -ne $fetchStage -and $fetchStage.countsKnown -eq $false -and $null -eq $fetchStage.counts) "无测试计数的阶段必须明确标为未知而不是 0"
+
+  $collectorSha = $script:testSha
+  $finalizeArgs = @(
+    "-Mode", "Finalize", "-StagesPath", $collectStages, "-OutputPath", (Join-Path $collectDir "evidence.json"),
+    "-Kind", "platform", "-Platform", "windows",
+    "-RunnerLabel", "windows-2025", "-Os", "Windows", "-Arch", "X64",
+    "-RunId", $script:testRunId, "-RunAttempt", $script:testAttempt,
+    "-Repository", "TanCan1998/Soxu", "-EventName", "pull_request",
+    "-BaseSha", (("b" * 40) -join ""), "-HeadSha", (("c" * 40) -join ""),
+    "-CheckoutSha", $collectorSha,
+    "-WorkflowRef", "stub/mirror/.github/workflows/ci.yml@refs/heads/main",
+    "-PlanJson", $evPlan, "-ResultStatus", "passed",
+    "-StartedAt", "2026-11-27T21:53:10Z", "-CompletedAt", "2026-11-27T22:05:00Z"
+  )
+  $finalizeResult = Invoke-Script $collectorPath $finalizeArgs
+  Assert-Check ($finalizeResult.Code -eq 0) "采集器 Finalize 必须成功（实际 exit $($finalizeResult.Code)：$($finalizeResult.Output.Trim())）"
+
+  $realEvidencePath = Join-Path $collectDir "evidence.json"
+  $realEvidence = $null
+  if (Test-Path -LiteralPath $realEvidencePath) {
+    $realEvidence = (Get-Content -LiteralPath $realEvidencePath -Raw -Encoding utf8) | ConvertFrom-Json -Depth 20
+  }
+  Assert-Check ($null -ne $realEvidence) "采集器必须写出可解析的证据 JSON"
+  if ($null -ne $realEvidence) {
+    Assert-Check (@($realEvidence.stages).Count -eq 3) "最终证据必须携带三个阶段（实际 $(@($realEvidence.stages).Count)）"
+    Assert-Check ($realEvidence.runner.os -eq "windows" -and $realEvidence.runner.arch -eq "x64") "Runner 观测必须从原生形态（Windows/X64）归一为平台目录取值"
+    Assert-Check ($realEvidence.plan.digest -eq $evDigest) "采集器写出的计划摘要必须与 Gate 重算一致"
+    Assert-Check ($realEvidence.result.status -eq "passed") "三阶段全绿时结果必须为 passed"
+  }
+
+  # Gate 接收：采集器真实产物直接参加对账。
+  Assert-Pass "证据通过：采集器真实产物被 Gate 接收" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents @($realEvidence, $goodDocs[1], $goodDocs[2]) -JobsJson $goodJobs)
+
+  # Gate 拒绝：从真实产物里移除一个阶段。
+  if ($null -ne $realEvidence) {
+    $stageTrimmed = (Get-Content -LiteralPath $realEvidencePath -Raw -Encoding utf8) | ConvertFrom-Json -Depth 20
+    $stageTrimmed.stages = @(@($stageTrimmed.stages) | Where-Object { $_.name -ne "cargo-test" })
+    Assert-Fail "证据失败：采集器产物缺 test 阶段" `
+      (Invoke-GateEvidence -PlanJson $evPlan -Documents @($stageTrimmed, $goodDocs[1], $goodDocs[2]) -JobsJson $goodJobs) 'evidence_stage_missing:windows/cargo-test'
+  }
+
+  # 采集器自身必须把编译中断识别为 build_failed，且 Gate 拒绝该产物。
+  $failDir = Join-Path $tempRoot ("collector-fail-" + [Guid]::NewGuid().ToString("N"))
+  New-Item -ItemType Directory -Path $failDir -Force | Out-Null
+  $failStages = Join-Path $failDir "stages.json"
+  $failLog = Join-Path $failDir "clippy.log"
+  # 日志夹具里不使用反引号包裹 crate 名：反引号会转义掉收尾引号导致字符串跨界。
+  $failLogBody = @(
+    "error[E0432]: unresolved import"
+    "error: could not compile soxu-core"
+  ) -join "`n"
+  Set-Content -LiteralPath $failLog -Value $failLogBody -NoNewline -Encoding utf8
+  foreach ($spec in @(
+      @{ Name = "cargo-fetch"; Log = $fetchLog; Code = "0" }
+      @{ Name = "cargo-clippy"; Log = $failLog; Code = "101" }
+    )) {
+    $recordResult = Invoke-Script $collectorPath @(
+      "-Mode", "Stage", "-StagesPath", $failStages, "-Name", $spec.Name,
+      "-Command", "cargo $($spec.Name -replace '^cargo-', '')", "-ExitCode", $spec.Code,
+      "-DurationMs", "900", "-LogPath", $spec.Log
+    )
+    Assert-Check ($recordResult.Code -eq 0) "失败阶段的记录动作本身必须成功（$($spec.Name) 实际 exit $($recordResult.Code)）"
+  }
+  $failedStagesJson = @((Get-Content -LiteralPath $failStages -Raw -Encoding utf8) | ConvertFrom-Json -Depth 12)
+  $clippyFailStage = @($failedStagesJson | Where-Object { $_.name -eq "cargo-clippy" })[0]
+  Assert-Check ($null -ne $clippyFailStage -and $clippyFailStage.status -eq "build_failed") "编译中断必须识别为 build_failed 而不是普通测试失败"
+
+  $failedEvidencePath = Join-Path $failDir "evidence.json"
+  $failedFinalize = Invoke-Script $collectorPath @(
+    "-Mode", "Finalize", "-StagesPath", $failStages, "-OutputPath", $failedEvidencePath,
+    "-Kind", "platform", "-Platform", "windows",
+    "-RunnerLabel", "windows-2025", "-Os", "Windows", "-Arch", "X64",
+    "-RunId", $script:testRunId, "-RunAttempt", $script:testAttempt,
+    "-Repository", "TanCan1998/Soxu", "-EventName", "pull_request",
+    "-BaseSha", (("b" * 40) -join ""), "-HeadSha", (("c" * 40) -join ""),
+    "-CheckoutSha", $collectorSha,
+    "-WorkflowRef", "stub/mirror/.github/workflows/ci.yml@refs/heads/main",
+    "-PlanJson", $evPlan,
+    "-StartedAt", "2026-11-27T21:53:10Z", "-CompletedAt", "2026-11-27T22:05:00Z"
+  )
+  Assert-Check ($failedFinalize.Code -eq 0) "失败证据的 Finalize 也必须能写出报告（实际 exit $($failedFinalize.Code)）"
+  if (Test-Path -LiteralPath $failedEvidencePath) {
+    $failedEvidence = (Get-Content -LiteralPath $failedEvidencePath -Raw -Encoding utf8) | ConvertFrom-Json -Depth 20
+    Assert-Check ($failedEvidence.result.status -eq "failed") "存在失败阶段时结语必须为 failed"
+    Assert-Fail "证据失败：采集器记录的编译中断被 Gate 拒绝" `
+      (Invoke-GateEvidence -PlanJson $evPlan -Documents @($failedEvidence, $goodDocs[1], $goodDocs[2]) -JobsJson (New-JobsJson @((New-MatrixJobRow "windows" -Conclusion "failure"), (New-MatrixJobRow "linux"), (New-MatrixJobRow "macos-arm64")))) 'evidence_stage_not_passed:windows/cargo-clippy=build_failed'
+  }
+
   # ============ 四、突变敏感度：移除契约校验后绕过用例必须重新通过 ============
   $verifierText = Get-Content -LiteralPath $verifierPath -Raw -Encoding utf8
   $contractMarker = '  Test-PlanContract $plan $errors'
@@ -959,7 +1486,7 @@ try {
 
   $variantContinueOnError = New-WorkflowVariant ".github/workflows/ci.yml" "ci-continue-on-error" {
     param($text)
-    $text.Replace("    timeout-minutes: 5`n    steps:`n      - uses: actions/checkout@v7", "    timeout-minutes: 5`n    continue-on-error: true`n    steps:`n      - uses: actions/checkout@v7")
+    $text.Replace("    runs-on: ubuntu-latest`n    timeout-minutes: 5", "    runs-on: ubuntu-latest`n    timeout-minutes: 5`n    continue-on-error: true")
   }
   Assert-Fail "失败：门禁作业使用 continue-on-error" (Invoke-WorkflowContract $variantContinueOnError) 'workflow_uses_continue_on_error'
 
@@ -971,7 +1498,7 @@ try {
 
   $variantNeeds = New-WorkflowVariant ".github/workflows/ci.yml" "ci-gate-needs" {
     param($text)
-    $text.Replace("    needs: [detect-changes, governance-and-privacy, rust-check, mobile-web-check]", "    needs: [detect-changes, governance-and-privacy, rust-check]")
+    $text.Replace("    needs: [detect-changes, governance-and-privacy, rust-format, rust-check, mobile-web-check]", "    needs: [detect-changes, governance-and-privacy, rust-format, rust-check]")
   }
   Assert-Fail "失败：门禁 needs 缺项" (Invoke-WorkflowContract $variantNeeds) 'gate_needs'
 
