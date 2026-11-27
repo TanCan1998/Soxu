@@ -1335,6 +1335,12 @@ function Invoke-ContractMode([string]$PathValue) {
       if ($queueValue -eq "max" -and $concurrencyText -match '(?m)^\s+cancel-in-progress:\s*true\s*$') {
         $errors.Add("concurrency_queue_max_with_cancel_true")
       }
+      # GitHub 在运行时求值 concurrency：只要 cancel-in-progress 在该 run 上解析为 true，
+      # queue: max 就会让整个 workflow 判为非法而零作业失败（实测 run 46023242089）。
+      # 因此本仓这种必须同时服务 PR（取消）与 main（排队）的单一 concurrency 块禁止出现 queue: max。
+      if ($queueValue -eq "max" -and $concurrencyText -match '(?m)^\s+cancel-in-progress:\s*\$\{\{') {
+        $errors.Add("concurrency_queue_max_with_dynamic_cancel")
+      }
     }
   }
 

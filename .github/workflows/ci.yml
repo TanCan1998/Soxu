@@ -16,14 +16,15 @@ on:
 # CI-D 并发策略（字面量必须是 GitHub 当前接受的取值，由 verify-ci-gate.ps1 的契约防守）：
 #   - 组名含事件名：workflow_dispatch 与 push/PR 各自独立分组，手动全量验证不占主线槽位；
 #   - PR 新提交取消同组旧 run 节省算力；
-#   - main 不取消在途 run（cancel-in-progress 解析为 false），并以 queue: max 允许最多 100 个 pending
-#     排队，避免连续 push 把仍有效的 pending run 替换掉；
-#   - queue: max 与字面量 cancel-in-progress: true 是 GitHub 明令非法的组合，
-#     因此取消语义只能写成按事件判定的表达式。
+#   - main 不取消在途 run（cancel-in-progress 解析为 false），后续 run 进入 pending 排队；
+#   - 实测结论（run 46023242089）：queue: max 与 cancel-in-progress 的组合是运行时求值检测的，
+#     即使写成表达式，只要 PR 上解析为 true 就会让整个 run 因 workflow 文件非法而零作业失败：
+#     “The combination of 'queue: max' and 'cancel-in-progress: true' is not allowed”。
+#     同一 workflow 必须同时服务 PR（取消）与 main（排队），因此只能显式使用 GitHub 合法值 single。
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-  queue: max
+  queue: single
 
 permissions:
   contents: read

@@ -2365,16 +2365,24 @@ $args = @(
 
   $variantCancelLiteral = New-WorkflowVariant ".github/workflows/ci.yml" "ci-concurrency-cancel-literal" {
     param($text)
-    $text.Replace("  cancel-in-progress: `${{ github.event_name == 'pull_request' }}", '  cancel-in-progress: true')
+    $text.Replace("  cancel-in-progress: `${{ github.event_name == 'pull_request' }}", '  cancel-in-progress: true').Replace("  queue: single`n", "  queue: max`n")
   }
-  # queue: max 与字面量 cancel-in-progress: true 是 GitHub 会直接判非法工作流的组合
+  # queue: max 与字面量 cancel-in-progress: true 是 GitHub 直接判非法工作流的组合
   Assert-Fail "失败：queue: max 与 cancel-in-progress: true 共存" (Invoke-WorkflowContract $variantCancelLiteral) 'concurrency_queue_max_with_cancel_true'
 
   $variantQueueInvalid = New-WorkflowVariant ".github/workflows/ci.yml" "ci-concurrency-queue-invalid" {
     param($text)
-    $text.Replace("  queue: max`n", "  queue: unlimited`n")
+    $text.Replace("  queue: single`n", "  queue: unlimited`n")
   }
   Assert-Fail "失败：queue 取值不在 GitHub 接受范围" (Invoke-WorkflowContract $variantQueueInvalid) 'concurrency_queue_invalid:unlimited'
+
+  # 实测 run 46023242089：GitHub 在运行时求值 concurrency，queue: max 配动态 cancel-in-progress
+  # 在 PR 上会让整个 workflow 判非法（零作业失败），因此契约必须在静态阶段就拦住这种组合。
+  $variantQueueMaxDynamicCancel = New-WorkflowVariant ".github/workflows/ci.yml" "ci-concurrency-queue-max" {
+    param($text)
+    $text.Replace("  queue: single`n", "  queue: max`n")
+  }
+  Assert-Fail "失败：queue: max 与动态 cancel-in-progress 共存" (Invoke-WorkflowContract $variantQueueMaxDynamicCancel) 'concurrency_queue_max_with_dynamic_cancel'
 
   $variantCacheKeyNarrow = New-WorkflowVariant ".github/workflows/ci.yml" "ci-cache-key-narrow" {
     param($text)
