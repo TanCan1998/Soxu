@@ -1,4 +1,4 @@
-﻿# Soxu 研发进度与跨会话交接看板 (PROGRESS)
+# Soxu 研发进度与跨会话交接看板 (PROGRESS)
 
 > **新对话接手指引**：请先阅读根目录 [`AGENTS.md`](../../AGENTS.md)，再结合下方「当前里程碑状态」与 `gh issue list` / `gh pr list` 即可在 30 秒内无损恢复上下文。
 
@@ -17,7 +17,10 @@
 - **`main` 已合入 `#76` / PR `#77`（`ea9f345`）。** 完成按改动域与 Cargo 反向依赖分级的抗压 CI、`scripts/detect-check-scope.ps1` 门禁分流、`.github/workflows/release.yml` 与公开联动发版仓库 `TanCan1998/soxu-releases`。
 - **`main` 已合入 `#78` / PR `#79`（`481ed70`）与 PR `#81`（`0e969b6`）。** 项目级 `.pi/settings.json` 以 `autoload: false` 关闭 `context-mode`，派发脚本放行 `python 3.13` 并注入 `PYTHONUTF8=1`，同时修复 `detect-check-scope.ps1` 双括号 `[[bin]]` 误解析导致 `soxu-cli` 包名漏检的缺陷。
 - **`main` 已合入 `#80` / PR `#82`（`e9504d6`）。** 收窄 Linux 真机已检出 Worktree 诊断的 `pending` 放行条件，为 `project.rs` 补跨挂载点 stderr 严格白名单，并修复两处历史 Linux Clippy 告警。
-- **CI 抗压波次：`#83`（CI-A）已合入，`#86`（CI-B）待合入。** `#83` / PR `#85`（`a86024e`）交付 `ci-gate-plan/v1` 固定 job 契约、`Plan` / `Verify` 同源推导对账与发布资产白名单，已通过远端 CI 合入 `main` 并归档工作区。审核候选提交 `2216417` 的 run `45906220407` 是审核快照，合入后主线 run `45906614204` 核验的正是 CI-B 的派发基线 `a86024e`，两者是分开记录的两条证据。`#86`（CI-B）在 `feat/86-ci-b-change-scope` 交付 `schemaVersion: 1` 结构化变更计划、Cargo 元数据反向闭包、Git NUL 差异与基准语义、平台/必跑 job/测试配置推导，并保留 CI-A 的严格门禁对账与路径契约保真，等待主控复验与合入。
+- **CI 抗压波次：`#83`（CI-A）与 `#86`（CI-B）均已合入 `main`。** `#83` / PR `#85`（`a86024e`）交付 `ci-gate-plan/v1` 固定 job 契约、`Plan` / `Verify` 同源推导对账与发布资产白名单，已通过远端 CI 合入 `main` 并归档工作区。审核候选提交 `2216417` 的 run `45906220407` 是审核快照，合入后主线 run `45906614204` 核验的正是 CI-B 的派发基线 `a86024e`，两者是分开记录的两条证据。`#86` / PR `#87`（`8c01a533`）交付 `schemaVersion: 1` 结构化变更计划、Cargo 元数据反向闭包、Git NUL 差异与基准语义、平台/必跑 job/测试配置推导，保留 CI-A 的严格门禁对账与路径契约保真，已通过远端 CI 合入 `main` 并归档工作区。
+- **（正在进行的子任务前缀）：原生矩阵冻结源码热修复（`#90`，分支 `fix/native-matrix-blockers`，工作区 `wks_4e0ff3d28c954665`，基线 `8c01a53`）。** 目标是在不改动 CI 工作流与脚本的前提下，修复 run `45914578287`（attempt 1，合并候选 `260333d6d397d61f57d8a11e0084489dcbf3ae94`）在 `macos-15` ARM64 与 `ubuntu-24.04` 上的两处真实失败：Darwin 上 `crates/soxu-git/src/repository_create/platform.rs` 的 `open_handle` 未使用参数与 `needless_return`（保留 `UnsupportedPlatform` 零写入语义，未加 `allow`、未把 Linux 原语放宽到 Darwin）；Linux 上 `crates/soxu-git/tests/diff.rs` 的整树快照与夹具自身派生的后台 `git maintenance` 竞态（夹具提交改为与生产只读入口同源的 `-c maintenance.auto=false -c gc.auto=0` 守卫，新增 trace2 `child_start`/`child_exit` 确定性回归）。
+- **`#90` 第二轮（有界修订）：加固回归用例里可独立证实的不等待风险。** PR `#91` 原 head `b0fc54b6` 的 GitHub run `45917865092` / Windows `rust-check`（job `140241392408`）在 `Run scoped unit & integration tests` 触到 30 分钟 job 级上限后 cancelled，job 与 run 日志均报 `log not found`（`BlobNotFound`），远端无法定位到具体二进制。同范围本地运行（`-p soxu-daemon -p soxu-git`）**未复现**该超时：原候选 `b0fc54b6` 与最终源码 `93b5125` 分别耗时 `111s` 与 `94s`，因此原 30 分钟超时**仍属未定因**。可独立证实的是对照用例自身的无界等待风险：旧实现的阳性对照刻意重新打开后台维护，并用 `Command::output()` 无界收集 stdout/stderr，只要继承写端的子/孙进程存活就会永久阻塞——该风险在旧候选上已独立确认。修订后对照仍真实走同一条 `commit_command` 提交路径，参数为 `maintenance.auto=true` + `gc.auto=0` + 显式 `*autoDetach=false`，改为 `stdin`/`stdout`/`stderr` 全部 `Stdio::null()` 的有界直接进程等待（`spawn` + `try_wait` + `60s` 截止 + `kill` + `10s` 回收窗口），五态（成功 / 非零退出 / 超时 / 观察异常 / 回收未确认）可区分，`try_wait` 自身失败也要走 kill + 有界回收，超时只承诺回收直接子进程；失败证据仅输出布尔摘要，不转储原始 trace2。三项源证据（子进程启动、无 detach、同 `sid` + 同 `child_id` 的 `child_exit`）全部保留：`child_id` 只是发出进程内的序号，必须与该进程 `sid` 一起绑定，并已用“同号不同 `sid`”的负例回归钉住。原远端超时仍按未定因记录，本修订不声称已定位。
+- **`#88` / PR `#89` 在办（CI-C 三平台动态矩阵）。** 首轮 run `45914578287`（attempt 1）失败于 `macos-15` ARM64 的 Clippy 与 `ubuntu-24.04` 的 `soxu-git` Diff 集测，两处根因由 `#90` 热修复分派；`#88` 在 `#90` 合入后基于新 `main` 重跑，本看板由主控协调两分支合流，不互相覆盖。
 - **CI 波次后续顺序**：CI-C 承接三平台动态矩阵的实际 job 执行与证据聚合，CI-D 后接；CI-E/F 与 CI-D 写入面正交。未经核验的原生测试与正式发布仍列为待办。
 - **M3 两份设计已合入 `main`。** `#57` 的显式 Init/Clone 与损坏恢复二次授权见 [仓库初始化、克隆与工作树恢复](../dev/git-init-clone-and-recovery.md)。`#58` 的轮次 Checkpoint 快照、先建 Safety Snapshot 再 Rewind 和文件级结构化提交见 [检查点、回退与结构化提交](../dev/git-checkpoint-rewind-commit.md)。
 - 仓库已启用合并自动删支（`delete_branch_on_merge = true`）与 Paseo Worktree 回收。
@@ -113,12 +116,19 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 三路均通过远端 CI 合入 `main`，工作区已归档、本地与远端分支已回收。`#69` 的 WSL `Ubuntu-26.04` 真机收尾验证（Rust `1.99.1`、独立 `CARGO_TARGET_DIR`）记录在 3.2 节；其原生二进制与相关原生测试未在本轮门禁中复跑，仍列为待办。
 
-#### 在办波次：CI 抗压（`#83` 已合入，`#86` 待合入）
+#### 在办波次：CI 抗压（`#83` / PR `#85`、`#86` / PR `#87` 已合入）
 
 | Issue / 任务 | 分支 / Paseo 工作区 | 状态 | Owned Paths |
 | :--- | :--- | :--- | :--- |
 | `#83` / PR `#85` CI-A 变更范围门禁与发布契约 | `feat/83-ci-a-strict-gate` / `wks_87a6a683f132b176` | 已合入 `a86024e`，工作区已归档 | `.github/workflows/ci.yml`、`scripts/verify-ci-gate.ps1`、`scripts/test-ci-gate.ps1`、AOCI |
-| `#86` CI-B 范围检测、Cargo Metadata 与测试计划 | `feat/86-ci-b-change-scope` / `wks_8bf43dd1b64bca90` | 执行中，等待主控复验与合入 | `scripts/detect-check-scope.ps1`、`scripts/test-check-scope.ps1`、`scripts/check-all.ps1`、`scripts/verify-ci-gate.ps1`、`scripts/test-ci-gate.ps1`、`ci.yml` 检测器接线、本看板、AOCI |
+| `#86` / PR `#87` CI-B 范围检测、Cargo Metadata 与测试计划 | `feat/86-ci-b-change-scope` / `wks_8bf43dd1b64bca90` | 已合入 `8c01a533`，工作区已归档 | `scripts/detect-check-scope.ps1`、`scripts/test-check-scope.ps1`、`scripts/check-all.ps1`、`scripts/verify-ci-gate.ps1`、`scripts/test-ci-gate.ps1`、`ci.yml` 检测器接线、本看板、AOCI |
+| `#88` / PR `#89` CI-C 三平台动态矩阵与证据聚合 | `feat/88-ci-c-platform-matrix` | 在办；首轮 run `45914578287`（attempt 1）失败，等 `#90` 合入后基于新 `main` 重跑 | `.github/workflows/ci.yml`、CI 证据聚合脚本、`scripts/check-all.ps1`、本看板、AOCI |
+
+#### 在办热修复：原生平台矩阵冻结源码（`#90`）
+
+| Issue / 任务 | 分支 / Paseo 工作区 | 状态 | Owned Paths |
+| :--- | :--- | :--- | :--- |
+| `#90` 原生矩阵冻结源码热修复 | `fix/native-matrix-blockers` / `wks_4e0ff3d28c954665` | 第二轮有界修订已提交，待主控独立复验与锁 SHA 合入（与 `#88` 并行，不改 CI 工作流/脚本） | `soxu-git/src/repository_create/platform.rs`（最小条件编译/告警修正）、`soxu-git/tests/diff.rs`（夹具隔离、有界维护回归）、本看板、`LESSONS.md`、本分支 AOCI |
 
 ### 3.2 已合入交付与验收证据边界
 
@@ -164,7 +174,7 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. 主控复验并合入 `#86`（CI-B），随后按 **CI-C → CI-D** 顺序推进；CI-E/F 与 CI-D 写入面正交，可并行排期但不能共用同一工作树。
+1. `#90` 合入后由主控独立复验并锁 SHA 合入 `#88`（CI-C）首轮失败后的重跑候选；随后按 **CI-C → CI-D** 顺序推进；CI-E/F 与 CI-D 写入面正交，可并行排期但不能共用同一工作树。
 2. CI-C 要把 CI-B 的结构化计划（`requiredPlatforms` / `requiredJobs` / `testProfiles` 与 `baseSha` / `headSha` / `checkoutSha`）接到真实三平台动态矩阵执行与证据聚合；动态矩阵可以按需扩展 job 契约，但必须保留 `CI Gate` 检查名、必跑只认 `success` 的严格证据与失败闭合，不得为接入矩阵而削弱对账。
 3. Git 后续候选继续按契约与共享写入范围排序：`#57-2` 只读恢复预览（恢复执行须另经二次授权）、`#58-D` 先建 Safety Snapshot 再执行 Rewind、`#58-E` 文件级结构化提交的预检与执行；`direct` MCP 运行时挂载与 Worktree 内写权限另排期，涉及 `soxu-protocol` 的变更先走独立契约 PR。
 4. 未经核验的原生测试、正式发布与 Intel 平台发版入口仍列为待办；Intel 只能由架构敏感、手动完整或发版入口显式请求，不从文件变更推导。
