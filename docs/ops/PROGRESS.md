@@ -1,4 +1,4 @@
-﻿# Soxu 研发进度与跨会话交接看板 (PROGRESS)
+# Soxu 研发进度与跨会话交接看板 (PROGRESS)
 
 > **新对话接手指引**：请先阅读根目录 [`AGENTS.md`](../../AGENTS.md)，再结合下方「当前里程碑状态」与 `gh issue list` / `gh pr list` 即可在 30 秒内无损恢复上下文。
 
@@ -18,7 +18,8 @@
 - **`main` 已合入 `#78` / PR `#79`（`481ed70`）与 PR `#81`（`0e969b6`）。** 项目级 `.pi/settings.json` 以 `autoload: false` 关闭 `context-mode`，派发脚本放行 `python 3.13` 并注入 `PYTHONUTF8=1`，同时修复 `detect-check-scope.ps1` 双括号 `[[bin]]` 误解析导致 `soxu-cli` 包名漏检的缺陷。
 - **`main` 已合入 `#80` / PR `#82`（`e9504d6`）。** 收窄 Linux 真机已检出 Worktree 诊断的 `pending` 放行条件，为 `project.rs` 补跨挂载点 stderr 严格白名单，并修复两处历史 Linux Clippy 告警。
 - **CI 抗压波次：`#83`（CI-A）与 `#86`（CI-B）均已合入 `main`。** `#83` / PR `#85`（`a86024e`）交付 `ci-gate-plan/v1` 固定 job 契约、`Plan` / `Verify` 同源推导对账与发布资产白名单，已通过远端 CI 合入 `main` 并归档工作区。审核候选提交 `2216417` 的 run `45906220407` 是审核快照，合入后主线 run `45906614204` 核验的正是 CI-B 的派发基线 `a86024e`，两者是分开记录的两条证据。`#86` / PR `#87`（`8c01a533`）交付 `schemaVersion: 1` 结构化变更计划、Cargo 元数据反向闭包、Git NUL 差异与基准语义、平台/必跑 job/测试配置推导，保留 CI-A 的严格门禁对账与路径契约保真，已通过远端 CI 合入 `main` 并归档工作区。
-- **（正在进行的子任务前缀）：原生矩阵冻结源码热修复（`#90`，分支 `fix/native-matrix-blockers`，工作区 `wks_4e0ff3d28c954665`，基线 `8c01a53`）。** 目标是在不改动 CI 工作流与脚本的前提下，修复 run `45914578287`（attempt 1，合并候选 `260333d6d397d61f57d8a11e0084489dcbf3ae94`）在 `macos-15` ARM64 与 `ubuntu-24.04` 上的两处真实失败：Darwin 上 `crates/soxu-git/src/repository_create/platform.rs` 的 `open_handle` 未使用参数与 `needless_return`（保留 `UnsupportedPlatform` 零写入语义，未加 `allow`、未把 Linux 原语放宽到 Darwin）；Linux 上 `crates/soxu-git/tests/diff.rs` 的整树快照与夹具自身派生的后台 `git maintenance` 竞态（夹具提交改为与生产只读入口同源的 `-c maintenance.auto=false -c gc.auto=0` 守卫，新增 trace2 `child_start`/`child_exit` 确定性回归，正向对照以 `*autoDetach=false` 同步等待）。本分支已锁定受测字节 `platform.rs` SHA-256 `b0e50bf5…`、`tests/diff.rs` SHA-256 `b6b575ba…`，等待主控独立复验与锁 SHA 合入。
+- **（正在进行的子任务前缀）：原生矩阵冻结源码热修复（`#90`，分支 `fix/native-matrix-blockers`，工作区 `wks_4e0ff3d28c954665`，基线 `8c01a53`）。** 目标是在不改动 CI 工作流与脚本的前提下，修复 run `45914578287`（attempt 1，合并候选 `260333d6d397d61f57d8a11e0084489dcbf3ae94`）在 `macos-15` ARM64 与 `ubuntu-24.04` 上的两处真实失败：Darwin 上 `crates/soxu-git/src/repository_create/platform.rs` 的 `open_handle` 未使用参数与 `needless_return`（保留 `UnsupportedPlatform` 零写入语义，未加 `allow`、未把 Linux 原语放宽到 Darwin）；Linux 上 `crates/soxu-git/tests/diff.rs` 的整树快照与夹具自身派生的后台 `git maintenance` 竞态（夹具提交改为与生产只读入口同源的 `-c maintenance.auto=false -c gc.auto=0` 守卫，新增 trace2 `child_start`/`child_exit` 确定性回归）。
+- **`#90` 第二轮（有界修订）：消除回归用例里的无界等待风险。** PR `#91` 原 head `b0fc54b6` 的 GitHub run `45917865092` / Windows `rust-check`（job `140241392408`）在 `Run scoped unit & integration tests` 触到 30 分钟 job 级上限后 cancelled，job 与 run 日志均报 `log not found`（`BlobNotFound`），远端无法定位到具体二进制；本地同范围套件（`-p soxu-daemon -p soxu-git`）实测 `100`–`111` 秒，基线 run `45914578287` 的 `windows-2025` 全 workspace 测试为 `173` 秒，因此属确定性阻塞而非慢。已证实的新增可阻塞构造是回归里的正面对照：它刻意重新打开后台维护，并用 `Command::output()` 无界收集 stdout/stderr。修订后对照仍真实走同一条 `commit_command` 提交路径，参数为 `maintenance.auto=true` + `gc.auto=0` + 显式 `*autoDetach=false`，改为 `stdin`/`stdout`/`stderr` 全部 `Stdio::null()` 的有界直接进程等待（`spawn` + `try_wait` + `60s` 截止 + `kill` + `10s` 回收窗口），五态（成功 / 非零退出 / 超时 / 观察异常 / 回收未确认）可区分，`try_wait` 自身失败也要走 kill + 有界回收，超时只承诺回收直接子进程；失败证据仅输出布尔摘要，不转储原始 trace2。三项源证据（子进程启动、无 detach、同 `sid` + 同 `child_id` 的 `child_exit`）全部保留：`child_id` 只是发出进程内的序号，必须与该进程 `sid` 一起绑定，并已用“同号不同 `sid`”的负例回归钉住。原 `b0fc54b6` 的 Windows 超时仍未定因，本修订只消除已确认存在的无界等待风险。
 - **`#88` / PR `#89` 在办（CI-C 三平台动态矩阵）。** 首轮 run `45914578287`（attempt 1）失败于 `macos-15` ARM64 的 Clippy 与 `ubuntu-24.04` 的 `soxu-git` Diff 集测，两处根因由 `#90` 热修复分派；`#88` 在 `#90` 合入后基于新 `main` 重跑，本看板由主控协调两分支合流，不互相覆盖。
 - **CI 波次后续顺序**：CI-C 承接三平台动态矩阵的实际 job 执行与证据聚合，CI-D 后接；CI-E/F 与 CI-D 写入面正交。未经核验的原生测试与正式发布仍列为待办。
 - **M3 两份设计已合入 `main`。** `#57` 的显式 Init/Clone 与损坏恢复二次授权见 [仓库初始化、克隆与工作树恢复](../dev/git-init-clone-and-recovery.md)。`#58` 的轮次 Checkpoint 快照、先建 Safety Snapshot 再 Rewind 和文件级结构化提交见 [检查点、回退与结构化提交](../dev/git-checkpoint-rewind-commit.md)。
@@ -127,7 +128,7 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 | Issue / 任务 | 分支 / Paseo 工作区 | 状态 | Owned Paths |
 | :--- | :--- | :--- | :--- |
-| `#90` 原生矩阵冻结源码热修复 | `fix/native-matrix-blockers` / `wks_4e0ff3d28c954665` | 本分支已锁定受测字节，待主控独立复验与锁 SHA 合入（与 `#88` 并行，不改 CI 工作流/脚本） | `soxu-git/src/repository_create/platform.rs`（最小条件编译/告警修正）、`soxu-git/tests/diff.rs`（夹具隔离与直接回归）、本看板、`LESSONS.md`、本分支 AOCI |
+| `#90` 原生矩阵冻结源码热修复 | `fix/native-matrix-blockers` / `wks_4e0ff3d28c954665` | 第二轮有界修订已提交，待主控独立复验与锁 SHA 合入（与 `#88` 并行，不改 CI 工作流/脚本） | `soxu-git/src/repository_create/platform.rs`（最小条件编译/告警修正）、`soxu-git/tests/diff.rs`（夹具隔离、有界维护回归）、本看板、`LESSONS.md`、本分支 AOCI |
 
 ### 3.2 已合入交付与验收证据边界
 

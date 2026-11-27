@@ -34,6 +34,7 @@
 | `L-013` | 平台矩阵告警 | `-D warnings` 只译当前平台分支；macOS 目标必跑 `cargo clippy --target aarch64-apple-darwin` 交叉证据，不加 `#[allow]`、不移栽 Linux 原语 | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-014` | 测试夹具后台维护 | 夹具 Git 命令必须与生产只读入口同源加 `-c maintenance.auto=false -c gc.auto=0`；回归用 trace2 `child_start`/`child_exit`，正向对照加 `*autoDetach=false` 不留后台进程 | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-015` | 管道退出码 | `cargo ... \| tail` 拿到的是 `tail` 的 0；WSL/Linux 验证脚本必 `set -euo pipefail` 或查 `${PIPESTATUS[0]}`，重跑前 `--no-run` 重建并核对二进制 SHA/mtime | `L2 · Seen 1×` | 本文 / 波次验收 |
+| `L-016` | 测试内子进程等待 | 观察“某子进程是否被派生”时，受测进程 stdin/stdout/stderr 全 `Stdio::null()`，证据只从 trace2 读；等待用 `spawn`+`try_wait`+截止+`kill`+回收窗口，四态可区分；禁 `output()` 无界收集 | `L2 · Seen 1×` | 本文 / 波次验收 |
 
 ---
 
@@ -106,7 +107,7 @@
 
 ### `L-014` 测试夹具的 Git 命令必须与生产只读入口同源禁用后台维护
 - **场景与根因**（`Seen 1× (2026-11-27)`）：run `45914578287` 的 Ubuntu 24.04 任务上，`binary_and_non_utf8_text_keep_distinct_output_contracts` 的整树快照只差 `.git/objects/maintenance.lock` 的增删与 `.git/objects` 的 mtime。根因是**夹具自己的 `git commit`** 派生了 detached `git maintenance run --auto`（trace2 可见 `child_start` 带 `--detach`），它持有 `objects/maintenance.lock` 并推进目录 mtime，与快照断言并发写。生产只读入口（`probe.rs`、`checkpoint/git.rs`、`repository_create/sandbox.rs`）都已用 `-c maintenance.auto=false -c gc.auto=0` 关闭，夹具漏了这套同源守卫。
-- **预防动作**：把守卫集中到夹具 Git 命令的唯一构造点（单一 `command_with` helper）。回归用 `GIT_TRACE2_EVENT` 的 `child_start`/`child_exit` 直接断言行为，不用 `sleep`、不删断言、不靠反复重跑；正向对照必须追加 `-c maintenance.autoDetach=false -c gc.autoDetach=false`（已验证 Git 2.53/2.56 均支持），让提交同步等待维护结束并以同 `child_id` 的 `child_exit` 核实，不给后续用例或夹具回收留后台进程。注意 `gc.auto=0` 单独并不足以阻止派生（Linux Git 2.53 实测仍派生），`maintenance.auto=false` 才是关键。
+- **预防动作**：把守卫集中到夹具 Git 命令的唯一构造点（单一 `command_with` helper）。回归用 `GIT_TRACE2_EVENT` 的 `child_start`/`child_exit` 直接断言行为，不用 `sleep`、不删断言、不靠反复重跑；正向对照必须追加 `-c maintenance.autoDetach=false -c gc.autoDetach=false`（已验证 Git 2.53/2.56 均支持），让提交同步等待维护结束并以同 `child_id` 的 `child_exit` 核实。对照必须用**有界等待 + 无管道收集**（见 `L-016`），不得用 `Command::output()` 等可能派生子进程的命令。注意 `gc.auto=0` 单独并不足以阻止派生（Linux Git 2.53 实测仍派生），`maintenance.auto=false` 才是关键；对照只翻 `maintenance.auto=true`，`gc.auto` 保持 `0`，不要为了“让维护真跑一下”去开 `gc.auto`。
 - **验证方式**：删掉夹具守卫后回归用例如期失败（`started: true, detached: true`），恢复后受测字节 SHA-256 不变并通过；修复前旧实现重跑 40 次全部通过，证明重跑不能作为修复证据。**状态**：活跃。
 
 ### `L-015` 管道会吞掉子进程退出码，重跑前必须重建二进制
@@ -114,10 +115,15 @@
 - **预防动作**：WSL/Linux 验证脚本统一 `set -euo pipefail` 或显式检查 `${PIPESTATUS[0]}`；先重定向到日志文件、单独检查退出码、再 `tail` 日志。做过任何源码回退/恢复实验后，重复实验前必显式显示 `cargo test --no-run` 输出并打印二进制 `mtime` 与 SHA-256，确认跑的是当前源码。
 - **验证方式**：每一步都留下 `exit=0` 逐条痕迹，且旧二进制误判不再出现。**状态**：活跃。
 
+### `L-016` 测试内子进程必须无管道、有界等待，失败证据必须有界脱敏
+- **场景与根因**（`Seen 1× (2026-11-27)`）：PR `#91` 原 head 的 Windows `rust-check`（run `45917865092` job `140241392408`）在 `Run scoped unit & integration tests` 触到 30 分钟 job 级上限后 cancelled，且 job/run 日志均 `log not found`，远端无任何 per-binary 粒度。本地同范围套件（`-p soxu-daemon -p soxu-git`）实测 `100`–`111` 秒、基线 `windows-2025` 全 workspace `173` 秒，所以是确定性阻塞而非变慢。新增维护回归的阳性对照是唯一新增可阻塞构造：它刻意重新打开后台维护，并用 `Command::output()` 无界收集 stdout/stderr；`output()` 要读到管道所有写端关闭，一旦有继承写端的后代存活就会永久阻塞，表现为 step 永不结束、日志无后续行。
+- **预防动作**：凡“观察某子进程是否被派生”的用例，受测进程一律 `stdin(Stdio::null())` 与 `stdout/stderr` 不接管道，证据只从 trace2 文件读；等待改成 `spawn` + `try_wait` 轮询 + 截止时间 + 超时 `kill` + 回收窗口，并让“成功 / 非零退出 / 超时 / 观察异常 / 回收未确认”五种结局可分别判定（`try_wait` 自身失败也必须走 kill + 有界回收，不得直接丢弃可能存活的直接子进程）。作为证据的事件必须**按发出进程 `sid` 绑定**：`child_id` 只是该进程内部的子进程序号，启动与退出必须同 `sid` + 同 `child_id` 才算闭环，否则会把后一层 Git 子进程的同号事件误当成顶层维护进程已结束（依据 Git 官方 `api-trace2.html` 的 Event 语义）。超时只允许声称回收**直接子进程**，不得写成对后代进程的证明。断言失败信息只输出布尔与计数摘要，**禁止**在 CI 转储原始 trace2 或整份环境。
+- **验证方式**：移除夹具守卫后用例确定性失败且 `0.3s` 内结束；把期限临时改成 `0` 得到 `timed_out` 且 `0.14s` 结束；把 `sid` 绑定退回只看 `child_id` 时负例用例失败；恢复字节后 SHA-256 一致。**状态**：活跃。
+
 ---
 
 ## 四、已自动化防呆归档区
 
 > 当「活跃规则速查表」中的经验已被仓库脚本或自动化测试完全机器防呆且连续两个波次零复发后，将其迁入本区归档，以保持主控日常上下文精干。
 
-- *暂无已迁出归档项（当前 `L-001` ~ `L-015` 处于活跃巡检期）。*
+- *暂无已迁出归档项（当前 `L-001` ~ `L-016` 处于活跃巡检期）。*
