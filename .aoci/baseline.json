@@ -89,15 +89,15 @@
     },
     "Cargo.lock": {
       "role": "index",
-      "sha256": "f833babd425b363367d84db1a6fcb0ed87bc88425460f5c85fa47805b76b7d8b",
-      "size": 43879,
-      "normalized_sha256": "f833babd425b363367d84db1a6fcb0ed87bc88425460f5c85fa47805b76b7d8b"
+      "sha256": "3360faf15ab4017b1aaa2c7e14bf1abd684ee74d19ef0dc829a0f469be3ff5c7",
+      "size": 167870,
+      "normalized_sha256": "3360faf15ab4017b1aaa2c7e14bf1abd684ee74d19ef0dc829a0f469be3ff5c7"
     },
     "Cargo.toml": {
       "role": "index",
-      "sha256": "1b674fd4595802e6c59665c9c9644542cab7605eb29c16960cb9e9acbd1807c0",
-      "size": 1636,
-      "normalized_sha256": "1b674fd4595802e6c59665c9c9644542cab7605eb29c16960cb9e9acbd1807c0"
+      "sha256": "37fa2bc0cc175d205c42f7f386924f1fe0283aa41a115cc148af7eff7afe3e4f",
+      "size": 2334,
+      "normalized_sha256": "37fa2bc0cc175d205c42f7f386924f1fe0283aa41a115cc148af7eff7afe3e4f"
     },
     "README.md": {
       "role": "index",
@@ -587,15 +587,15 @@
     },
     "crates/soxu-desktop/Cargo.toml": {
       "role": "index",
-      "sha256": "0cb583b5a9acce30aabcd02238a5452d709178c3a17f136b177bacda08b1f76c",
-      "size": 373,
-      "normalized_sha256": "0cb583b5a9acce30aabcd02238a5452d709178c3a17f136b177bacda08b1f76c"
+      "sha256": "dc7b87ea113bc3b7ce567f540f55fb7700406dd04b6d65b8ed85ace14140fb90",
+      "size": 427,
+      "normalized_sha256": "dc7b87ea113bc3b7ce567f540f55fb7700406dd04b6d65b8ed85ace14140fb90"
     },
     "crates/soxu-desktop/src/lib.rs": {
       "role": "index",
-      "sha256": "4549f33b874818f239e9e2d473c9a1187345e5ef3d11e4ad3efbd2186a3a8d3a",
-      "size": 386,
-      "normalized_sha256": "4549f33b874818f239e9e2d473c9a1187345e5ef3d11e4ad3efbd2186a3a8d3a"
+      "sha256": "4f485dda339b34d9ba637f06a6e7dde312956bbc84ab3f00c0734472b03166cc",
+      "size": 441,
+      "normalized_sha256": "4f485dda339b34d9ba637f06a6e7dde312956bbc84ab3f00c0734472b03166cc"
     },
     "crates/soxu-desktop/src/main.rs": {
       "role": "index",
@@ -603,11 +603,17 @@
       "size": 351,
       "normalized_sha256": "0e7ee9ad38eda9ebb2beea67bdf45db67f52a5a18b6382fd6c56f0f10846fdb1"
     },
+    "crates/soxu-desktop/src/theme/gpui_colors.rs": {
+      "role": "index",
+      "sha256": "c31d9820d193b7a5db5df840fe61ddce8fe44eb57bfe6598ed5424af4c452194",
+      "size": 24286,
+      "normalized_sha256": "c31d9820d193b7a5db5df840fe61ddce8fe44eb57bfe6598ed5424af4c452194"
+    },
     "crates/soxu-desktop/src/theme/mod.rs": {
       "role": "index",
-      "sha256": "4f073bb17eac5c7d7febb9ddd2791e08ce6d322e663fdb41f8400fe8c936e26f",
-      "size": 349,
-      "normalized_sha256": "4f073bb17eac5c7d7febb9ddd2791e08ce6d322e663fdb41f8400fe8c936e26f"
+      "sha256": "ee280af7bc7132eb809c1c7a7e49bda08c880b25bc49b929578867ada0622892",
+      "size": 437,
+      "normalized_sha256": "ee280af7bc7132eb809c1c7a7e49bda08c880b25bc49b929578867ada0622892"
     },
     "crates/soxu-desktop/src/theme/tokens.rs": {
       "role": "index",
@@ -1223,9 +1229,9 @@
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "81621a9e7c3c2e24bb8ffd6bec923e32b1b4f9916e9fff85df463d402e62f10d",
-      "size": 86709,
-      "normalized_sha256": "81621a9e7c3c2e24bb8ffd6bec923e32b1b4f9916e9fff85df463d402e62f10d"
+      "sha256": "6231b262c27a3b10d823a91cb8ee7f4bc95bfd3a4b7e2b6c0017388b8664c256",
+      "size": 87146,
+      "normalized_sha256": "6231b262c27a3b10d823a91cb8ee7f4bc95bfd3a4b7e2b6c0017388b8664c256"
     },
     "docs/user/getting-started.md": {
       "role": "index",
