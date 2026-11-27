@@ -1128,13 +1128,6 @@ async fn fifty_thousand_lines_return_metadata_but_oversized_review_fails_closed(
     assert_eq!(snapshot(&fixture.temp), before);
 }
 
-/// 夹具文件名含非法 UTF-8 字节（`0xff`），本项目的原始字节路径语义只在 Linux 验证支持。
-///
-/// 此处不能用 `cfg(unix)`：在 `macos-15` ARM64 Runner 上 `fs::write` 对这种名字返回
-/// `EILSEQ`（Illegal byte sequence），夹具的建盘前提不成立。Linux 是本项目明确验证
-/// 支持「原始字节路径无损 + 被替换的符号链接被拒绝」的运行面，Windows 本来就不在
-/// `unix` 编译面内。这里只按实测 Runner 行为与项目验证范围定门控，不推断 Darwin
-/// 文件系统的整体能力。
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn linux_preserves_raw_linebreak_name_and_refuses_a_replaced_symlink() {
