@@ -355,6 +355,43 @@ try {
   Assert-Condition ($ciWorkflowText -notmatch 'detect-check-scope\.ps1[^\n]*-Event range') "ci.yml 不得使用检测器未声明的 -Event range"
   Assert-Condition ($ciWorkflowText -match 'detect-check-scope\.ps1 -Event auto -BaseRef "origin/main" -HeadRef HEAD -Json') "ci.yml 的 workflow_dispatch 默认 scope 使用 -Event auto 加显式基准"
 
+  # PR 事件身份与检出树必须分离：head 是事件里的 PR head commit，
+  # checkout 是实际执行树（GitHub 在 PR 上检出的是合并提交），两者身份不得混用。
+  $idRepo = New-GitFixture "git-pr-identity"
+  Write-FixtureFile $idRepo "docs/base.md" "base"
+  $idBase = Commit-Fixture $idRepo "base"
+  Invoke-GitIn $idRepo @("checkout", "-q", "-b", "feature") | Out-Null
+  Write-FixtureFile $idRepo "docs/feature.md" "feature"
+  $idHead = Commit-Fixture $idRepo "feature"
+  Invoke-GitIn $idRepo @("checkout", "-q", "main") | Out-Null
+  Write-FixtureFile $idRepo "docs/main-only.md" "main"
+  Commit-Fixture $idRepo "main moves on" | Out-Null
+  Invoke-GitIn $idRepo @("checkout", "-q", "feature") | Out-Null
+  Invoke-GitIn $idRepo @("merge", "-q", "--no-ff", "-m", "merge main into feature", "main") | Out-Null
+  $idMerge = (Invoke-GitIn $idRepo @("rev-parse", "HEAD")).Trim()
+  Assert-Condition ($idMerge -ne $idHead) "夹具必须产生与 PR head 不同的合并检出提交"
+
+  $idScope = Invoke-Detect -RepoRootOverride $idRepo -EventName "pull_request" -BaseRef $idBase -HeadRef $idHead
+  Assert-Condition (
+    $idScope.headSha -eq $idHead -and
+    $idScope.checkoutSha -eq $idMerge -and
+    $idScope.headSha -ne $idScope.checkoutSha -and
+    $idScope.baseSha -eq $idBase
+  ) "PR 计划 headSha 取事件 head，checkoutSha 与实际合并检出分离"
+
+  # 用合并提交当 head 会把 main 后续改动算进 PR 范围，这就是要用事件 head 的原因。
+  $mergedScope = Invoke-Detect -RepoRootOverride $idRepo -EventName "pull_request" -BaseRef $idBase -HeadRef $idMerge
+  Assert-Condition (
+    ($mergedScope.changedFiles -contains "docs/main-only.md") -and
+    (-not ($idScope.changedFiles -contains "docs/main-only.md")) -and
+    ($idScope.changedFiles -contains "docs/feature.md")
+  ) "以事件 head 求差不会把 main 后续提交算进 PR，用合并提交当 head 则会"
+
+  # 工作流接线必须传事件 head，不得回退到检出 HEAD。
+  $ciWorkflowText = Get-Content -LiteralPath (Join-Path $repoRoot ".github/workflows/ci.yml") -Raw -Encoding utf8
+  Assert-Condition ($ciWorkflowText -match 'PR_HEAD_SHA:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\}\}') "ci.yml 必须把 PR head sha 经事件上下文传入"
+  Assert-Condition ($ciWorkflowText -match 'detect-check-scope\.ps1 -Event pull_request -BaseRef \$baseRef -HeadRef \$headRef -Json') "PR 接线必须用事件 head，不得直接传 HEAD"
+
   # 删除、重命名、逗号、非 ASCII 与空白路径
   $renameRepo = New-GitFixture "git-rename"
   Write-FixtureFile $renameRepo "old name.md" "payload"

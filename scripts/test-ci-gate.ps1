@@ -72,7 +72,8 @@ function Invoke-GateVerify {
   param(
     [string]$PlanJson,
     [string]$EvidenceJson,
-    [string]$ScriptPath = ""
+    [string]$ScriptPath = "",
+    [string]$JobsJson = ""
   )
   $target = if ([string]::IsNullOrWhiteSpace($ScriptPath)) { $verifierPath } else { $ScriptPath }
   $arguments = @("-Mode", "Verify")
@@ -81,6 +82,9 @@ function Invoke-GateVerify {
   }
   if ($null -ne $EvidenceJson) {
     $arguments += @("-EvidencePath", (Save-Fixture ("evidence-" + [Guid]::NewGuid().ToString("N")) $EvidenceJson))
+  }
+  if (-not [string]::IsNullOrWhiteSpace($JobsJson)) {
+    $arguments += @("-JobsPath", (Save-Fixture ("jobs-verify-" + [Guid]::NewGuid().ToString("N")) $JobsJson))
   }
   return Invoke-Script $target $arguments
 }
@@ -465,7 +469,11 @@ $script:testRunId = "45899688832"
 $script:testAttempt = "2"
 $script:testSha = ("a" * 40) -join ""
 # 主控在真实 run 的 /attempts/2 端点核对到的起点（复用 job 仍停在早于它的时间）。
-$script:testAttemptStart = "2026-11-27T21:52:40Z"
+$script:testAttemptStart = "2026-11-26T20:00:00Z"
+$script:testStageStarted = "2026-11-26T20:01:00Z"
+$script:testStageCompleted = "2026-11-26T20:05:00Z"
+$script:testStaleCompleted = "2026-11-26T19:50:00Z"
+$script:testStaleStarted = "2026-11-26T19:45:00Z"
 $script:evidenceRunnerCatalog = @{
   "windows"     = @{ label = "windows-2025"; os = "windows"; arch = "x64" }
   "linux"       = @{ label = "ubuntu-24.04"; os = "linux"; arch = "x64" }
@@ -531,8 +539,8 @@ function New-PlatformEvidenceDoc {
     [string]$Os = "",
     [string]$Arch = "",
     [string]$ResultStatus = "passed",
-    [string]$CompletedAt = "2026-11-27T22:05:00Z",
-    [string]$StartedAt = "2026-11-27T21:53:10Z",
+    [string]$CompletedAt = $script:testStageCompleted,
+    [string]$StartedAt = $script:testStageStarted,
     $Stages = $null
   )
   $catalog = $script:evidenceRunnerCatalog[$Platform]
@@ -561,8 +569,8 @@ function New-MatrixJobRow {
   param(
     [string]$Platform,
     [string]$Conclusion = "success",
-    [string]$StartedAt = "2026-11-27T21:53:05Z",
-    [string]$CompletedAt = "2026-11-27T22:05:00Z"
+    [string]$StartedAt = $script:testStageStarted,
+    [string]$CompletedAt = $script:testStageCompleted
   )
   # 注意：jobs 列表会把沿用（复用）的 job 也标 run_attempt=2，所以只能靠原始时间分辨。
   return [ordered]@{
@@ -712,6 +720,27 @@ $evidenceMultiFolded = @'
 }
 '@
 
+# 聚合字符串形式的 needs 结果：不含实例身份，必须拒绝当作逐实例证据。
+$evidenceAggregateSuccess = @'
+{
+  "detect-changes": "success",
+  "governance-and-privacy": "success",
+  "rust-format": "success",
+  "rust-check": "success",
+  "mobile-web-check": "skipped"
+}
+'@
+
+$evidenceAggregateSkipped = @'
+{
+  "detect-changes": "success",
+  "governance-and-privacy": "success",
+  "rust-format": "skipped",
+  "rust-check": "skipped",
+  "mobile-web-check": "skipped"
+}
+'@
+
 $planBaseline = New-PlanJson
 $planRustSkipped = New-PlanJson -Rust $false -RustScope "none" -RustRequired $false -ChangedFiles @("docs/ops/PROGRESS.md")
 $planMobileRequired = New-PlanJson -Rust $false -RustScope "none" -RustRequired $false -MobileWeb $true -MobileRequired $true -ChangedFiles @("apps/mobile-web/src/main.tsx")
@@ -816,7 +845,7 @@ try {
   Assert-Fail "失败：多实例部分失败" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiPartial) 'required_not_success:rust-check/windows=failure'
   Assert-Fail "失败：多实例证据缺项" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiMissing) 'instance_missing:rust-check/macos-arm64'
   Assert-Fail "失败：多实例重复证据" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiDuplicate) 'instance_duplicate:rust-check/windows'
-  Assert-Fail "失败：多实例被折叠为单一状态" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiFolded) 'multi_instance_evidence_missing:rust-check'
+  Assert-Fail "失败：多实例被折叠为单一状态" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiFolded) 'matrix_jobs_unavailable:rust-check'
   Assert-Fail "失败：实例状态非字符串" (Invoke-GateVerify -PlanJson $planMultiInstance -EvidenceJson $evidenceMultiStatusInvalid) 'instance_status_invalid:rust-check/windows'
 
   # 计划实例集不得被篡改：删平台、不声明实例、scope 与 instances 不同源都必须拒绝。
@@ -1232,6 +1261,18 @@ try {
   Assert-Fail "证据失败：计数未知却填了 0" `
     (Invoke-GateEvidence -PlanJson $evPlan -Documents $unknownButCountedDocs -JobsJson $goodJobs) 'evidence_stage_counts_conflict:windows/cargo-test'
 
+  # passed 阶段却带失败计数是矛盾证据：计数已统计且 failed>0，就不可能通过。
+  # 计数未知（countsKnown=false）仍是合法表态，不在此列。
+  $contradictionCountDocs = @(foreach ($p in $evPlatforms) {
+      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -Stages @(
+        (New-StageRecord -Name 'cargo-fetch')
+        (New-StageRecord -Name 'cargo-clippy')
+        (New-StageRecord -Name 'cargo-test' -Status 'passed' -ExitCode 0 -CountsKnown $true -Counts ([ordered]@{ passed = 150; failed = 6; ignored = 5; measured = 0; filtered = 0 }))
+      )
+    })
+  Assert-Fail "证据失败：passed 阶段却带失败计数" `
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $contradictionCountDocs -JobsJson $goodJobs) 'evidence_stage_counts_contradiction:windows/cargo-test'
+
   # 平台集合：缺项、重复、未知平台
   $missingPlatform = Invoke-GateEvidence -PlanJson $evPlan -Documents @($goodDocs[0], $goodDocs[1]) -JobsJson $goodJobs
   Assert-Fail "证据失败：缺少必要平台" $missingPlatform 'evidence_platform_missing:macos-arm64'
@@ -1269,7 +1310,7 @@ try {
 
   # 部分重跑：复用前 attempt 的证据必须失败关闭，并提示全量重跑
   $reusedDocs = @(foreach ($p in $evPlatforms) {
-      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -CompletedAt '2026-11-27T21:40:12Z' -StartedAt '2026-11-27T21:38:00Z'
+      New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest -CompletedAt $script:testStaleCompleted -StartedAt $script:testStaleStarted
     })
   $reusedResult = Invoke-GateEvidence -PlanJson $evPlan -Documents $reusedDocs -JobsJson $goodJobs
   Assert-Fail "证据失败：沿用前 attempt 的已完成时间" $reusedResult 'evidence_from_previous_attempt'
@@ -1293,7 +1334,7 @@ try {
 
   # 关键防伪：jobs 列表会把沿用项也标成当前 attempt，只能靠开始时间分辨。
   Assert-Fail "证据失败：矩阵 job 开始时间早于本次 attempt" `
-    (Invoke-GateEvidence -PlanJson $evPlan -Documents $goodDocs -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows' -StartedAt '2026-11-27T21:40:02Z'), (New-MatrixJobRow 'linux'), (New-MatrixJobRow 'macos-arm64')))) 'matrix_job_from_previous_attempt:windows'
+    (Invoke-GateEvidence -PlanJson $evPlan -Documents $goodDocs -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows' -StartedAt '2026-11-26T19:40:02Z'), (New-MatrixJobRow 'linux'), (New-MatrixJobRow 'macos-arm64')))) 'matrix_job_from_previous_attempt:windows'
 
   # 无需要平台证据时（rust 未触发）不得因空证据目录失败
   Assert-Pass "证据通过：rust 未触发时不要求平台证据" `
@@ -1375,7 +1416,7 @@ try {
     "-CheckoutSha", $collectorSha,
     "-WorkflowRef", "stub/mirror/.github/workflows/ci.yml@refs/heads/main",
     "-PlanJson", $evPlan, "-ResultStatus", "passed",
-    "-StartedAt", "2026-11-27T21:53:10Z", "-CompletedAt", "2026-11-27T22:05:00Z"
+    "-StartedAt", $script:testStageStarted, "-CompletedAt", $script:testStageCompleted
   )
   $finalizeResult = Invoke-Script $collectorPath $finalizeArgs
   Assert-Check ($finalizeResult.Code -eq 0) "采集器 Finalize 必须成功（实际 exit $($finalizeResult.Code)：$($finalizeResult.Output.Trim())）"
@@ -1442,7 +1483,7 @@ try {
     "-CheckoutSha", $collectorSha,
     "-WorkflowRef", "stub/mirror/.github/workflows/ci.yml@refs/heads/main",
     "-PlanJson", $evPlan,
-    "-StartedAt", "2026-11-27T21:53:10Z", "-CompletedAt", "2026-11-27T22:05:00Z"
+    "-StartedAt", $script:testStageStarted, "-CompletedAt", $script:testStageCompleted
   )
   Assert-Check ($failedFinalize.Code -eq 0) "失败证据的 Finalize 也必须能写出报告（实际 exit $($failedFinalize.Code)）"
   if (Test-Path -LiteralPath $failedEvidencePath) {
@@ -1450,6 +1491,227 @@ try {
     Assert-Check ($failedEvidence.result.status -eq "failed") "存在失败阶段时结语必须为 failed"
     Assert-Fail "证据失败：采集器记录的编译中断被 Gate 拒绝" `
       (Invoke-GateEvidence -PlanJson $evPlan -Documents @($failedEvidence, $goodDocs[1], $goodDocs[2]) -JobsJson (New-JobsJson @((New-MatrixJobRow "windows" -Conclusion "failure"), (New-MatrixJobRow "linux"), (New-MatrixJobRow "macos-arm64")))) 'evidence_stage_not_passed:windows/cargo-clippy=build_failed'
+  }
+
+  # ============ 三·四、矩阵作业的 Verify 逐实例来源 ============
+  # needs.<job>.result 只是聚合字符串，不含实例身份；矩阵作业必须从原始 jobs 派生。
+  $mvPlan = (New-PlanJson).Trim()
+  $mvEvidence = $evidenceBaseline
+  $mvJobsGood = New-JobsJson @(foreach ($p in @('windows', 'linux', 'macos-arm64')) { New-MatrixJobRow $p })
+
+  Assert-Pass "矩阵 Verify 通过：逐实例来自原始 jobs 且全绿" `
+    (Invoke-GateVerify -PlanJson $mvPlan -EvidenceJson $mvEvidence -JobsJson $mvJobsGood)
+
+  # 核心防回归：只有聚合 success 字符串、没原始 jobs 时必须拒绝。
+  Assert-Fail "矩阵 Verify 失败：聚合成功字符串不得代替逐实例证据" `
+    (Invoke-GateVerify -PlanJson $mvPlan -EvidenceJson $evidenceAggregateSuccess) 'matrix_jobs_unavailable:rust-check'
+
+  Assert-Fail "矩阵 Verify 失败：原始 jobs 缺少平台实例" `
+    (Invoke-GateVerify -PlanJson $mvPlan -EvidenceJson $mvEvidence -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows'), (New-MatrixJobRow 'linux')))) 'matrix_instance_missing:rust-check/macos-arm64'
+
+  Assert-Fail "矩阵 Verify 失败：平台实例失败" `
+    (Invoke-GateVerify -PlanJson $mvPlan -EvidenceJson $evidenceMultiPartial -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows' -Conclusion 'failure'), (New-MatrixJobRow 'linux'), (New-MatrixJobRow 'macos-arm64')))) 'required_not_success:rust-check/windows=failure'
+
+  Assert-Fail "矩阵 Verify 失败：needs 报成功但实例不全绿" `
+    (Invoke-GateVerify -PlanJson $mvPlan -EvidenceJson $evidenceAggregateSuccess -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows' -Conclusion 'failure'), (New-MatrixJobRow 'linux'), (New-MatrixJobRow 'macos-arm64')))) 'matrix_aggregate_conflict:rust-check=success'
+
+  Assert-Fail "矩阵 Verify 失败：needs 报跳过但实例全绿" `
+    (Invoke-GateVerify -PlanJson $mvPlan -EvidenceJson $evidenceAggregateSkipped -JobsJson $mvJobsGood) 'matrix_aggregate_conflict:rust-check=skipped'
+
+  Assert-Fail "矩阵 Verify 失败：同名实例行重复" `
+    (Invoke-GateVerify -PlanJson $mvPlan -EvidenceJson $mvEvidence -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows'), (New-MatrixJobRow 'windows'), (New-MatrixJobRow 'linux'), (New-MatrixJobRow 'macos-arm64')))) 'matrix_instance_duplicate:rust-check/windows'
+
+  Assert-Fail "矩阵 Verify 失败：出现计划外平台行" `
+    (Invoke-GateVerify -PlanJson $mvPlan -EvidenceJson $mvEvidence -JobsJson (New-JobsJson @((New-MatrixJobRow 'windows'), (New-MatrixJobRow 'linux'), (New-MatrixJobRow 'macos-arm64'), (New-MatrixJobRow 'macos-intel')))) 'matrix_instance_unknown:rust-check'
+
+  Assert-Fail "矩阵 Verify 失败：证据 instances 与原始 jobs 不符" `
+    (Invoke-GateVerify -PlanJson $mvPlan -EvidenceJson $evidenceMultiPartial -JobsJson $mvJobsGood) 'matrix_evidence_conflict:rust-check/windows'
+
+  # rust 未触发时不应要求原始 jobs。
+  Assert-Pass "矩阵 Verify 通过：rust 未触发时不要求原始 jobs" `
+    (Invoke-GateVerify -PlanJson ((New-PlanJson -Rust $false -RustScope "none" -RustRequired $false -ChangedFiles @("docs/ops/PROGRESS.md")).Trim()) -EvidenceJson $evidenceRustSkipped)
+
+  # ============ 三·五、真实 workflow run 块按 Actions pwsh 包装往返 ============
+  # 只靠字符串契约盖不住参数绑定：本轮远端真实失败就是内部脚本调用的数组 splatting。
+  # 这里从真实 ci.yml 提取 run 块，按 Actions 的 pwsh 包装真实执行：
+  # 先 $ErrorActionPreference='Stop'，再 dot-source，最后按 LASTEXITCODE 决定退出码。
+  $rtTemp = Join-Path $tempRoot ("runblocks-" + [Guid]::NewGuid().ToString("N"))
+  $rtEvidence = Join-Path $rtTemp 'ci-evidence'
+  New-Item -ItemType Directory -Path $rtEvidence -Force | Out-Null
+  foreach ($p in $evPlatforms) {
+    $sub = Join-Path $rtEvidence ("ci-evidence-1-rust-" + $p)
+    New-Item -ItemType Directory -Path $sub -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $sub 'evidence.json') -Value ((New-PlatformEvidenceDoc -Platform $p -PlanDigest $evDigest) | ConvertTo-Json -Depth 12) -Encoding utf8 -NoNewline
+  }
+  Set-Content -LiteralPath (Join-Path $rtTemp 'ci-jobs.json') -Value (New-JobsJson @(foreach ($p in $evPlatforms) { New-MatrixJobRow $p })) -Encoding utf8 -NoNewline
+  Set-Content -LiteralPath (Join-Path $rtTemp 'ci-attempt-start.txt') -Value $script:testAttemptStart -Encoding utf8 -NoNewline
+  Set-Content -LiteralPath (Join-Path $rtTemp 'ci-scope.json') -Value (New-ScopeJson -Rust $true -RustScope "workspace") -Encoding utf8 -NoNewline
+  Set-Content -LiteralPath (Join-Path $rtTemp 'github-output.txt') -Value "" -Encoding utf8 -NoNewline
+  Set-Content -LiteralPath (Join-Path $rtTemp 'github-env.txt') -Value "" -Encoding utf8 -NoNewline
+
+  # 按 step 的明确 name 挑选并断言精确集合：不用命令词黑名单，否则新增接线会被静默漏测。
+  # 接线 step 分两类：可整体执行往返的，与含构建命令只能做结构断言的 Stage step。
+  $expectedExecutableBlocks = @(
+    'Build deterministic CI gate plan'
+    'Verify CI gate plan against actual job evidence'
+    'Verify per-platform evidence against plan and run identity'
+    'Finalize sanitized governance evidence'
+    'Finalize sanitized format evidence'
+    'Finalize sanitized platform evidence'
+    'Finalize sanitized mobile web evidence'
+  )
+  # Stage step 的真实名字对应唯一采集阶段；漏一个就是少一个平台的执行证据。
+  $expectedStageBlocks = [ordered]@{
+    'Check formatting'                          = 'cargo-fmt'
+    'Fetch dependencies (shared build directory)' = 'cargo-fetch'
+    'Run Clippy'                                = 'cargo-clippy'
+    'Run scoped unit & integration tests'       = 'cargo-test'
+  }
+  $expectedAllBlocks = @($expectedExecutableBlocks) + @($expectedStageBlocks.Keys)
+
+  $allBlocks = @(Get-RunBlocks $ciWorkflow)
+  $blockGrouped = @{}
+  foreach ($candidate in $allBlocks) {
+    if (-not $blockGrouped.ContainsKey($candidate.name)) { $blockGrouped[$candidate.name] = [System.Collections.Generic.List[object]]::new() }
+    $blockGrouped[$candidate.name].Add($candidate)
+  }
+
+  $missingBlocks = @($expectedAllBlocks | Where-Object { -not $blockGrouped.ContainsKey($_) })
+  Assert-Check ($missingBlocks.Count -eq 0) "缺少预期的脚本接线 step：$($missingBlocks -join ', ')"
+
+  # 反向覆盖：真实工作流里调脚本的 step 必须全部列入，否则新增接线会漏测。
+  $scriptStepBlocks = @($allBlocks | Where-Object { $_.body -match 'scripts/(verify-ci-gate|collect-ci-evidence)\.ps1' })
+  $unlistedBlocks = @($scriptStepBlocks | Where-Object { $expectedAllBlocks -notcontains $_.name })
+  Assert-Check ($unlistedBlocks.Count -eq 0) "存在未纳入回归的脚本接线 step：$((@($unlistedBlocks | ForEach-Object { $_.name })) -join ', ')"
+  Assert-Check ($scriptStepBlocks.Count -eq $expectedAllBlocks.Count) "调脚本的接线 step 总数必须精确为 $($expectedAllBlocks.Count)（实际 $($scriptStepBlocks.Count)）"
+
+  # Stage step 不执行 cargo，但必须断言其采集调用形态与阶段名完全正确。
+  foreach ($stageStepName in $expectedStageBlocks.Keys) {
+    $stageBlock = $blockGrouped[$stageStepName]
+    Assert-Check ($null -ne $stageBlock) "缺少 Stage step「$stageStepName」"
+    if ($null -eq $stageBlock) { continue }
+    $stageBody = $stageBlock.body
+    Assert-Check ($stageBody -match "-Mode Stage") "Stage step「$stageStepName」必须显式传 -Mode Stage"
+    Assert-Check ($stageBody -match "-StagesPath") "Stage step「$stageStepName」必须传 -StagesPath"
+    $expectedStageName = [string]$expectedStageBlocks[$stageStepName]
+    Assert-Check ($stageBody -match [regex]::Escape("-Name $expectedStageName")) "Stage step「$stageStepName」必须记录阶段名 $expectedStageName"
+    Assert-Check ($stageBody -match "-ExitCode") "Stage step「$stageStepName」必须传递真实退出码"
+  }
+
+  $rtBlocks = @($expectedExecutableBlocks | ForEach-Object { $blockGrouped[$_] } | Where-Object { $null -ne $_ })
+  Assert-Check ($rtBlocks.Count -eq $expectedExecutableBlocks.Count) "可执行往返必须精确覆盖 $($expectedExecutableBlocks.Count) 个接线 step（实际 $($rtBlocks.Count)）"
+  foreach ($expectedBlock in $rtBlocks) {
+    Assert-Check ($expectedBlock.body -notmatch '(?m)^\s*(&\s*)?(cargo|pnpm|gitleaks)\b') "往返 step「$($expectedBlock.name)」不得包含构建工具执行行"
+  }
+
+  $rtEnv = @{
+    GATE_PLAN              = $evPlan
+    DETECT_RESULT          = 'success'
+    GOV_RESULT             = 'success'
+    FMT_RESULT             = 'success'
+    RUST_RESULT            = 'success'
+    WEB_RESULT             = 'skipped'
+    EVIDENCE_JOB_STATUS    = 'success'
+    EVIDENCE_RUN_ID        = $script:testRunId
+    EVIDENCE_RUN_ATTEMPT   = $script:testAttempt
+    EVIDENCE_REPOSITORY    = 'TanCan1998/Soxu'
+    EVIDENCE_EVENT         = 'pull_request'
+    EVIDENCE_WORKFLOW_REF  = 'stub/mirror/.github/workflows/ci.yml@refs/heads/main'
+    EVIDENCE_BASE_SHA      = (("b" * 40) -join "")
+    EVIDENCE_HEAD_SHA      = (("c" * 40) -join "")
+    EVIDENCE_CHECKOUT_SHA  = $script:testSha
+    EVIDENCE_PLATFORM      = 'windows'
+    EVIDENCE_RUNNER_LABEL  = 'windows-2025'
+    EVIDENCE_RUNNER_OS     = 'Windows'
+    EVIDENCE_RUNNER_ARCH   = 'X64'
+    RUNNER_TEMP            = $rtTemp
+    GITHUB_OUTPUT          = (Join-Path $rtTemp 'github-output.txt')
+    GITHUB_ENV             = (Join-Path $rtTemp 'github-env.txt')
+  }
+
+  # 模拟 Actions 的 pwsh 包装：Stop + dot-source + LASTEXITCODE 退出。
+  function Invoke-ActionPwshStep([string]$StepPath) {
+    $escaped = $StepPath.Replace("'", "''")
+    $wrapperPath = Join-Path $rtTemp ("wrapper-" + [Guid]::NewGuid().ToString("N") + ".ps1")
+    $wrapperText = "`$ErrorActionPreference = 'Stop'`n. '$escaped'`nif (Test-Path -LiteralPath variable:\LASTEXITCODE) { exit `$LASTEXITCODE }`n"
+    Set-Content -LiteralPath $wrapperPath -Value $wrapperText -Encoding utf8 -NoNewline
+    Push-Location $repoRoot
+    try { $out = (& pwsh -NoProfile -File $wrapperPath 2>&1 | Out-String); $code = $LASTEXITCODE }
+    finally { Pop-Location }
+    return [pscustomobject]@{ Code = $code; Output = $out }
+  }
+
+  $rtPrevious = @{}
+  foreach ($key in $rtEnv.Keys) {
+    $rtPrevious[$key] = [Environment]::GetEnvironmentVariable($key)
+    [Environment]::SetEnvironmentVariable($key, [string]$rtEnv[$key])
+  }
+  try {
+    foreach ($block in $rtBlocks) {
+      # 消费型 step 读共享输入根；Finalize 必须写进自己的 RUNNER_TEMP，
+      # 共用同一根会互相覆盖，也无法证明每个作业只产出自己的那份证据。
+      $isConsumer = $block.name -like 'Build deterministic*' -or $block.name -like 'Verify *'
+      if ($isConsumer) {
+        $blockTemp = $rtTemp
+      } else {
+        $blockTemp = Join-Path $rtTemp ("run-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path (Join-Path $blockTemp 'ci-evidence') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $blockTemp 'ci-start.txt') -Value $script:testStageStarted -Encoding utf8 -NoNewline
+      }
+
+      $previousTemp = [Environment]::GetEnvironmentVariable('RUNNER_TEMP')
+      [Environment]::SetEnvironmentVariable('RUNNER_TEMP', $blockTemp)
+      try {
+        $stepPath = Join-Path $rtTemp ("step-" + [Guid]::NewGuid().ToString("N") + ".ps1")
+        Set-Content -LiteralPath $stepPath -Value $block.body -Encoding utf8 -NoNewline
+        $rtResult = Invoke-ActionPwshStep $stepPath
+      } finally {
+        [Environment]::SetEnvironmentVariable('RUNNER_TEMP', $previousTemp)
+      }
+      Assert-Check ($rtResult.Code -eq 0) "真实 run 块「$($block.name)」在 Actions pwsh 包装下必须 exit 0（实际 exit $($rtResult.Code)：$($rtResult.Output.Trim())）"
+      Assert-Check ($rtResult.Output -notmatch 'Cannot validate argument on parameter') "真实 run 块「$($block.name)」不得出现参数绑定错误（实际：$($rtResult.Output.Trim())）"
+
+      if (-not $isConsumer) {
+        $produced = Join-Path $blockTemp 'ci-evidence/evidence.json'
+        Assert-Check (Test-Path -LiteralPath $produced -PathType Leaf) "「$($block.name)」必须产出自己的证据文件"
+        if (Test-Path -LiteralPath $produced -PathType Leaf) {
+          $producedDoc = (Get-Content -LiteralPath $produced -Raw -Encoding utf8) | ConvertFrom-Json -Depth 20
+          Assert-Check ([int]$producedDoc.schemaVersion -eq 1) "「$($block.name)」产出的证据必须声明 schemaVersion=1"
+          Assert-Check ([string]$producedDoc.run.id -eq $script:testRunId -and [string]$producedDoc.run.attempt -eq $script:testAttempt) "「$($block.name)」证据必须绑定本次 Run/Attempt"
+          Assert-Check ([string]$producedDoc.identity.checkoutSha -eq $script:testSha) "「$($block.name)」证据必须绑定 checkoutSha"
+          if ($block.name -eq 'Finalize sanitized platform evidence') {
+            Assert-Check ([string]$producedDoc.kind -eq 'soxu-ci-evidence/platform/v1' -and [string]$producedDoc.platform -eq 'windows') "平台证据必须使用 platform 类型与真实平台 id"
+          } else {
+            Assert-Check ([string]$producedDoc.kind -eq 'soxu-ci-evidence/job/v1') "作业证据必须使用 job 类型（$($block.name)）"
+          }
+        }
+      }
+    }
+
+    # 突变回归：哈希表 splatting 退回字符串数组 splatting。主判据是真实退出码非零，
+    # 错误文字只用于辅助定位，不能拿来代替退出码判定。
+    $verifyBlock = @($rtBlocks | Where-Object { $_.name -eq 'Verify CI gate plan against actual job evidence' })[0]
+    Assert-Check ($null -ne $verifyBlock) "必须存在调用 verify-ci-gate.ps1 的 Verify step"
+    if ($null -ne $verifyBlock) {
+      Assert-Check ($verifyBlock.body -match '@[A-Za-z_]\w*(Params|Parameters)') "Verify step 必须用哈希表 splatting 调用内部脚本"
+      $brokenBody = @'
+$args = @(
+  '-Mode', 'Evidence',
+  '-PlanJson', $env:GATE_PLAN,
+  '-EvidenceDir', (Join-Path $env:RUNNER_TEMP 'ci-evidence')
+)
+./scripts/verify-ci-gate.ps1 @args
+'@
+      $brokenPath = Join-Path $rtTemp 'step-broken-splat.ps1'
+      Set-Content -LiteralPath $brokenPath -Value $brokenBody -Encoding utf8 -NoNewline
+      $brokenResult = Invoke-ActionPwshStep $brokenPath
+      Assert-Check ($brokenResult.Code -ne 0) "字符串数组 splatting 在 Stop 包装下必须真实非零退出（实际 exit $($brokenResult.Code)：$($brokenResult.Output.Trim())）"
+      Assert-Check ($brokenResult.Output -match "Cannot validate argument on parameter 'Mode'") "失败应来自 Mode 参数绑定（辅助定位）：$($brokenResult.Output.Trim())"
+    }
+  } finally {
+    foreach ($key in $rtPrevious.Keys) {
+      [Environment]::SetEnvironmentVariable($key, $rtPrevious[$key])
+    }
   }
 
   # ============ 四、突变敏感度：移除契约校验后绕过用例必须重新通过 ============
