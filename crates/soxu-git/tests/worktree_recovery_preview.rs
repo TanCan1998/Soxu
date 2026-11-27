@@ -17,8 +17,11 @@ use soxu_git::{
     UnlockRejection, WorktreeObservationKind,
 };
 // Windows 上协调域 fail-closed 与 Linux 专属用例不编译，相关导入按 cfg 收窄。
+// TargetState 仅在 Linux 专属 HEAD 损坏用例中使用，须与使用点同 cfg 门控（L-013）。
+#[cfg(target_os = "linux")]
+use soxu_git::TargetState;
 #[cfg(not(windows))]
-use soxu_git::{TargetState, WorktreeRegistrationCoordinator};
+use soxu_git::WorktreeRegistrationCoordinator;
 
 struct Fixture {
     root: PathBuf,
