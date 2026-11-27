@@ -38,6 +38,17 @@ impl Fixture {
     }
 
     fn command(&self, root: &Path) -> Command {
+        self.command_with(root, &[])
+    }
+
+    /// 夹具 Git 命令的唯一构造点：清除宿主 `GIT_*`、隔离系统与全局配置。
+    ///
+    /// `maintenance.auto=false` 与 `gc.auto=0` 与生产只读入口（`probe.rs`、
+    /// `checkpoint/git.rs`、`repository_create/sandbox.rs`）的守卫保持一致：夹具提交
+    /// 若不禁用后台维护，`git commit` 会派生 detached 的 `git maintenance run --auto`，
+    /// 它在 `.git/objects` 下创建并删除 `maintenance.lock`、推进该目录 mtime，
+    /// 与整树只读快照断言竞态。`extra_args` 追加在守卫之后，供回归用例显式反向启用。
+    fn command_with(&self, root: &Path, extra_args: &[&str]) -> Command {
         let mut command = Command::new(self.git.program());
         for (name, _) in std::env::vars_os() {
             if name
@@ -60,7 +71,12 @@ impl Fixture {
                 "user.name=Diff Fixture",
                 "-c",
                 "user.email=diff@example.invalid",
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
             ]);
+        command.args(extra_args);
         command
     }
 
@@ -78,16 +94,26 @@ impl Fixture {
     }
 
     fn commit(&self) {
+        self.commit_with(&[], "fixture", None)
+    }
+
+    /// 与 `commit` 走同一命令形状，但允许回归用例追加 `-c` 覆盖（如重新打开后台维护），
+    /// 并在需要时用 trace2 记录本次提交派生的子进程。
+    fn commit_with(&self, extra_args: &[&str], label: &str, trace: Option<&Path>) {
         static COMMIT_SEQ: AtomicU64 = AtomicU64::new(0);
         self.git(["add", "--all"]);
         // 并行测试中的独立仓库也可能提交相同内容，为每次提交分配不同的时间戳。
         let seq = COMMIT_SEQ.fetch_add(1, Ordering::Relaxed);
         let date = format!("{} +0000", 1_700_000_000 + seq);
+        let mut command = self.command_with(&self.root, extra_args);
+        if let Some(trace) = trace {
+            command.env("GIT_TRACE2_EVENT", trace);
+        }
         success(
-            self.command(&self.root)
+            command
                 .env("GIT_AUTHOR_DATE", &date)
                 .env("GIT_COMMITTER_DATE", &date)
-                .args(["commit", "-qm", "fixture"])
+                .args(["commit", "-qm", label])
                 .output()
                 .expect("执行夹具提交"),
         );
@@ -481,6 +507,123 @@ async fn binary_and_non_utf8_text_keep_distinct_output_contracts() {
         .expect("非 UTF-8 文本审阅");
     assert!(text(patch).ends_with(b"-old\xff\n+new\xff\n"));
     assert_eq!(snapshot(&fixture.temp), before);
+}
+
+/// trace2 在一次夹具提交里观察到的后台维护子进程事实。
+#[derive(Debug)]
+struct MaintenanceTrace {
+    /// trace 文件确实被写入；否则“未派生”只是空断言。
+    written: bool,
+    /// 是否派生了 `git maintenance` 子进程。
+    started: bool,
+    /// 该子进程是否以 `--detach` 运行（会在夹具外残留后台进程）。
+    detached: bool,
+    /// 是否观察到同 `child_id` 的 `child_exit`，即父进程确实等到了维护结束。
+    exited: bool,
+}
+
+/// 从 trace2 事件行取 `"child_id":N`。
+fn trace_child_id(line: &str) -> Option<u32> {
+    const KEY: &str = "\"child_id\":";
+    let rest = line.get(line.find(KEY)? + KEY.len()..)?;
+    rest.chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .ok()
+}
+
+/// 用 trace2 的 `child_start` / `child_exit` 事件观察一次夹具提交派生的维护子进程。
+fn traced_commit_spawns_maintenance(
+    fixture: &Fixture,
+    extra_args: &[&str],
+    label: &str,
+) -> MaintenanceTrace {
+    static TRACE_SEQ: AtomicU64 = AtomicU64::new(0);
+    let trace = std::env::temp_dir().join(format!(
+        "soxu-readonly-diff-trace-{}-{}.json",
+        std::process::id(),
+        TRACE_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_file(&trace);
+    // 每次提交写入不同内容，确保 `git commit` 不会因 nothing-to-commit 而失败。
+    fixture.write("traced", label.as_bytes());
+    fixture.commit_with(extra_args, label, Some(&trace));
+    let text = fs::read_to_string(&trace).unwrap_or_default();
+    let _ = fs::remove_file(&trace);
+
+    // `.git/objects/maintenance.lock` 由 `git maintenance run` 持有；它的增删就是
+    // 平台失败的真实写源，因此这里直接断言是否启动了该子进程及它的生命周期。
+    let mut started_ids = Vec::new();
+    let mut detached = false;
+    for line in text.lines() {
+        if !line.contains("\"event\":\"child_start\"") || !line.contains("\"maintenance\"") {
+            continue;
+        }
+        if let Some(id) = trace_child_id(line) {
+            started_ids.push(id);
+        }
+        detached |= line.contains("\"--detach\"");
+    }
+    let exited = text.lines().any(|line| {
+        line.contains("\"event\":\"child_exit\"")
+            && trace_child_id(line).is_some_and(|id| started_ids.contains(&id))
+    });
+    MaintenanceTrace {
+        written: !text.is_empty(),
+        started: !started_ids.is_empty(),
+        detached,
+        exited,
+    }
+}
+
+/// 夹具提交不得派生后台 `git maintenance`。
+///
+/// run 45914578287 上 `binary_and_non_utf8_text_keep_distinct_output_contracts` 的整树快照
+/// 只差 `.git/objects/maintenance.lock` 的增删与 `.git/objects` 的 mtime，根因是夹具自身的
+/// `git commit` 派生了 detached `git maintenance run --auto`，与快照断言并发写。
+/// 本用例不靠重跑或 sleep，而是用 trace2 直接证明：受测路径不派生该子进程，
+/// 且显式重新打开维护时同一观察通道能看见它——删掉夹具的 `-c` 守卫即失败。
+/// 正向对照另以 `maintenance.autoDetach=false`、`gc.autoDetach=false` 让提交同步等待维护
+/// 结束，并用同 `child_id` 的 `child_exit` 核实，不留后台进程给夹具回收或后续用例。
+#[test]
+fn fixture_commits_never_start_background_maintenance() {
+    let guarded = Fixture::new(&[]);
+    let observed = traced_commit_spawns_maintenance(&guarded, &[], "guarded\n");
+    assert!(observed.written, "trace2 未写入，本次观察无效");
+    assert!(
+        !observed.started,
+        "夹具提交派生了后台 git maintenance 子进程：{observed:?}"
+    );
+
+    let control = Fixture::new(&[]);
+    let observed = traced_commit_spawns_maintenance(
+        &control,
+        &[
+            "-c",
+            "maintenance.auto=true",
+            "-c",
+            "gc.auto=1",
+            "-c",
+            "maintenance.autoDetach=false",
+            "-c",
+            "gc.autoDetach=false",
+        ],
+        "control\n",
+    );
+    assert!(observed.written, "反向对照的 trace2 未写入");
+    assert!(
+        observed.started,
+        "反向对照未观察到 maintenance 子进程，trace2 观察通道失效"
+    );
+    assert!(
+        !observed.detached,
+        "反向对照的维护子进程仍以 --detach 运行，会残留后台进程：{observed:?}"
+    );
+    assert!(
+        observed.exited,
+        "反向对照未观察到同 child_id 的 child_exit，无法确认维护已结束：{observed:?}"
+    );
 }
 
 #[tokio::test]
