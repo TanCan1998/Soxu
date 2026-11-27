@@ -76,6 +76,7 @@ impl Drop for Fixture {
     }
 }
 
+// L-014：与生产只读入口同源禁用后台维护。
 fn command(root: &Path, args: &[&str]) -> Output {
     let mut cmd = Command::new("git");
     cmd.current_dir(root);
@@ -93,6 +94,7 @@ fn command(root: &Path, args: &[&str]) -> Output {
             "GIT_CONFIG_GLOBAL",
             if cfg!(windows) { "NUL" } else { "/dev/null" },
         )
+        .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
         .args(args)
         .output()
         .expect("运行夹具 Git")

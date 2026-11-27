@@ -41,6 +41,7 @@ impl Fixture {
         path
     }
 
+    // L-014：与生产只读入口同源禁用后台维护。
     fn run(&self, directory: &Path, arguments: &[&str]) {
         let mut command = Command::new(self.git.program());
         for (name, _) in std::env::vars_os() {
@@ -68,6 +69,10 @@ impl Fixture {
                 "user.name=Fixture",
                 "-c",
                 "user.email=fixture@example.invalid",
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
             ])
             .args(arguments)
             .output()
