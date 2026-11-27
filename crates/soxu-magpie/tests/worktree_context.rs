@@ -1,7 +1,9 @@
 use soxu_magpie::{
-    EnvironmentMode, WORKTREE_CONTEXT_FILE, WorktreeContext, WorktreeContextError,
-    WorktreeContextServer, WorktreeDirectory, prepare_worktree_context,
+    EnvironmentMode, WorktreeContext, WorktreeContextError, WorktreeDirectory,
+    prepare_worktree_context,
 };
+#[cfg(any(windows, target_os = "linux"))]
+use soxu_magpie::{WORKTREE_CONTEXT_FILE, WorktreeContextServer};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
