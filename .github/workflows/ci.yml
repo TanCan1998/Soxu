@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: '执行模式：scope=按变更分级；full=全工作区；full-with-intel=全工作区并追加 Intel 原生验证'
+        type: choice
+        options: [scope, full, full-with-intel]
+        default: scope
 
 # 对标 Magpie 抗压并发策略：PR 推送新提交时取消旧 run 节省算力；main 永远跑完保障发版基准
 concurrency:
@@ -31,12 +37,18 @@ jobs:
       gate_plan: ${{ steps.plan.outputs.gate_plan }}
       gate_self_test: ${{ steps.plan.outputs.gate_self_test }}
       gate_release_contract: ${{ steps.plan.outputs.gate_release_contract }}
-      # CI-B 结构化计划字段：CI-C 的动态平台矩阵按 required_platforms 展开，不改变 job 集合
+      # CI-B 结构化计划字段；CI-C 的 Rust 矩阵按 platforms / platform_matrix 展开
       schema_version: ${{ steps.scope.outputs.schema_version }}
       plan_mode: ${{ steps.scope.outputs.plan_mode }}
       required_platforms: ${{ steps.scope.outputs.required_platforms }}
+      platforms: ${{ steps.scope.outputs.platforms }}
+      platform_matrix: ${{ steps.scope.outputs.platform_matrix }}
       required_jobs: ${{ steps.scope.outputs.required_jobs }}
       test_profiles: ${{ steps.scope.outputs.test_profiles }}
+      # 事件身份：base/head/checkout 各自独立，证据按 checkoutSha 绑定实际执行树
+      base_sha: ${{ steps.scope.outputs.base_sha }}
+      head_sha: ${{ steps.scope.outputs.head_sha }}
+      checkout_sha: ${{ steps.scope.outputs.checkout_sha }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -45,21 +57,43 @@ jobs:
       - name: Analyze changed scope and reverse dependencies
         id: scope
         shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
         run: |
           # 事件种类显式声明：PR 求 merge base，push 比较 before/after 完整树。
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $json = ./scripts/detect-check-scope.ps1 -Full -Json
-          } elseif ("${{ github.event_name }}" -eq "pull_request") {
+          # 运行期动态字符串一律从 env 读取，不拼进脚本文本。
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            # 手动入口：scope 走基准范围增量，full 与 full-with-intel 才提升为工作区全量。
+            # Intel 只有显式 full-with-intel 才会请求，普通 full 不含 Intel。
+            if ($env:INPUT_MODE -eq 'full-with-intel') {
+              $json = ./scripts/detect-check-scope.ps1 -Full -IncludeIntel -Json
+            } elseif ($env:INPUT_MODE -eq 'full') {
+              $json = ./scripts/detect-check-scope.ps1 -Full -Json
+            } else {
+              # 检测器的 Event 只有 auto/local/pull_request/push/manual/release；
+              # auto 不开启工作区模式时就进入 range 语义，基准显式给 origin/main。
+              $json = ./scripts/detect-check-scope.ps1 -Event auto -BaseRef "origin/main" -HeadRef HEAD -Json
+            }
+          } elseif ($env:EVENT_NAME -eq 'pull_request') {
             # 绑定事件里不变的 base.sha：base 分支头会随 push 前进，
             # 用可变 ref 求 merge base 会让同一 PR 计划与证据脱绑。
-            $baseRef = if (-not [string]::IsNullOrWhiteSpace("${{ github.event.pull_request.base.sha }}")) {
-              "${{ github.event.pull_request.base.sha }}"
+            $baseRef = if (-not [string]::IsNullOrWhiteSpace($env:PR_BASE_SHA)) {
+              $env:PR_BASE_SHA
             } else {
-              "origin/${{ github.base_ref }}"
+              "origin/$($env:BASE_REF)"
             }
-            $json = ./scripts/detect-check-scope.ps1 -Event pull_request -BaseRef $baseRef -HeadRef HEAD -Json
+            # head 用事件身份（PR 真实 head commit），不能用 checkout 出来的合并提交；
+            # 检出树另由检测器的 checkoutSha 独立取自 git HEAD，两者不得混用。
+            $headRef = if (-not [string]::IsNullOrWhiteSpace($env:PR_HEAD_SHA)) { $env:PR_HEAD_SHA } else { 'HEAD' }
+            $json = ./scripts/detect-check-scope.ps1 -Event pull_request -BaseRef $baseRef -HeadRef $headRef -Json
           } else {
-            $json = ./scripts/detect-check-scope.ps1 -Event push -BaseRef "${{ github.event.before }}" -HeadRef "${{ github.sha }}" -Json
+            $json = ./scripts/detect-check-scope.ps1 -Event push -BaseRef $env:PUSH_BEFORE -HeadRef $env:PUSH_AFTER -Json
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $scope = ($json | Out-String) | ConvertFrom-Json -ErrorAction Stop
@@ -77,8 +111,13 @@ jobs:
           "schema_version=$($scope.schemaVersion)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "plan_mode=$($scope.mode)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "required_platforms=$(ConvertTo-Json -InputObject @($scope.requiredPlatforms) -Compress)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "platforms=$(ConvertTo-Json -InputObject @($scope.platforms) -Compress)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "platform_matrix=$(ConvertTo-Json -InputObject @($scope.platformMatrix) -Compress)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "required_jobs=$(ConvertTo-Json -InputObject @($scope.requiredJobs) -Compress)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "test_profiles=$(ConvertTo-Json -InputObject @($scope.testProfiles) -Compress)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "base_sha=$($scope.baseSha)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "head_sha=$($scope.headSha)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "checkout_sha=$($scope.checkoutSha)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Build deterministic CI gate plan
         id: plan
@@ -107,6 +146,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Stamp job start
+        shell: pwsh
+        run: (Get-Date -AsUTC -Format o) | Out-File -FilePath (Join-Path $env:RUNNER_TEMP 'ci-start.txt') -NoNewline
 
       - name: Verify Git Emoji commit & PR title conventions
         shell: pwsh
@@ -144,29 +187,170 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-ci-gate.ps1 -Mode ReleaseContract
 
-  rust-check:
-    name: Rust Format, Clippy & Tests
+      - name: Finalize sanitized governance evidence
+        if: always()
+        shell: pwsh
+        env:
+          GATE_PLAN: ${{ needs.detect-changes.outputs.gate_plan }}
+          EVIDENCE_JOB_STATUS: ${{ job.status }}
+          EVIDENCE_RUN_ID: ${{ github.run_id }}
+          EVIDENCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVIDENCE_REPOSITORY: ${{ github.repository }}
+          EVIDENCE_EVENT: ${{ github.event_name }}
+          EVIDENCE_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVIDENCE_BASE_SHA: ${{ needs.detect-changes.outputs.base_sha }}
+          EVIDENCE_HEAD_SHA: ${{ needs.detect-changes.outputs.head_sha }}
+          EVIDENCE_CHECKOUT_SHA: ${{ needs.detect-changes.outputs.checkout_sha }}
+          EVIDENCE_RUNNER_OS: ${{ runner.os }}
+          EVIDENCE_RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          $stages = Join-Path $env:RUNNER_TEMP 'ci-evidence/stages.json'
+          $out = Join-Path $env:RUNNER_TEMP 'ci-evidence/evidence.json'
+          $result = if ($env:EVIDENCE_JOB_STATUS -eq 'success') { 'passed' } elseif ($env:EVIDENCE_JOB_STATUS -eq 'cancelled') { 'cancelled' } else { 'failed' }
+          $startFile = Join-Path $env:RUNNER_TEMP 'ci-start.txt'
+          $collectArgs = @(
+            '-Mode', 'Finalize', '-OutputPath', $out, '-Kind', 'job', '-JobId', 'governance-and-privacy',
+            '-RunnerLabel', 'ubuntu-latest', '-Os', $env:EVIDENCE_RUNNER_OS, '-Arch', $env:EVIDENCE_RUNNER_ARCH,
+            '-RunId', $env:EVIDENCE_RUN_ID, '-RunAttempt', $env:EVIDENCE_RUN_ATTEMPT,
+            '-Repository', $env:EVIDENCE_REPOSITORY, '-EventName', $env:EVIDENCE_EVENT,
+            '-BaseSha', $env:EVIDENCE_BASE_SHA, '-HeadSha', $env:EVIDENCE_HEAD_SHA,
+            '-CheckoutSha', $env:EVIDENCE_CHECKOUT_SHA, '-WorkflowRef', $env:EVIDENCE_WORKFLOW_REF,
+            '-PlanJson', $env:GATE_PLAN, '-ResultStatus', $result,
+            '-CompletedAt', (Get-Date -AsUTC -Format o)
+          )
+          if (Test-Path $startFile) { $collectArgs += @('-StartedAt', (Get-Content $startFile -Raw).Trim()) }
+          if (Test-Path $stages) { $collectArgs += @('-StagesPath', $stages) }
+          pwsh -NoProfile -File scripts/collect-ci-evidence.ps1 @collectArgs
+
+      # 产物名带 attempt：重跑不会写入同名产物，也不会被本次下载命中。
+      - name: Upload sanitized job evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-evidence-${{ github.run_attempt }}-job-governance-and-privacy
+          path: ${{ runner.temp }}/ci-evidence/evidence.json
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-format:
+    name: Rust Format Check
     needs: detect-changes
     if: needs.detect-changes.outputs.rust == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-    env:
-      CARGO_TERM_COLOR: always
-      CARGO_INCREMENTAL: '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
+      - name: Stamp job start
+        shell: pwsh
+        run: (Get-Date -AsUTC -Format o) | Out-File -FilePath (Join-Path $env:RUNNER_TEMP 'ci-start.txt') -NoNewline
+
       - uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: stable
-          components: rustfmt, clippy
+          toolchain: 1.99.1
+          components: rustfmt
 
-      - uses: Swatinem/rust-cache@v2
-
+      # 纯 Rust 格式检查只在 Ubuntu 上跑一次，不随平台矩阵复制。
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        shell: pwsh
+        run: |
+          $stages = Join-Path $env:RUNNER_TEMP 'ci-evidence/stages.json'
+          $log = Join-Path $env:RUNNER_TEMP 'cargo-fmt.log'
+          $start = Get-Date
+          cargo fmt --all -- --check 2>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          $ms = ((Get-Date) - $start).TotalMilliseconds
+          pwsh -NoProfile -File scripts/collect-ci-evidence.ps1 -Mode Stage -StagesPath $stages -Name cargo-fmt `
+            -Command 'cargo fmt --all -- --check' -ExitCode $code -DurationMs $ms -LogPath $log
+          exit $code
+
+      - name: Finalize sanitized format evidence
+        if: always()
+        shell: pwsh
+        env:
+          GATE_PLAN: ${{ needs.detect-changes.outputs.gate_plan }}
+          EVIDENCE_JOB_STATUS: ${{ job.status }}
+          EVIDENCE_RUN_ID: ${{ github.run_id }}
+          EVIDENCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVIDENCE_REPOSITORY: ${{ github.repository }}
+          EVIDENCE_EVENT: ${{ github.event_name }}
+          EVIDENCE_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVIDENCE_BASE_SHA: ${{ needs.detect-changes.outputs.base_sha }}
+          EVIDENCE_HEAD_SHA: ${{ needs.detect-changes.outputs.head_sha }}
+          EVIDENCE_CHECKOUT_SHA: ${{ needs.detect-changes.outputs.checkout_sha }}
+          EVIDENCE_RUNNER_OS: ${{ runner.os }}
+          EVIDENCE_RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          $stages = Join-Path $env:RUNNER_TEMP 'ci-evidence/stages.json'
+          $out = Join-Path $env:RUNNER_TEMP 'ci-evidence/evidence.json'
+          $result = if ($env:EVIDENCE_JOB_STATUS -eq 'success') { 'passed' } elseif ($env:EVIDENCE_JOB_STATUS -eq 'cancelled') { 'cancelled' } else { 'failed' }
+          $startFile = Join-Path $env:RUNNER_TEMP 'ci-start.txt'
+          $collectArgs = @(
+            '-Mode', 'Finalize', '-OutputPath', $out, '-Kind', 'job', '-JobId', 'rust-format',
+            '-RunnerLabel', 'ubuntu-24.04', '-Os', $env:EVIDENCE_RUNNER_OS, '-Arch', $env:EVIDENCE_RUNNER_ARCH,
+            '-RunId', $env:EVIDENCE_RUN_ID, '-RunAttempt', $env:EVIDENCE_RUN_ATTEMPT,
+            '-Repository', $env:EVIDENCE_REPOSITORY, '-EventName', $env:EVIDENCE_EVENT,
+            '-BaseSha', $env:EVIDENCE_BASE_SHA, '-HeadSha', $env:EVIDENCE_HEAD_SHA,
+            '-CheckoutSha', $env:EVIDENCE_CHECKOUT_SHA, '-WorkflowRef', $env:EVIDENCE_WORKFLOW_REF,
+            '-PlanJson', $env:GATE_PLAN, '-ResultStatus', $result, '-RustVersion', "$(rustc --version)",
+            '-CompletedAt', (Get-Date -AsUTC -Format o)
+          )
+          if (Test-Path $startFile) { $collectArgs += @('-StartedAt', (Get-Content $startFile -Raw).Trim()) }
+          if (Test-Path $stages) { $collectArgs += @('-StagesPath', $stages) }
+          pwsh -NoProfile -File scripts/collect-ci-evidence.ps1 @collectArgs
+
+      - name: Upload sanitized job evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-evidence-${{ github.run_attempt }}-job-rust-format
+          path: ${{ runner.temp }}/ci-evidence/evidence.json
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-check:
+    name: Rust (${{ matrix.platform.id }})
+    needs: detect-changes
+    if: needs.detect-changes.outputs.rust == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.detect-changes.outputs.platform_matrix) }}
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      RUST_BACKTRACE: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stamp job start
+        shell: pwsh
+        run: (Get-Date -AsUTC -Format o) | Out-File -FilePath (Join-Path $env:RUNNER_TEMP 'ci-start.txt') -NoNewline
+
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.99.1
+          components: clippy
+
+      # 单一实例内依赖、Clippy 与测试共用一个构建目录，避免逐阶段重建。
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform.id }}
+
+      - name: Fetch dependencies (shared build directory)
+        shell: pwsh
+        run: |
+          $stages = Join-Path $env:RUNNER_TEMP 'ci-evidence/stages.json'
+          $log = Join-Path $env:RUNNER_TEMP 'cargo-fetch.log'
+          $start = Get-Date
+          cargo fetch --locked 2>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          $ms = ((Get-Date) - $start).TotalMilliseconds
+          pwsh -NoProfile -File scripts/collect-ci-evidence.ps1 -Mode Stage -StagesPath $stages -Name cargo-fetch `
+            -Command 'cargo fetch --locked' -ExitCode $code -DurationMs $ms -LogPath $log
+          exit $code
 
       - name: Run Clippy
         shell: pwsh
@@ -174,13 +358,25 @@ jobs:
           RUST_SCOPE: ${{ needs.detect-changes.outputs.rust_scope }}
           RUST_PACKAGE_ARGS: ${{ needs.detect-changes.outputs.rust_package_args }}
         run: |
-          if ($env:RUST_SCOPE -eq 'workspace') {
-            cargo clippy --workspace --all-targets --locked -- -D warnings
-          } else {
-            $pkgArgs = @($env:RUST_PACKAGE_ARGS -split '\s+' | Where-Object { $_ })
-            Write-Host "增量 Clippy 范围: $($pkgArgs -join ' ')"
-            cargo clippy @pkgArgs --all-targets --locked -- -D warnings
+          $stages = Join-Path $env:RUNNER_TEMP 'ci-evidence/stages.json'
+          $log = Join-Path $env:RUNNER_TEMP 'cargo-clippy.log'
+          $pkgArgs = [System.Collections.Generic.List[string]]::new()
+          if ($env:RUST_SCOPE -ne 'workspace') {
+            foreach ($pkg in @($env:RUST_PACKAGE_ARGS -split '\s+' | Where-Object { $_ })) { $pkgArgs.Add($pkg) }
           }
+          $cargoArgs = if ($env:RUST_SCOPE -eq 'workspace') {
+            @('clippy', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings')
+          } else {
+            @('clippy') + @($pkgArgs) + @('--all-targets', '--locked', '--', '-D', 'warnings')
+          }
+          Write-Host "Clippy 范围: $(if ($env:RUST_SCOPE -eq 'workspace') { 'workspace' } else { $pkgArgs -join ' ' })"
+          $start = Get-Date
+          & cargo @cargoArgs 2>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          $ms = ((Get-Date) - $start).TotalMilliseconds
+          pwsh -NoProfile -File scripts/collect-ci-evidence.ps1 -Mode Stage -StagesPath $stages -Name cargo-clippy `
+            -Command ('cargo ' + ($cargoArgs -join ' ')) -ExitCode $code -DurationMs $ms -LogPath $log
+          exit $code
 
       - name: Run scoped unit & integration tests
         shell: pwsh
@@ -188,13 +384,77 @@ jobs:
           RUST_SCOPE: ${{ needs.detect-changes.outputs.rust_scope }}
           RUST_PACKAGE_ARGS: ${{ needs.detect-changes.outputs.rust_package_args }}
         run: |
-          if ($env:RUST_SCOPE -eq 'workspace') {
-            cargo test --workspace --locked
-          } else {
-            $pkgArgs = @($env:RUST_PACKAGE_ARGS -split '\s+' | Where-Object { $_ })
-            Write-Host "增量测试范围: $($pkgArgs -join ' ')"
-            cargo test @pkgArgs --locked
+          $stages = Join-Path $env:RUNNER_TEMP 'ci-evidence/stages.json'
+          $log = Join-Path $env:RUNNER_TEMP 'cargo-test.log'
+          $pkgArgs = [System.Collections.Generic.List[string]]::new()
+          if ($env:RUST_SCOPE -ne 'workspace') {
+            foreach ($pkg in @($env:RUST_PACKAGE_ARGS -split '\s+' | Where-Object { $_ })) { $pkgArgs.Add($pkg) }
           }
+          $cargoArgs = if ($env:RUST_SCOPE -eq 'workspace') {
+            @('test', '--workspace', '--locked')
+          } else {
+            @('test') + @($pkgArgs) + @('--locked')
+          }
+          Write-Host "测试范围: $(if ($env:RUST_SCOPE -eq 'workspace') { 'workspace' } else { $pkgArgs -join ' ' })"
+          $start = Get-Date
+          & cargo @cargoArgs 2>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          $ms = ((Get-Date) - $start).TotalMilliseconds
+          pwsh -NoProfile -File scripts/collect-ci-evidence.ps1 -Mode Stage -StagesPath $stages -Name cargo-test `
+            -Command ('cargo ' + ($cargoArgs -join ' ')) -ExitCode $code -DurationMs $ms -LogPath $log
+          exit $code
+
+      - name: Finalize sanitized platform evidence
+        if: always()
+        shell: pwsh
+        env:
+          GATE_PLAN: ${{ needs.detect-changes.outputs.gate_plan }}
+          EVIDENCE_JOB_STATUS: ${{ job.status }}
+          EVIDENCE_RUN_ID: ${{ github.run_id }}
+          EVIDENCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVIDENCE_REPOSITORY: ${{ github.repository }}
+          EVIDENCE_EVENT: ${{ github.event_name }}
+          EVIDENCE_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVIDENCE_BASE_SHA: ${{ needs.detect-changes.outputs.base_sha }}
+          EVIDENCE_HEAD_SHA: ${{ needs.detect-changes.outputs.head_sha }}
+          EVIDENCE_CHECKOUT_SHA: ${{ needs.detect-changes.outputs.checkout_sha }}
+          EVIDENCE_PLATFORM: ${{ matrix.platform.id }}
+          EVIDENCE_RUNNER_LABEL: ${{ matrix.platform.runner }}
+          EVIDENCE_RUNNER_OS: ${{ runner.os }}
+          EVIDENCE_RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          $stages = Join-Path $env:RUNNER_TEMP 'ci-evidence/stages.json'
+          $out = Join-Path $env:RUNNER_TEMP 'ci-evidence/evidence.json'
+          $result = if ($env:EVIDENCE_JOB_STATUS -eq 'success') { 'passed' } elseif ($env:EVIDENCE_JOB_STATUS -eq 'cancelled') { 'cancelled' } else { 'failed' }
+          $startFile = Join-Path $env:RUNNER_TEMP 'ci-start.txt'
+          # OS 与 CPU 架构只接受实际 Runner 观测，不得回写矩阵期待值。
+          $collectArgs = @(
+            '-Mode', 'Finalize', '-OutputPath', $out, '-Kind', 'platform',
+            '-Platform', $env:EVIDENCE_PLATFORM,
+            '-RunnerLabel', $env:EVIDENCE_RUNNER_LABEL,
+            '-Os', $env:EVIDENCE_RUNNER_OS,
+            '-Arch', $env:EVIDENCE_RUNNER_ARCH,
+            '-RunId', $env:EVIDENCE_RUN_ID, '-RunAttempt', $env:EVIDENCE_RUN_ATTEMPT,
+            '-Repository', $env:EVIDENCE_REPOSITORY, '-EventName', $env:EVIDENCE_EVENT,
+            '-BaseSha', $env:EVIDENCE_BASE_SHA, '-HeadSha', $env:EVIDENCE_HEAD_SHA,
+            '-CheckoutSha', $env:EVIDENCE_CHECKOUT_SHA, '-WorkflowRef', $env:EVIDENCE_WORKFLOW_REF,
+            '-PlanJson', $env:GATE_PLAN, '-ResultStatus', $result,
+            '-RustVersion', "$(rustc --version)", '-CargoVersion', "$(cargo --version)",
+            '-CompletedAt', (Get-Date -AsUTC -Format o)
+          )
+          if (Test-Path $startFile) { $collectArgs += @('-StartedAt', (Get-Content $startFile -Raw).Trim()) }
+          if (Test-Path $stages) { $collectArgs += @('-StagesPath', $stages) }
+          pwsh -NoProfile -File scripts/collect-ci-evidence.ps1 @collectArgs
+
+      # 每个矩阵实例独立命名 artifact，且带 attempt：重跑不会覆盖或被旧产物冒用。
+      - name: Upload sanitized platform evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-evidence-${{ github.run_attempt }}-rust-${{ matrix.platform.id }}
+          path: ${{ runner.temp }}/ci-evidence/evidence.json
+          retention-days: 14
+          if-no-files-found: error
 
   mobile-web-check:
     name: Mobile Web/PWA Typecheck & Build
@@ -207,6 +467,10 @@ jobs:
         working-directory: apps/mobile-web
     steps:
       - uses: actions/checkout@v7
+
+      - name: Stamp job start
+        shell: pwsh
+        run: (Get-Date -AsUTC -Format o) | Out-File -FilePath (Join-Path $env:RUNNER_TEMP 'ci-start.txt') -NoNewline
 
       - uses: pnpm/action-setup@v6
         with:
@@ -233,34 +497,144 @@ jobs:
       - name: Verify design system & zero-emoji gate
         run: node ../../scripts/verify-design-system.mjs
 
+      - name: Finalize sanitized mobile web evidence
+        if: always()
+        shell: pwsh
+        working-directory: .
+        env:
+          GATE_PLAN: ${{ needs.detect-changes.outputs.gate_plan }}
+          EVIDENCE_JOB_STATUS: ${{ job.status }}
+          EVIDENCE_RUN_ID: ${{ github.run_id }}
+          EVIDENCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVIDENCE_REPOSITORY: ${{ github.repository }}
+          EVIDENCE_EVENT: ${{ github.event_name }}
+          EVIDENCE_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVIDENCE_BASE_SHA: ${{ needs.detect-changes.outputs.base_sha }}
+          EVIDENCE_HEAD_SHA: ${{ needs.detect-changes.outputs.head_sha }}
+          EVIDENCE_CHECKOUT_SHA: ${{ needs.detect-changes.outputs.checkout_sha }}
+          EVIDENCE_RUNNER_OS: ${{ runner.os }}
+          EVIDENCE_RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          $stages = Join-Path $env:RUNNER_TEMP 'ci-evidence/stages.json'
+          $out = Join-Path $env:RUNNER_TEMP 'ci-evidence/evidence.json'
+          $result = if ($env:EVIDENCE_JOB_STATUS -eq 'success') { 'passed' } elseif ($env:EVIDENCE_JOB_STATUS -eq 'cancelled') { 'cancelled' } else { 'failed' }
+          $startFile = Join-Path $env:RUNNER_TEMP 'ci-start.txt'
+          $collectArgs = @(
+            '-Mode', 'Finalize', '-OutputPath', $out, '-Kind', 'job', '-JobId', 'mobile-web-check',
+            '-RunnerLabel', 'ubuntu-latest', '-Os', $env:EVIDENCE_RUNNER_OS, '-Arch', $env:EVIDENCE_RUNNER_ARCH,
+            '-RunId', $env:EVIDENCE_RUN_ID, '-RunAttempt', $env:EVIDENCE_RUN_ATTEMPT,
+            '-Repository', $env:EVIDENCE_REPOSITORY, '-EventName', $env:EVIDENCE_EVENT,
+            '-BaseSha', $env:EVIDENCE_BASE_SHA, '-HeadSha', $env:EVIDENCE_HEAD_SHA,
+            '-CheckoutSha', $env:EVIDENCE_CHECKOUT_SHA, '-WorkflowRef', $env:EVIDENCE_WORKFLOW_REF,
+            '-PlanJson', $env:GATE_PLAN, '-ResultStatus', $result,
+            '-NodeVersion', "$(node --version)", '-PnpmVersion', "$(pnpm --version)",
+            '-CompletedAt', (Get-Date -AsUTC -Format o)
+          )
+          if (Test-Path $startFile) { $collectArgs += @('-StartedAt', (Get-Content $startFile -Raw).Trim()) }
+          if (Test-Path $stages) { $collectArgs += @('-StagesPath', $stages) }
+          pwsh -NoProfile -File scripts/collect-ci-evidence.ps1 @collectArgs
+
+      - name: Upload sanitized job evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-evidence-${{ github.run_attempt }}-job-mobile-web-check
+          path: ${{ runner.temp }}/ci-evidence/evidence.json
+          retention-days: 14
+          if-no-files-found: error
+
   ci-gate:
     name: CI Gate
-    needs: [detect-changes, governance-and-privacy, rust-check, mobile-web-check]
+    needs: [detect-changes, governance-and-privacy, rust-format, rust-check, mobile-web-check]
     if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      # 逐项核对检测器计划与 needs 实际结果：必跑任务只认 success，
-      # 计划内跳过的任务必须显式 skipped，缺失/未知/冲突/重复一律失败。
+      # 精确 attempt 端点的 run_started_at 才是本次 attempt 的起点。runs 端点只反映最近
+      # 一次 attempt，而 /jobs 列表会把沿用（复用）的成功 job 也标成当前 attempt。
+      # 它必须先跑：逐实例状态只能从原始 jobs 派生，needs 只提供聚合结果。
+      - name: Fetch attempt start and raw run jobs
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}" --jq '.run_started_at' > "${RUNNER_TEMP}/ci-attempt-start.txt"
+          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate > "${RUNNER_TEMP}/ci-jobs.json"
+
+      # 逐项核对检测器计划与真实作业结果：必跑任务只认 success，计划内跳过的
+      # 任务必须显式 skipped；矩阵作业的逐实例结论从原始 jobs 派生，绝不拿聚合字符串替位。
       - name: Verify CI gate plan against actual job evidence
         shell: pwsh
         env:
           GATE_PLAN: ${{ needs.detect-changes.outputs.gate_plan }}
           DETECT_RESULT: ${{ needs.detect-changes.result }}
           GOV_RESULT: ${{ needs.governance-and-privacy.result }}
+          FMT_RESULT: ${{ needs.rust-format.result }}
           RUST_RESULT: ${{ needs.rust-check.result }}
           WEB_RESULT: ${{ needs.mobile-web-check.result }}
         run: |
-          Write-Host "detect-changes=$env:DETECT_RESULT governance-and-privacy=$env:GOV_RESULT rust-check=$env:RUST_RESULT mobile-web-check=$env:WEB_RESULT"
-          $evidence = ([ordered]@{
+          Write-Host "detect-changes=$env:DETECT_RESULT governance-and-privacy=$env:GOV_RESULT rust-format=$env:FMT_RESULT rust-check=$env:RUST_RESULT mobile-web-check=$env:WEB_RESULT"
+          $evidenceJson = ([ordered]@{
             'detect-changes'         = "$env:DETECT_RESULT"
             'governance-and-privacy' = "$env:GOV_RESULT"
+            'rust-format'            = "$env:FMT_RESULT"
             'rust-check'             = "$env:RUST_RESULT"
             'mobile-web-check'       = "$env:WEB_RESULT"
           } | ConvertTo-Json -Compress)
-          Write-Host "门禁证据：$evidence"
-          ./scripts/verify-ci-gate.ps1 -Mode Verify -PlanJson $env:GATE_PLAN -EvidenceJson $evidence
+          Write-Host "门禁证据（needs 聚合）：$evidenceJson"
+          # 哈希表 splatting 才是命名参数绑定；字符串数组 splatting 会把 '-Mode'
+          # 当作位置参数值传出去（Mode 收到字面量 '-Mode'）。
+          $verifyParams = @{
+            Mode         = 'Verify'
+            PlanJson     = $env:GATE_PLAN
+            EvidenceJson = $evidenceJson
+            JobsPath     = (Join-Path $env:RUNNER_TEMP 'ci-jobs.json')
+          }
+          ./scripts/verify-ci-gate.ps1 @verifyParams
+
+      # 只下载本次 attempt 的产物：旧 attempt 的 artifact 即使仍在也会被 pattern 排除。
+      - name: Download platform evidence artifacts
+        if: always()
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ci-evidence-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/ci-evidence
+          merge-multiple: false
+
+      # 平台证据必须在同一 Run、Attempt、SHA 与计划下各有且仅有一份已通过。
+      - name: Verify per-platform evidence against plan and run identity
+        if: always()
+        shell: pwsh
+        env:
+          GATE_PLAN: ${{ needs.detect-changes.outputs.gate_plan }}
+          EVIDENCE_RUN_ID: ${{ github.run_id }}
+          EVIDENCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVIDENCE_CHECKOUT_SHA: ${{ needs.detect-changes.outputs.checkout_sha }}
+        run: |
+          $evidenceParams = @{
+            Mode         = 'Evidence'
+            PlanJson     = $env:GATE_PLAN
+            EvidenceDir  = (Join-Path $env:RUNNER_TEMP 'ci-evidence')
+            JobsPath     = (Join-Path $env:RUNNER_TEMP 'ci-jobs.json')
+            RunId        = $env:EVIDENCE_RUN_ID
+            RunAttempt   = $env:EVIDENCE_RUN_ATTEMPT
+            CheckoutSha  = $env:EVIDENCE_CHECKOUT_SHA
+          }
+          $startFile = Join-Path $env:RUNNER_TEMP 'ci-attempt-start.txt'
+          if (Test-Path $startFile) {
+            $started = (Get-Content $startFile -Raw).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($started)) { $evidenceParams['AttemptStartedAt'] = $started }
+          }
+          ./scripts/verify-ci-gate.ps1 @evidenceParams

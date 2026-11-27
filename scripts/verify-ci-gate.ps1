@@ -1,5 +1,5 @@
 ﻿param(
-  [ValidateSet("Plan", "Verify", "Contract", "ReleaseContract", "ExtractRuns")]
+  [ValidateSet("Plan", "Verify", "Evidence", "Contract", "ReleaseContract", "ExtractRuns")]
   [string]$Mode = "Verify",
   [string]$ScopePath = "",
   [string]$ScopeJson = "",
@@ -7,6 +7,14 @@
   [string]$PlanJson = "",
   [string]$EvidencePath = "",
   [string]$EvidenceJson = "",
+  # Evidence 模式：已下载的 artifact 目录、原始 run jobs、事件身份与 attempt 起点。
+  [string]$EvidenceDir = "",
+  [string]$JobsPath = "",
+  [string]$JobsJson = "",
+  [string]$RunId = "",
+  [string]$RunAttempt = "",
+  [string]$CheckoutSha = "",
+  [string]$AttemptStartedAt = "",
   [string]$WorkflowPath = "",
   [string]$ReleaseWorkflowPath = ""
 )
@@ -31,6 +39,32 @@ $GateJobId = "ci-gate"
 $ValidStatuses = @("success", "failure", "cancelled", "skipped")
 $ValidRustScopes = @("workspace", "crates", "none")
 
+# 平台目录：与 detect-check-scope.ps1 的 $PlatformCatalog 必须逐项一致。
+# 计划只携带平台 id，runner 标签与 CPU 架构由本表派生，因此计划不能自造 runner。
+# 两个副本的一致性由 test-ci-gate.ps1 的目录对齐用例防守。
+$PlatformCatalog = [ordered]@{
+  "windows"     = [ordered]@{ id = "windows"; os = "windows"; arch = "x64"; runner = "windows-2025" }
+  "linux"       = [ordered]@{ id = "linux"; os = "linux"; arch = "x64"; runner = "ubuntu-24.04" }
+  "macos-arm64" = [ordered]@{ id = "macos-arm64"; os = "macos"; arch = "arm64"; runner = "macos-15" }
+  "macos-intel" = [ordered]@{ id = "macos-intel"; os = "macos"; arch = "x64"; runner = "macos-15-intel" }
+}
+$PlatformOrder = @($PlatformCatalog.Keys)
+$BaselinePlatform = "windows"
+# 平台证据只接受这组终态：部分失败、取消、未知、未跑都不得充当“已通过”。
+$PassingEvidenceStatuses = @("passed")
+$EvidencePlatformKind = "soxu-ci-evidence/platform/v1"
+$EvidenceJobKind = "soxu-ci-evidence/job/v1"
+# 矩阵作业的 GitHub 作业显示名模版：逐实例证据只能从 /attempts/<n>/jobs 派生，
+# needs.<job>.result 只是聚合字符串，不包含实例身份，不得当作逐实例证据使用。
+$MatrixJobDisplayNames = [ordered]@{
+  "rust-check" = "Rust ({0})"
+}
+# 平台证据的必要执行阶段：依赖拉取、Clippy 与测试必须各自真实执行并全绿。
+# 缺段、重复段、失败段和未归零退出码一律拒绝，不能用“身份对就算通过”充数。
+$RequiredPlatformStages = @("cargo-fetch", "cargo-clippy", "cargo-test")
+$PassingStageStatuses = @("passed")
+$StageCountKeys = @("passed", "failed", "ignored", "measured", "filtered")
+
 # 计划路径契约。检测器输出的结构化 scope 带 schemaVersion=1，路径一律是仓库相对规范
 # 路径且原样传递：POSIX 合法的字面反斜杠不得被改写成分隔符，否则一个路径会变成另一个
 # 路径并误触发专项门禁。旧的无版本 scope 继续接受既有 Windows 路径格式并归一化。
@@ -47,12 +81,14 @@ $ReleaseAssetNames = @(
 )
 $ReleaseAssetManifest = ($ReleaseAssetNames -join " ")
 
-# 当前 CI-A 固定 job 契约：governance-and-privacy 无条件必跑，其余由检测器同源输出决定。
-# CI-C 的三平台动态矩阵只扩展实例证据，不改变这里的 job 集合。
+# 当前固定 job 契约：governance-and-privacy 无条件必跑，其余由检测器同源输出决定。
+# CI-C 新增独立的 rust-format 作业（Ubuntu 上只跑一次），并把 rust-check 改为平台矩阵；
+# 矩阵只扩展实例证据，不改变这里的 job 集合身份。
 $GatedJobSpecs = @(
-  [pscustomobject]@{ Id = "governance-and-privacy"; Output = ""; Unconditional = $true }
-  [pscustomobject]@{ Id = "rust-check"; Output = "rust"; Unconditional = $false }
-  [pscustomobject]@{ Id = "mobile-web-check"; Output = "mobile_web"; Unconditional = $false }
+  [pscustomobject]@{ Id = "governance-and-privacy"; Output = ""; Unconditional = $true; Instanced = $false }
+  [pscustomobject]@{ Id = "rust-format"; Output = "rust"; Unconditional = $false; Instanced = $false }
+  [pscustomobject]@{ Id = "rust-check"; Output = "rust"; Unconditional = $false; Instanced = $true }
+  [pscustomobject]@{ Id = "mobile-web-check"; Output = "mobile_web"; Unconditional = $false; Instanced = $false }
 )
 
 function Get-GatedJobSpec {
@@ -73,6 +109,15 @@ function Resolve-RepoFile([string]$PathValue, [string]$FallbackRelPath) {
 }
 
 function Read-JsonPayload([string]$PathValue, [string]$InlineValue, [string]$Label) {
+  $raw = Read-RawPayload $PathValue $InlineValue $Label
+  try {
+    return ($raw | ConvertFrom-Json -Depth 20 -ErrorAction Stop)
+  } catch {
+    throw "$Label 不是合法 JSON：$($_.Exception.Message)"
+  }
+}
+
+function Read-RawPayload([string]$PathValue, [string]$InlineValue, [string]$Label) {
   if (-not [string]::IsNullOrWhiteSpace($PathValue)) {
     if (-not (Test-Path -LiteralPath $PathValue -PathType Leaf)) {
       throw "$Label 文件不存在：$PathValue"
@@ -84,11 +129,7 @@ function Read-JsonPayload([string]$PathValue, [string]$InlineValue, [string]$Lab
     throw "缺少 $Label 输入（请提供文件路径或内联 JSON）。"
   }
   if ([string]::IsNullOrWhiteSpace($raw)) { throw "$Label 内容为空。" }
-  try {
-    return ($raw | ConvertFrom-Json -Depth 20 -ErrorAction Stop)
-  } catch {
-    throw "$Label 不是合法 JSON：$($_.Exception.Message)"
-  }
+  return $raw.Trim()
 }
 
 function Get-ScopeField($Scope, [string]$Name) {
@@ -174,6 +215,45 @@ function Assert-ScopeConsistency($Scope, [bool]$Full, [bool]$Rust, [string]$Rust
   }
 }
 
+function Assert-ScopePlatforms($Scope, [bool]$Rust) {
+  # platforms 是 CI-C 的必需字段：Rust 矩阵实例集必须随 scope 声明，
+  # 否则 Verify 无法以同一推导函数重算“哪些平台份证据是必须的”。
+  $prop = $Scope.PSObject.Properties["platforms"]
+  if ($null -eq $prop) { throw "变更范围 JSON 缺少字段 platforms（CI-C 要求显式声明 Rust 矩阵实例）。" }
+  if ($null -eq $prop.Value) { throw "变更范围字段 platforms 不能为 null。" }
+  if ($prop.Value -isnot [System.Array]) { throw "变更范围字段 platforms 必须是数组。" }
+
+  $seen = @{}
+  foreach ($item in @($prop.Value)) {
+    if ($item -isnot [string] -or [string]::IsNullOrWhiteSpace($item)) {
+      throw "变更范围字段 platforms 含非字符串或空值。"
+    }
+    if (-not $PlatformCatalog.Contains([string]$item)) {
+      throw "未知平台 id：$item（允许 $($PlatformOrder -join '/')）。"
+    }
+    if ($seen.ContainsKey([string]$item)) { throw "变更范围字段 platforms 含重复平台：$item。" }
+    $seen[[string]$item] = $true
+  }
+
+  if (-not $Rust) {
+    if ($seen.Count -gt 0) {
+      throw "rust=false 时 platforms 必须为空（PWA-only 的 linux 不得开开 Rust 矩阵），实际：$($seen.Keys -join ',')。"
+    }
+    return @()
+  }
+  if ($seen.Count -eq 0) { throw "rust=true 时 platforms 不能为空，否则 Rust 矩阵无可核对实例。" }
+  if (-not $seen.ContainsKey($BaselinePlatform)) {
+    throw "rust=true 时 platforms 必须包含基线平台 $BaselinePlatform。"
+  }
+
+  # 按平台目录键序重排，使矩阵实例顺序与证据顺序都是确定的。
+  $ordered = [System.Collections.Generic.List[string]]::new()
+  foreach ($platformId in $PlatformOrder) {
+    if ($seen.ContainsKey($platformId)) { $ordered.Add($platformId) }
+  }
+  return @($ordered)
+}
+
 function New-GatePlan($Scope) {
   if ($null -eq $Scope) { throw "变更范围 JSON 为空。" }
 
@@ -188,6 +268,7 @@ function New-GatePlan($Scope) {
   $rustScope = [string]$rustScopeValue
 
   Assert-ScopeConsistency $Scope $full $rust $rustScope $mobileWeb $paseoOrchestration $checkScopeSelfTest
+  $platforms = Assert-ScopePlatforms $Scope $rust
 
   $schemaVersion = Get-ScopeSchemaVersion $Scope
   $pathContract = if ($schemaVersion -ge $CurrentScopeSchemaVersion) { $PathContractVersioned } else { $PathContractLegacy }
@@ -214,6 +295,8 @@ function New-GatePlan($Scope) {
     }
     $job = [ordered]@{ id = $spec.Id; required = [bool]$required }
     if (-not [string]::IsNullOrEmpty($spec.Output)) { $job["depends_on"] = $spec.Output }
+    # 只有平台矩阵作业带 instances，且仅在它真的必跑时声明。
+    if ($spec.Instanced -and $required) { $job["instances"] = @($platforms) }
     $jobs.Add([pscustomobject]$job)
   }
 
@@ -226,6 +309,8 @@ function New-GatePlan($Scope) {
     mobileWeb          = $mobileWeb
     paseoOrchestration = $paseoOrchestration
     checkScopeSelfTest = $checkScopeSelfTest
+    # 随计划回写平台集，使 Verify 能用同一推导函数重算矩阵实例。
+    platforms          = @($platforms)
     # 随计划回写变更文件，使 Verify 能用同一推导函数重算 selfTest / releaseContract。
     changedFiles       = @($changed)
   }
@@ -377,6 +462,22 @@ function Test-PlanContract($Plan, [System.Collections.Generic.List[string]]$Erro
     } else {
       if ($entry.DependsOn -ne $spec.Output) { $Errors.Add("plan_job_depends_conflict:$($spec.Id)") }
     }
+
+    # 矩阵实例集必须与 scope 重算结果完全一致：删平台、加平台、改顺序、伪造实例都拒绝。
+    $expectedInstances = @()
+    if ($null -ne $expectedJob) {
+      $instProp = $expectedJob.PSObject.Properties["instances"]
+      if ($null -ne $instProp -and $null -ne $instProp.Value) { $expectedInstances = @($instProp.Value) }
+    }
+    if ($expectedInstances.Count -gt 0) {
+      if ($entry.Instances.Count -eq 0) {
+        $Errors.Add("plan_instances_missing:$($spec.Id)")
+      } elseif (($entry.Instances -join ',') -ne ($expectedInstances -join ',')) {
+        $Errors.Add("plan_instances_conflict:$($spec.Id)")
+      }
+    } elseif ($entry.Instances.Count -gt 0) {
+      $Errors.Add("plan_instances_conflict:$($spec.Id)")
+    }
   }
 
   foreach ($id in $declared.Keys) {
@@ -388,6 +489,63 @@ function Test-PlanContract($Plan, [System.Collections.Generic.List[string]]$Erro
   if ($declared.Count -ne @(Get-GatedJobSpec).Count) {
     $Errors.Add("plan_job_set_mismatch")
   }
+}
+
+# 逐实例证据派生：只从原始 jobs 列表读取，缺失、重复、未知与非法结论均拒绝。
+# 返回 $null 表示无法派生，调用方必须失败关闭，不得回退到聚合字符串。
+function Get-MatrixInstanceEvidence($JobsDocument, [string]$JobId, [string[]]$ExpectedInstances, $Errors) {
+  if (-not $MatrixJobDisplayNames.Contains($JobId)) {
+    $Errors.Add("matrix_job_display_name_unmapped:$JobId")
+    return $null
+  }
+  $template = [string]$MatrixJobDisplayNames[$JobId]
+  $rows = @()
+  $jobsProp = $JobsDocument.PSObject.Properties["jobs"]
+  if ($null -ne $jobsProp -and $null -ne $jobsProp.Value) { $rows = @($jobsProp.Value) }
+
+  $observed = [ordered]@{}
+  $seen = @{}
+  foreach ($row in $rows) {
+    $name = [string]$row.name
+    $matched = $null
+    foreach ($candidate in $ExpectedInstances) {
+      if ($name -eq ($template -f $candidate)) { $matched = $candidate; break }
+    }
+    if ($null -eq $matched) { continue }
+    if ($seen.ContainsKey($matched)) {
+      $Errors.Add("matrix_instance_duplicate:${JobId}/${matched}")
+      continue
+    }
+    $seen[$matched] = $true
+    $conclusion = [string]$row.conclusion
+    if (-not $ValidStatuses.Contains($conclusion)) {
+      $Errors.Add("matrix_instance_status_invalid:${JobId}/${matched}=$conclusion")
+      continue
+    }
+    $observed[$matched] = $conclusion
+  }
+
+  foreach ($expected in $ExpectedInstances) {
+    if (-not $seen.ContainsKey($expected)) { $Errors.Add("matrix_instance_missing:${JobId}/${expected}") }
+  }
+
+  # 计划外的同名矩阵行也拒绝：否则多出的平台实例可以旕混过对账。
+  $expectedNames = @($ExpectedInstances | ForEach-Object { $template -f $_ })
+  foreach ($row in $rows) {
+    $name = [string]$row.name
+    if ($expectedNames -contains $name) { continue }
+    $prefix = ($template -f "@")
+    $splitAt = $prefix.IndexOf("@")
+    $head = $prefix.Substring(0, $splitAt)
+    $tail = $prefix.Substring($splitAt + 1)
+    if ($name.StartsWith($head, [StringComparison]::Ordinal) -and $name.EndsWith($tail, [StringComparison]::Ordinal)) {
+      $Errors.Add("matrix_instance_unknown:${JobId}/$name")
+    }
+  }
+
+  $instances = @()
+  foreach ($key in $observed.Keys) { $instances += [pscustomobject]@{ id = $key; status = [string]$observed[$key] } }
+  return [pscustomobject]@{ instances = @($instances) }
 }
 
 function Invoke-VerifyMode {
@@ -444,6 +602,62 @@ function Invoke-VerifyMode {
     }
 
     if ($instances.Count -gt 0) {
+      # 逐实例证据优先来自原始 jobs 列表。needs 聚合字符串不包含实例身份，
+      # 它只能与其他来源交叉校验，绝不能自己充当逐实例证据。
+      $hasJobs = -not [string]::IsNullOrWhiteSpace($JobsPath) -or -not [string]::IsNullOrWhiteSpace($JobsJson)
+      if (-not $hasJobs) {
+        if ($value -is [string]) {
+          # 聚合字符串 + 无原始 jobs：无法证明逐平台结果，必须失败关闭。
+          $errors.Add("matrix_jobs_unavailable:$id")
+          continue
+        }
+        # 证据自带 instances（仅单测夹具会走这条）：仍走下方逐实例校验。
+      } else {
+        $jobsDocument = $null
+        try {
+          $jobsRaw = Read-RawPayload $JobsPath $JobsJson "run jobs JSON"
+          $jobsDocument = $jobsRaw | ConvertFrom-Json -Depth 20 -ErrorAction Stop
+        } catch {
+          $errors.Add("matrix_jobs_unreadable:$id")
+          continue
+        }
+        if ($null -eq $jobsDocument) { $errors.Add("matrix_jobs_unreadable:$id"); continue }
+        $derived = Get-MatrixInstanceEvidence $jobsDocument $id $instances $errors
+        if ($null -eq $derived) { continue }
+
+        # 聚合状态与逐实例结论必须一致：needs 报成功但实例不全绿，同样是矛盾。
+        $aggregate = if ($value -is [string]) { [string]$value } else { "" }
+        $derivedAllSuccess = (@($derived.instances | Where-Object { $_.status -ne "success" }).Count -eq 0)
+        if ($aggregate -eq "success" -and -not $derivedAllSuccess) {
+          $errors.Add("matrix_aggregate_conflict:${id}=success")
+        }
+        if ($aggregate -ne "" -and $aggregate -ne "success" -and $derivedAllSuccess) {
+          $errors.Add("matrix_aggregate_conflict:${id}=$aggregate")
+        }
+
+        # 证据自带的 instances 与原始 jobs 不一致时，以 jobs 为准并显式报冲突。
+        if ($value -isnot [string]) {
+          $evidenceRowsProp = $value.PSObject.Properties["instances"]
+          if ($null -ne $evidenceRowsProp -and $null -ne $evidenceRowsProp.Value) {
+            $evidenceMap = @{}
+            foreach ($row in @($evidenceRowsProp.Value)) {
+              if ($null -ne $row -and $null -ne $row.PSObject.Properties["id"]) {
+                $evidenceMap[[string]$row.id] = [string]$row.status
+              }
+            }
+            foreach ($row in @($derived.instances)) {
+              if ($evidenceMap.ContainsKey([string]$row.id) -and $evidenceMap[[string]$row.id] -ne [string]$row.status) {
+                $errors.Add("matrix_evidence_conflict:${id}/$($row.id)")
+              }
+            }
+          }
+        }
+
+        $value = $derived
+      }
+    }
+
+    if ($instances.Count -gt 0) {
       if ($value -is [string]) { $errors.Add("multi_instance_evidence_missing:$id"); continue }
       if ($value -isnot [pscustomobject]) { $errors.Add("evidence_shape_invalid:$id"); continue }
       $rowsProp = $value.PSObject.Properties["instances"]
@@ -490,6 +704,311 @@ function Invoke-VerifyMode {
     if ($value -isnot [string]) { $errors.Add("evidence_shape_invalid:$id"); continue }
     if (-not $ValidStatuses.Contains([string]$value)) { $errors.Add("status_invalid:$id=$value"); continue }
     if ($value -ne "success") { $errors.Add("required_not_success:$id=$value") }
+  }
+
+  return $errors
+}
+
+function Get-EvidenceField($Document, [string]$Path) {
+  $node = $Document
+  foreach ($segment in $Path.Split('.')) {
+    if ($null -eq $node) { return $null }
+    $prop = $node.PSObject.Properties[$segment]
+    if ($null -eq $prop) { return $null }
+    $node = $prop.Value
+  }
+  return $node
+}
+
+function ConvertTo-UtcTimestamp([string]$Value) {
+  if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+  $parsed = [datetimeoffset]::MinValue
+  $style = [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal
+  if ([datetimeoffset]::TryParse($Value, [System.Globalization.CultureInfo]::InvariantCulture, $style, [ref]$parsed)) {
+    return $parsed.ToUniversalTime()
+  }
+  return $null
+}
+
+function Get-Sha256Hex([string]$Text) {
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ([System.BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '').ToLowerInvariant()
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+# CI-C 平台阶段完整性：必要阶段必须有真实执行记录，且阶段状态、退出码、计数表态均真实。
+# 计数缺失只能显式记为 countsKnown=false + counts=null，不得用 0 冒充“已统计”结果。
+function Test-PlatformStages($Document, [string]$PlatformId, $Errors) {
+  $stagesProp = $Document.PSObject.Properties["stages"]
+  if ($null -eq $stagesProp) { $Errors.Add("evidence_stages_missing:$PlatformId"); return }
+  if ($null -eq $stagesProp.Value) { $Errors.Add("evidence_stages_null:$PlatformId"); return }
+  if ($stagesProp.Value -isnot [System.Array]) { $Errors.Add("evidence_stages_not_array:$PlatformId"); return }
+
+  $rows = @($stagesProp.Value)
+  if ($rows.Count -eq 0) { $Errors.Add("evidence_stages_empty:$PlatformId"); return }
+
+  $seen = @{}
+  $seenOrder = [System.Collections.Generic.List[string]]::new()
+  foreach ($row in $rows) {
+    if ($null -eq $row -or $row -isnot [pscustomobject]) { $Errors.Add("evidence_stage_invalid:$PlatformId"); continue }
+    $nameProp = $row.PSObject.Properties["name"]
+    if ($null -eq $nameProp -or $nameProp.Value -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$nameProp.Value)) {
+      $Errors.Add("evidence_stage_name_invalid:$PlatformId")
+      continue
+    }
+    $name = [string]$nameProp.Value
+    if ($seen.ContainsKey($name)) { $Errors.Add("evidence_stage_duplicate:${PlatformId}/${name}"); continue }
+    $seen[$name] = $row
+    $seenOrder.Add($name)
+  }
+
+  foreach ($required in $RequiredPlatformStages) {
+    if (-not $seen.ContainsKey($required)) { $Errors.Add("evidence_stage_missing:${PlatformId}/${required}") }
+  }
+  foreach ($name in $seenOrder) {
+    if ($RequiredPlatformStages -notcontains $name) { $Errors.Add("evidence_stage_unexpected:${PlatformId}/${name}") }
+  }
+
+  foreach ($name in $seenOrder) {
+    $row = $seen[$name]
+    $status = [string](Get-EvidenceField $row 'status')
+    if ($PassingStageStatuses -notcontains $status) {
+      $Errors.Add("evidence_stage_not_passed:${PlatformId}/${name}=$status")
+    }
+    $exitProp = $row.PSObject.Properties["exitCode"]
+    if ($null -eq $exitProp -or ($exitProp.Value -isnot [int] -and $exitProp.Value -isnot [long])) {
+      $Errors.Add("evidence_stage_exit_code_invalid:${PlatformId}/${name}")
+    } elseif ([int]$exitProp.Value -ne 0) {
+      $Errors.Add("evidence_stage_exit_code:${PlatformId}/${name}=$($exitProp.Value)")
+    }
+
+    $knownProp = $row.PSObject.Properties["countsKnown"]
+    if ($null -eq $knownProp -or $knownProp.Value -isnot [bool]) {
+      $Errors.Add("evidence_stage_counts_flag_invalid:${PlatformId}/${name}")
+      continue
+    }
+    $countsProp = $row.PSObject.Properties["counts"]
+    if (-not [bool]$knownProp.Value) {
+      # 未知计数是合法表态，但必须与 counts 都为 null 一致，不能用 0 冒充。
+      if ($null -ne $countsProp -and $null -ne $countsProp.Value) {
+        $Errors.Add("evidence_stage_counts_conflict:${PlatformId}/${name}")
+      }
+      continue
+    }
+    if ($null -eq $countsProp -or $null -eq $countsProp.Value -or $countsProp.Value -isnot [pscustomobject]) {
+      $Errors.Add("evidence_stage_counts_missing:${PlatformId}/${name}")
+      continue
+    }
+    foreach ($key in $StageCountKeys) {
+      $keyProp = $countsProp.Value.PSObject.Properties[$key]
+      $isInt = $null -ne $keyProp -and ($keyProp.Value -is [int] -or $keyProp.Value -is [long])
+      if (-not $isInt -or [int]$keyProp.Value -lt 0) {
+        $Errors.Add("evidence_stage_counts_invalid:${PlatformId}/${name}")
+        break
+      }
+    }
+
+    # 阶段声称 passed 但计数里 failed>0 是矛盾证据，一律拒绝。
+    # 计数未知（countsKnown=false）仍是合法表态，不在此列。
+    $failedProp = $countsProp.Value.PSObject.Properties["failed"]
+    if ($status -eq "passed" -and $null -ne $failedProp -and [int]$failedProp.Value -gt 0) {
+      $Errors.Add("evidence_stage_counts_contradiction:${PlatformId}/${name}")
+    }
+  }
+}
+
+# CI-C 证据对账：同一 Run、Attempt、SHA 与计划下，预期平台必须各有且仅有一份已通过证据。
+# 拒绝缺项、重复、未知平台、差异 SHA、部分失败、取消，以及沿用前一次 attempt 的复用证据。
+function Invoke-EvidenceMode {
+  $errors = [System.Collections.Generic.List[string]]::new()
+
+  $planRaw = Read-RawPayload $PlanPath $PlanJson "门禁计划 JSON"
+  $plan = $null
+  try { $plan = $planRaw | ConvertFrom-Json -Depth 20 -ErrorAction Stop } catch { $errors.Add("plan_invalid_json"); return $errors }
+  if ($null -eq $plan) { $errors.Add("plan_missing"); return $errors }
+
+  Test-PlanContract $plan $errors
+  if ($errors.Count -gt 0) { return $errors }
+
+  if ([string]::IsNullOrWhiteSpace($EvidenceDir)) { $errors.Add("evidence_dir_missing"); return $errors }
+  if (-not (Test-Path -LiteralPath $EvidenceDir -PathType Container)) { $errors.Add("evidence_dir_unreadable"); return $errors }
+
+  $rustJob = @($plan.jobs | Where-Object { $_.id -eq "rust-check" })[0]
+  $expectedPlatforms = @()
+  if ($null -ne $rustJob) {
+    $instProp = $rustJob.PSObject.Properties["instances"]
+    if ($null -ne $instProp -and $null -ne $instProp.Value) { $expectedPlatforms = @($instProp.Value) }
+  }
+  $planDigest = Get-Sha256Hex $planRaw
+
+  if ([string]::IsNullOrWhiteSpace($RunId)) { $errors.Add("run_identity_missing") }
+  if ([string]::IsNullOrWhiteSpace($RunAttempt)) { $errors.Add("attempt_identity_missing") }
+  if ([string]::IsNullOrWhiteSpace($CheckoutSha)) { $errors.Add("checkout_sha_missing") }
+
+  $attemptAt = ConvertTo-UtcTimestamp $AttemptStartedAt
+  if ([string]::IsNullOrWhiteSpace($AttemptStartedAt)) {
+    # 缺 attempt 起点就无法区分“本次新执行”与“沿用前一次 attempt”，必须失败关闭。
+    $errors.Add("attempt_started_at_missing")
+  } elseif ($null -eq $attemptAt) {
+    $errors.Add("attempt_started_at_invalid")
+  }
+
+  $observed = @{}
+  $duplicated = @{}
+  $files = @(Get-ChildItem -LiteralPath $EvidenceDir -Recurse -File -Filter '*.json' | Sort-Object FullName)
+  if ($files.Count -eq 0) {
+    # 本次 attempt 一个证据都没有：仅在真的需要平台证据时才是错误。
+    if ($expectedPlatforms.Count -gt 0) { $errors.Add("evidence_dir_empty") }
+  }
+
+  foreach ($file in $files) {
+    $label = $file.Name
+    $raw = Get-Content -LiteralPath $file.FullName -Raw -Encoding utf8
+    if ([string]::IsNullOrWhiteSpace($raw)) { $errors.Add("evidence_unreadable:$label"); continue }
+    try { $doc = $raw | ConvertFrom-Json -Depth 20 -ErrorAction Stop } catch { $errors.Add("evidence_unreadable:$label"); continue }
+
+    $schemaVersion = Get-EvidenceField $doc 'schemaVersion'
+    if ($null -eq $schemaVersion -or $schemaVersion -isnot [int] -and $schemaVersion -isnot [long]) {
+      $errors.Add("evidence_schema_invalid:$label")
+      continue
+    }
+    if ([int]$schemaVersion -ne 1) { $errors.Add("evidence_schema_invalid:$label"); continue }
+
+    $kind = [string](Get-EvidenceField $doc 'kind')
+    if ($kind -ne $EvidencePlatformKind -and $kind -ne $EvidenceJobKind) {
+      $errors.Add("evidence_kind_invalid:$label")
+      continue
+    }
+
+    # 事件身份绑定：Run、Attempt、SHA 与计划四项均必须与本次招待一致。
+    if ([string](Get-EvidenceField $doc 'run.id') -ne $RunId) { $errors.Add("evidence_run_mismatch:$label") }
+    if ([string](Get-EvidenceField $doc 'run.attempt') -ne $RunAttempt) { $errors.Add("evidence_attempt_mismatch:$label") }
+    if ([string](Get-EvidenceField $doc 'identity.checkoutSha') -ne $CheckoutSha) { $errors.Add("evidence_sha_mismatch:$label") }
+    if ([string](Get-EvidenceField $doc 'plan.digest') -ne $planDigest) { $errors.Add("evidence_plan_mismatch:$label") }
+
+    # 部分重跑：gh run rerun --failed 会沿用前一次 attempt 的成功 job 与 artifact，
+    # 那些结果不属于本次 attempt。时间戳早于本次 attempt 起点即失败关闭，不默默放宽绑定。
+    if ($null -ne $attemptAt) {
+      $completedRaw = [string](Get-EvidenceField $doc 'timing.completedAt')
+      if ([string]::IsNullOrWhiteSpace($completedRaw)) {
+        $errors.Add("evidence_timing_missing:$label")
+      } else {
+        $completedAt = ConvertTo-UtcTimestamp $completedRaw
+        if ($null -eq $completedAt) {
+          $errors.Add("evidence_timing_invalid:$label")
+        } elseif ($completedAt -lt $attemptAt) {
+          $errors.Add("evidence_from_previous_attempt:$label")
+        }
+      }
+    }
+
+    if ($kind -ne $EvidencePlatformKind) { continue }
+
+    $platformId = [string](Get-EvidenceField $doc 'platform')
+    if ([string]::IsNullOrWhiteSpace($platformId)) { $errors.Add("evidence_platform_missing_field:$label"); continue }
+    if (-not $PlatformCatalog.Contains($platformId)) { $errors.Add("evidence_platform_unknown:$platformId"); continue }
+    if ($expectedPlatforms -notcontains $platformId) { $errors.Add("evidence_platform_unexpected:$platformId"); continue }
+    if ($observed.ContainsKey($platformId)) {
+      $duplicated[$platformId] = $true
+      $errors.Add("evidence_platform_duplicate:$platformId")
+      continue
+    }
+    $observed[$platformId] = $doc
+
+    # Runner 与架构只认平台目录：证据不得用 Ubuntu 冒充 macOS 或把交叉编译当原生。
+    $expectedRunner = [string]$PlatformCatalog[$platformId].runner
+    $expectedOs = [string]$PlatformCatalog[$platformId].os
+    $expectedArch = [string]$PlatformCatalog[$platformId].arch
+    if ([string](Get-EvidenceField $doc 'runner.label') -ne $expectedRunner) { $errors.Add("evidence_runner_mismatch:$platformId") }
+    if ([string](Get-EvidenceField $doc 'runner.os') -ne $expectedOs) { $errors.Add("evidence_runner_os_mismatch:$platformId") }
+    if ([string](Get-EvidenceField $doc 'runner.arch') -ne $expectedArch) { $errors.Add("evidence_runner_arch_mismatch:$platformId") }
+
+    $resultStatus = [string](Get-EvidenceField $doc 'result.status')
+    if ($PassingEvidenceStatuses -notcontains $resultStatus) {
+      $errors.Add("evidence_not_passed:$platformId=$resultStatus")
+    }
+
+    # 只有身份对还不够：必须真有 fetch/clippy/test 三个通过阶段。
+    Test-PlatformStages $doc $platformId $errors
+  }
+
+  if ($expectedPlatforms.Count -gt 0) {
+    foreach ($platformId in $expectedPlatforms) {
+      if (-not $observed.ContainsKey($platformId) -and -not $duplicated.ContainsKey($platformId)) {
+        $errors.Add("evidence_platform_missing:$platformId")
+      }
+    }
+  } elseif ($observed.Count -gt 0) {
+    $errors.Add("evidence_platform_unexpected:$((@($observed.Keys)) -join ',')")
+  }
+
+  # 原始矩阵 job 汇总状态必须与实际证据一致：不接受“job 绿但无证据”或反向失配。
+  if (-not [string]::IsNullOrWhiteSpace($JobsPath) -or -not [string]::IsNullOrWhiteSpace($JobsJson)) {
+    $jobsRaw = Read-RawPayload $JobsPath $JobsJson "run jobs JSON"
+    $jobsDoc = $null
+    try { $jobsDoc = $jobsRaw | ConvertFrom-Json -Depth 20 -ErrorAction Stop } catch { $errors.Add("matrix_jobs_invalid_json"); $jobsDoc = $null }
+    if ($null -ne $jobsDoc) {
+      $rows = @()
+      $jobsProp = $jobsDoc.PSObject.Properties["jobs"]
+      if ($null -ne $jobsProp -and $null -ne $jobsProp.Value) { $rows = @($jobsProp.Value) }
+      if ($rows.Count -eq 0 -and $expectedPlatforms.Count -gt 0) { $errors.Add("matrix_jobs_empty") }
+
+      $matrixRows = @($rows | Where-Object { [string]$_.name -match '^Rust \((.+)\)$' })
+      $seenRowPlatforms = @{}
+      foreach ($row in $matrixRows) {
+        $null = ([string]$row.name) -match '^Rust \((.+)\)$'
+        $rowPlatform = $Matches[1]
+        if (-not $PlatformCatalog.Contains($rowPlatform)) { $errors.Add("matrix_job_unknown:$rowPlatform"); continue }
+        if ($expectedPlatforms -notcontains $rowPlatform) { $errors.Add("matrix_job_unplanned:$rowPlatform"); continue }
+        if ($seenRowPlatforms.ContainsKey($rowPlatform)) { $errors.Add("matrix_job_duplicate:$rowPlatform"); continue }
+        $seenRowPlatforms[$rowPlatform] = $true
+        $conclusion = [string]$row.conclusion
+        if ($conclusion -ne "success") { $errors.Add("matrix_job_not_success:$rowPlatform=$conclusion") }
+        # jobs 列表会把沿用（复用）的成功 job 也标上当前 attempt，所以只能看原始时间：
+        # 开始时间早于本次 attempt 起点即证明它是上一 attempt 的执行结果。
+        if ($null -ne $attemptAt) {
+          $rowStartedRaw = [string](Get-EvidenceField $row 'started_at')
+          if ([string]::IsNullOrWhiteSpace($rowStartedRaw)) {
+            $errors.Add("matrix_job_timing_missing:$rowPlatform")
+          } else {
+            $rowStarted = ConvertTo-UtcTimestamp $rowStartedRaw
+            if ($null -eq $rowStarted) {
+              $errors.Add("matrix_job_timing_invalid:$rowPlatform")
+            } elseif ($rowStarted -lt $attemptAt) {
+              $errors.Add("matrix_job_from_previous_attempt:$rowPlatform")
+            }
+          }
+        }
+        if ($observed.ContainsKey($rowPlatform)) {
+          $evidenceStatus = [string](Get-EvidenceField $observed[$rowPlatform] 'result.status')
+          if ($conclusion -eq "success" -and $evidenceStatus -ne "passed") {
+            $errors.Add("matrix_job_evidence_conflict:$rowPlatform")
+          }
+          if ($conclusion -ne "success" -and $evidenceStatus -eq "passed") {
+            $errors.Add("matrix_job_evidence_conflict:$rowPlatform")
+          }
+        }
+      }
+      foreach ($platformId in $expectedPlatforms) {
+        if (-not $seenRowPlatforms.ContainsKey($platformId)) { $errors.Add("matrix_job_missing:$platformId") }
+      }
+    }
+  }
+
+  # 合法的部分重跑策略必须显式说明：不拓宽绑定，而是要求全量重跑。
+  # 既包括“证据时间戳早于本次 attempt”的复用，也包括“按名根本没有本次证据”。
+  $reuseMarkers = @(
+    @($errors | Where-Object { $_ -like 'evidence_from_previous_attempt:*' }).Count -gt 0
+    @($errors | Where-Object { $_ -like 'matrix_job_from_previous_attempt:*' }).Count -gt 0
+    @($errors | Where-Object { $_ -like 'evidence_platform_missing:*' }).Count -gt 0
+    @($errors | Where-Object { $_ -eq 'evidence_dir_empty' }).Count -gt 0
+  )
+  if (@($reuseMarkers | Where-Object { $_ }).Count -gt 0) {
+    Write-Host "::notice::CI-C-EVIDENCE-GUIDANCE 本次 attempt 缺少必要平台证据，或证据来自上一 attempt 的复用 job。请使用 gh run rerun <run-id> 全量重跑（不要用 --failed），让所有平台实例在本 attempt 重新执行。"
   }
 
   return $errors
@@ -639,7 +1158,7 @@ function Invoke-ContractMode([string]$PathValue) {
   $jobs = Split-WorkflowJobs $text
   Assert-WorkflowShape $jobs $errors
 
-  foreach ($jobId in @($GateJobId, $DetectorJobId, "governance-and-privacy", "rust-check", "mobile-web-check")) {
+  foreach ($jobId in @($GateJobId, $DetectorJobId, "governance-and-privacy", "rust-format", "rust-check", "mobile-web-check")) {
     if (-not $jobs.Contains($jobId)) { $errors.Add("workflow_job_missing:$jobId") }
   }
   if ($errors.Count -gt 0) { return $errors }
@@ -649,7 +1168,7 @@ function Invoke-ContractMode([string]$PathValue) {
   if ($gateText -notmatch '(?m)^    name: CI Gate\s*$') { $errors.Add("gate_name_unstable") }
   if ($gateText -notmatch '(?m)^    if: always\(\)\s*$') { $errors.Add("gate_not_always") }
   if ($gateText -notmatch 'scripts/verify-ci-gate\.ps1') { $errors.Add("gate_verifier_missing") }
-  if ($gateText -notmatch '(?m)-Mode Verify') { $errors.Add("gate_verify_mode_missing") }
+  if ($gateText -notmatch '(?m)-Mode Verify|Mode\s*=\s*\x27Verify\x27') { $errors.Add("gate_verify_mode_missing") }
 
   $needsList = @(Get-JobNeeds $jobs[$GateJobId])
   $expectedNeeds = @(Get-GateNeedsIds)
@@ -674,7 +1193,7 @@ function Invoke-ContractMode([string]$PathValue) {
 
   # 结构化输出的数组序列化形式。管道形式下 ConvertTo-Json 对零元素输出空串、
   # 对单元素输出 JSON 字符串，下游无法区分“空”与“一个值”，必须用 -InputObject 包住数组。
-  foreach ($outputName in @("required_platforms", "required_jobs", "test_profiles")) {
+  foreach ($outputName in @("required_platforms", "required_jobs", "test_profiles", "platform_matrix")) {
     $arrayPattern = $outputName + '=\$\(ConvertTo-Json -InputObject @\(\$scope\.[A-Za-z]+\) -Compress\)'
     if ($detectText -notmatch $arrayPattern) {
       $errors.Add("detect_output_json_not_array:$outputName")
@@ -700,6 +1219,76 @@ function Invoke-ContractMode([string]$PathValue) {
   $webText = ($jobs["mobile-web-check"] -join "`n")
   if ($webText -notmatch "needs\.detect-changes\.outputs\.mobile_web == 'true'") {
     $errors.Add("mobile_web_job_ungated")
+  }
+
+  # CI-C：Rust 矩阵契约。每个平台只生成一个实例，依赖/Clippy/测试共用一个构建目录，
+  # 且矩阵只消费检测器派生的 platform_matrix，不得在工作流内硬编码平台清单。
+  if ($rustText -notmatch '(?m)^    strategy:\s*$') { $errors.Add("rust_matrix_strategy_missing") }
+  if ($rustText -notmatch '(?m)^\s+matrix:\s*$') { $errors.Add("rust_matrix_missing") }
+  if ($rustText -notmatch 'platform:\s*\$\{\{\s*fromJSON\(needs\.detect-changes\.outputs\.platform_matrix\)\s*\}\}') {
+    $errors.Add("rust_matrix_not_from_plan")
+  }
+  if ($rustText -notmatch '(?m)^    name: Rust \(\$\{\{ matrix\.platform\.id \}\}\)\s*$') { $errors.Add("rust_matrix_name_unstable") }
+  if ($rustText -notmatch '(?m)^    runs-on: \$\{\{ matrix\.platform\.runner \}\}\s*$') { $errors.Add("rust_matrix_runner_not_from_plan") }
+  if ($rustText -notmatch 'ci-evidence-\$\{\{ github\.run_attempt \}\}-rust-\$\{\{ matrix\.platform\.id \}\}') { $errors.Add("rust_matrix_evidence_artifact_missing") }
+  # Runner 的 OS 与 CPU 架构必须取自实际观测（RUNNER_OS/RUNNER_ARCH），
+  # 不得把矩阵期待值原样写成观测，否则证据只能证明计划写了什么。
+  if ($rustText -notmatch '\$\{\{ runner\.os \}\}') { $errors.Add("rust_matrix_runner_os_not_observed") }
+  if ($rustText -notmatch '\$\{\{ runner\.arch \}\}') { $errors.Add("rust_matrix_runner_arch_not_observed") }
+  if ($rustText -match 'matrix\.platform\.os|matrix\.platform\.arch') { $errors.Add("rust_matrix_runner_observation_forged") }
+  # 必要阶段必须在矩阵作业里真实执行，证据才有东西可对。
+  foreach ($stageName in @('cargo-fetch', 'cargo-clippy', 'cargo-test')) {
+    if ($rustText -notmatch [regex]::Escape("-Name $stageName")) { $errors.Add("rust_matrix_stage_missing:$stageName") }
+  }
+  if ($rustText -notmatch 'retention-days:\s*14') { $errors.Add("rust_matrix_evidence_retention_missing") }
+  # 格式检查必须只跑一次：矩阵作业里出现 cargo fmt 就是按平台重复执行。
+  if ($rustText -match 'cargo fmt') { $errors.Add("rust_matrix_duplicates_format_check") }
+
+  # CI-C：纯 Rust 格式检查独立在 Ubuntu 上执行一次，本身不得再开矩阵。
+  $formatText = ($jobs["rust-format"] -join "`n")
+  if ($formatText -notmatch '(?m)^    name: Rust Format Check\s*$') { $errors.Add("rust_format_name_unstable") }
+  if ($formatText -notmatch '(?m)^    runs-on: ubuntu-24\.04\s*$') { $errors.Add("rust_format_runner_not_ubuntu") }
+  if ($formatText -notmatch 'cargo fmt --all -- --check') { $errors.Add("rust_format_command_missing") }
+  if ($formatText -notmatch "needs\.detect-changes\.outputs\.rust == 'true'") { $errors.Add("rust_format_job_ungated") }
+  if ($formatText -match '(?m)^\s+matrix:') { $errors.Add("rust_format_matrix_forbidden") }
+
+  # CI Gate 必须在同一 Run/Attempt/SHA 上对账平台证据，并具备读取原始 job 的权限。
+  if ($gateText -notmatch 'download-artifact') { $errors.Add("gate_evidence_download_missing") }
+  # 产物名与下载 pattern 均必须带 attempt：否则重跑会写入同名产物，
+  # 或把上一 attempt 的旧产物当成本次证据重下载。
+  if ($gateText -notmatch 'pattern:\s*ci-evidence-\$\{\{ github\.run_attempt \}\}-\*') { $errors.Add("gate_evidence_pattern_not_attempt_scoped") }
+  if ($gateText -notmatch "'-Mode',\s*'Evidence'|Mode\s*=\s*'Evidence'") { $errors.Add("gate_evidence_mode_missing") }
+  if ($gateText -notmatch 'actions:\s*read') { $errors.Add("gate_actions_read_missing") }
+  # 精确 attempt 端点的起点必须参与对账，不能用 runs 端点或 jobs 列表的 attempt 字段代替。
+  if ($gateText -notmatch 'attempts/\$\{RUN_ATTEMPT\}') { $errors.Add("gate_attempt_endpoint_missing") }
+  if ($gateText -notmatch 'run_started_at') { $errors.Add("gate_attempt_start_missing") }
+  if ($gateText -notmatch '-AttemptStartedAt|AttemptStartedAt' ) { $errors.Add("gate_attempt_start_unused") }
+  # 矩阵作业的逐实例结论只能来自原始 jobs：Verify 不得只传聚合 needs 结果。
+  if ($gateText -notmatch '-JobsPath|JobsPath\s*=') { $errors.Add("gate_verify_jobs_missing") }
+  if ($gateText -notmatch 'ci-jobs\.json') { $errors.Add("gate_verify_jobs_file_missing") }
+
+  # 内部脚本调用必须用命名参数或哈希表 splatting：`$args` 是 PowerShell 自动变量，
+  # `./scripts/x.ps1 @args` 会把 '-Mode' 当成位置参数值传给 Mode。
+  foreach ($splatMatch in [regex]::Matches($text, '(?m)^\s*\./scripts/[^\s]+\.ps1\s+(@\S+)')) {
+    $splat = $splatMatch.Groups[1].Value
+    if ($splat -notmatch '^@[A-Za-z_]\w*(Params|Parameters)$') {
+      $errors.Add("workflow_script_positional_splat:$splat")
+    }
+  }
+  # 自动变量 $args 不得用于 splatting（无论内部脚本还是 native 命令）：
+  # 它既能被赋值又被当成自动变量，行为随调用形式变化，本轮远端故障就出在这里。
+  if ($text -match '(?m)@args\b') { $errors.Add("workflow_automation_variable_splat") }
+  if ($text -match '(?m)\$args\s*=\s*@\(') { $errors.Add("workflow_automation_variable_assigned") }
+
+  # 逐实例证据必须先取回原始 jobs 才能对账，顺序颠倒就是接线错误。
+  $fetchIndex = $text.IndexOf("name: Fetch attempt start and raw run jobs", [StringComparison]::Ordinal)
+  $verifyIndex = $text.IndexOf("name: Verify CI gate plan against actual job evidence", [StringComparison]::Ordinal)
+  if ($fetchIndex -lt 0) {
+    $errors.Add("gate_jobs_step_missing")
+  } elseif ($verifyIndex -lt 0) {
+    $errors.Add("gate_verify_step_missing")
+  } elseif ($fetchIndex -gt $verifyIndex) {
+    $errors.Add("gate_jobs_before_verify")
   }
 
   return $errors
@@ -791,6 +1380,10 @@ try {
     "Verify" {
       $errors = Invoke-VerifyMode
       exit (Write-CheckResult $errors "Verify")
+    }
+    "Evidence" {
+      $errors = Invoke-EvidenceMode
+      exit (Write-CheckResult $errors "Evidence")
     }
     "Contract" {
       $errors = Invoke-ContractMode $WorkflowPath
