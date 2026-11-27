@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-27T03:05:25Z",
+  "updated_at": "2026-11-27T03:52:29Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "8ea83f359523df93f68d2911c9719788088961da5f16cc8ffcad5eea046bd322",
-      "size": 92400,
-      "normalized_sha256": "8ea83f359523df93f68d2911c9719788088961da5f16cc8ffcad5eea046bd322"
+      "sha256": "6f400f1a8bbdd484fb489d18ed648a4bd7f1acbfe819a7f8ddc10dec652e96ea",
+      "size": 92385,
+      "normalized_sha256": "6f400f1a8bbdd484fb489d18ed648a4bd7f1acbfe819a7f8ddc10dec652e96ea"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -929,9 +929,9 @@
     },
     "crates/soxu-magpie/tests/worktree_context.rs": {
       "role": "observe",
-      "sha256": "0be844dfed07cafa2938f14c854d155433f66fb9788094faf73539463911bf5a",
-      "size": 7516,
-      "normalized_sha256": "0be844dfed07cafa2938f14c854d155433f66fb9788094faf73539463911bf5a"
+      "sha256": "90e51cba3646781b9236b7f6f44a8363a52e96d5c6a5f925d938ecd0005e69db",
+      "size": 7577,
+      "normalized_sha256": "90e51cba3646781b9236b7f6f44a8363a52e96d5c6a5f925d938ecd0005e69db"
     },
     "crates/soxu-protocol/Cargo.toml": {
       "role": "index",
@@ -1133,15 +1133,15 @@
     },
     "docs/ops/LESSONS.md": {
       "role": "index",
-      "sha256": "43be505e05b66ea9fcf414e932ea6b40c25c1fadf9e954602387b2a6c1456b05",
-      "size": 22148,
-      "normalized_sha256": "43be505e05b66ea9fcf414e932ea6b40c25c1fadf9e954602387b2a6c1456b05"
+      "sha256": "478b73944d6860b27f4136634aa57b6e45fa67e070ff02635ff3711391513410",
+      "size": 23639,
+      "normalized_sha256": "478b73944d6860b27f4136634aa57b6e45fa67e070ff02635ff3711391513410"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "abdcd943b646cc859fa80cc69ef5867eafd2722bfb83fefd9305b474910b7a3a",
-      "size": 41063,
-      "normalized_sha256": "abdcd943b646cc859fa80cc69ef5867eafd2722bfb83fefd9305b474910b7a3a"
+      "sha256": "e206ab1a3e47142b248ff7399a632d694a4edc08a3cdf4344d7ec483a393b5b6",
+      "size": 46144,
+      "normalized_sha256": "e206ab1a3e47142b248ff7399a632d694a4edc08a3cdf4344d7ec483a393b5b6"
     },
     "docs/user/getting-started.md": {
       "role": "index",
