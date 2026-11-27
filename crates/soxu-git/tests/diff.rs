@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use soxu_git::{
     DiffBaseline, DiffError, DiffFileMode, DiffKind, DiffOutput, DiffRequest, DiffResult,
@@ -100,8 +100,17 @@ impl Fixture {
     /// 与 `commit` 走同一命令形状，但允许回归用例追加 `-c` 覆盖（如重新打开后台维护），
     /// 并在需要时用 trace2 记录本次提交派生的子进程。
     fn commit_with(&self, extra_args: &[&str], label: &str, trace: Option<&Path>) {
-        static COMMIT_SEQ: AtomicU64 = AtomicU64::new(0);
         self.git(["add", "--all"]);
+        success(
+            self.commit_command(extra_args, label, trace)
+                .output()
+                .expect("执行夹具提交"),
+        );
+    }
+
+    /// 提交流程的唯一命令构造点：`commit` 与有界回归用例共用，保证两边真的走同一条路径。
+    fn commit_command(&self, extra_args: &[&str], label: &str, trace: Option<&Path>) -> Command {
+        static COMMIT_SEQ: AtomicU64 = AtomicU64::new(0);
         // 并行测试中的独立仓库也可能提交相同内容，为每次提交分配不同的时间戳。
         let seq = COMMIT_SEQ.fetch_add(1, Ordering::Relaxed);
         let date = format!("{} +0000", 1_700_000_000 + seq);
@@ -109,14 +118,11 @@ impl Fixture {
         if let Some(trace) = trace {
             command.env("GIT_TRACE2_EVENT", trace);
         }
-        success(
-            command
-                .env("GIT_AUTHOR_DATE", &date)
-                .env("GIT_COMMITTER_DATE", &date)
-                .args(["commit", "-qm", label])
-                .output()
-                .expect("执行夹具提交"),
-        );
+        command
+            .env("GIT_AUTHOR_DATE", &date)
+            .env("GIT_COMMITTER_DATE", &date)
+            .args(["commit", "-qm", label]);
+        command
     }
 
     async fn diff(
@@ -510,19 +516,66 @@ async fn binary_and_non_utf8_text_keep_distinct_output_contracts() {
 }
 
 /// trace2 在一次夹具提交里观察到的后台维护子进程事实。
+///
+/// 只保存有界、脱敏的摘要（布尔与计数），回归失败时也只打印这份摘要，
+/// 不在 CI 里转储原始 trace2 事件或整份环境。
 #[derive(Debug)]
 struct MaintenanceTrace {
-    /// trace 文件确实被写入；否则“未派生”只是空断言。
+    /// trace2 通道确实写出了事件；否则“未派生”只是空断言。
     written: bool,
     /// 是否派生了 `git maintenance` 子进程。
     started: bool,
     /// 该子进程是否以 `--detach` 运行（会在夹具外残留后台进程）。
     detached: bool,
-    /// 是否观察到同 `child_id` 的 `child_exit`，即父进程确实等到了维护结束。
+    /// 是否观察到同一发出进程 `sid` 下、同一 `child_id` 的 `child_exit`。
     exited: bool,
 }
 
+/// 一次有界夹具提交的结局；各状态互斥且可区分。
+#[derive(Debug)]
+enum CommitOutcome {
+    /// 直接子进程在期限内以成功状态退出。
+    Succeeded,
+    /// 直接子进程在期限内以非零状态退出。
+    Failed(Option<i32>),
+    /// 超过期限；已尽力终止直接子进程，并在回收窗口内确认它已退出。
+    TimedOut,
+    /// `try_wait` 观察自身失败；已尽力终止直接子进程，并在回收窗口内确认它已退出。
+    WaitErrored,
+    /// 上述任一路径下都未能在回收窗口内确认直接子进程退出。
+    ReapUnconfirmed,
+}
+
+/// 有界提交的结局加同一次提交的 trace2 摘要。
+#[derive(Debug)]
+struct CommitObservation {
+    outcome: CommitOutcome,
+    trace: MaintenanceTrace,
+}
+
+/// 提交等待上限：正常提交在亚秒级完成，这里留出充足的机器抖动余量。
+const COMMIT_DEADLINE: Duration = Duration::from_secs(60);
+/// 等待与回收的轮询间隔。
+const POLL_INTERVAL: Duration = Duration::from_millis(20);
+/// 终止后只在这个窗口内确认**直接子进程**回收，不断言其后代。
+const REAP_WINDOW: Duration = Duration::from_secs(10);
+
+/// 正向对照参数：只重新打开后台维护，`gc.auto=0` 保证不触发真实 gc 工作，
+/// 并显式禁止 detach，让提交同步等待维护结束。
+const CONTROL_MAINTENANCE_ARGS: [&str; 8] = [
+    "-c",
+    "maintenance.auto=true",
+    "-c",
+    "gc.auto=0",
+    "-c",
+    "maintenance.autoDetach=false",
+    "-c",
+    "gc.autoDetach=false",
+];
+
 /// 从 trace2 事件行取 `"child_id":N`。
+///
+/// 这是**发出该事件的进程内部**的子进程序号，单独使用不足以定位某个子进程。
 fn trace_child_id(line: &str) -> Option<u32> {
     const KEY: &str = "\"child_id\":";
     let rest = line.get(line.find(KEY)? + KEY.len()..)?;
@@ -533,12 +586,108 @@ fn trace_child_id(line: &str) -> Option<u32> {
         .ok()
 }
 
-/// 用 trace2 的 `child_start` / `child_exit` 事件观察一次夹具提交派生的维护子进程。
-fn traced_commit_spawns_maintenance(
-    fixture: &Fixture,
-    extra_args: &[&str],
-    label: &str,
-) -> MaintenanceTrace {
+/// 从 trace2 事件行取发出该事件的进程 `sid`。
+///
+/// trace2 用 `/` 把父子 sid 串起来，因此逐字比较即可区分不同进程的同类事件。
+fn trace_sid(line: &str) -> Option<&str> {
+    const KEY: &str = "\"sid\":\"";
+    let rest = line.get(line.find(KEY)? + KEY.len()..)?;
+    Some(&rest[..rest.find('"')?])
+}
+
+/// 汇总 trace2 文本里的子进程事实。
+///
+/// `.git/objects/maintenance.lock` 由 `git maintenance run` 持有；它的增删就是平台失败的
+/// 真实写源，所以这里按 trace2 事件断言子进程的启动与退出。启动与退出都必须绑定
+/// **同一发出进程 `sid` + 同一 `child_id`**：只看数字会把后一层 Git 进程的同号子进程
+/// 误算成顶层维护进程已结束。
+fn summarize_trace(text: &str) -> MaintenanceTrace {
+    let mut started: Vec<(&str, u32)> = Vec::new();
+    let mut detached = false;
+    for line in text.lines() {
+        if !line.contains("\"event\":\"child_start\"") || !line.contains("\"maintenance\"") {
+            continue;
+        }
+        let (Some(sid), Some(child_id)) = (trace_sid(line), trace_child_id(line)) else {
+            continue;
+        };
+        started.push((sid, child_id));
+        detached |= line.contains("\"--detach\"");
+    }
+    let exited = text.lines().any(|line| {
+        if !line.contains("\"event\":\"child_exit\"") {
+            return false;
+        }
+        let (Some(sid), Some(child_id)) = (trace_sid(line), trace_child_id(line)) else {
+            return false;
+        };
+        started.contains(&(sid, child_id))
+    });
+    MaintenanceTrace {
+        written: !text.is_empty(),
+        started: !started.is_empty(),
+        detached,
+        exited,
+    }
+}
+
+/// 读 trace2 文件并汇总；文件缺失或为空时 `written = false`。
+fn read_maintenance_trace(path: &Path) -> MaintenanceTrace {
+    summarize_trace(&fs::read_to_string(path).unwrap_or_default())
+}
+
+/// 在回收窗口内确认直接子进程已退出；超出窗口即判未确认。
+fn reap_direct_child(child: &mut std::process::Child) -> bool {
+    let deadline = Instant::now() + REAP_WINDOW;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL_INTERVAL),
+            _ => return false,
+        }
+    }
+}
+
+/// 有界等待直接子进程：到期或观察失败都尽力终止，再走同一条有界回收。
+///
+/// 这里只对**直接子进程**负责；没有也不会声称其后代已被回收。
+/// 超时与 `try_wait` 观察失败分别成 `TimedOut` / `WaitErrored`，两者都不能被静默丢弃。
+fn await_child(child: &mut std::process::Child, deadline: Duration) -> CommitOutcome {
+    let started = Instant::now();
+    let mut observed_error = false;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if status.success() {
+                    CommitOutcome::Succeeded
+                } else {
+                    CommitOutcome::Failed(status.code())
+                };
+            }
+            Ok(None) if started.elapsed() < deadline => std::thread::sleep(POLL_INTERVAL),
+            Ok(None) => break,
+            Err(_) => {
+                observed_error = true;
+                break;
+            }
+        }
+    }
+    let _ = child.kill();
+    if !reap_direct_child(child) {
+        return CommitOutcome::ReapUnconfirmed;
+    }
+    if observed_error {
+        CommitOutcome::WaitErrored
+    } else {
+        CommitOutcome::TimedOut
+    }
+}
+
+/// 走与 `commit` 完全相同的命令形状做一次提交，但把等待做成有界的。
+///
+/// stdin 关闭、stdout/stderr 不接任何管道：证据只从 trace2 文件读，
+/// 因此即便有无关子进程继承了写端，收集端也不会被拖成无界阻塞。
+fn traced_commit(fixture: &Fixture, extra_args: &[&str], label: &str) -> CommitObservation {
     static TRACE_SEQ: AtomicU64 = AtomicU64::new(0);
     let trace = std::env::temp_dir().join(format!(
         "soxu-readonly-diff-trace-{}-{}.json",
@@ -548,33 +697,72 @@ fn traced_commit_spawns_maintenance(
     let _ = fs::remove_file(&trace);
     // 每次提交写入不同内容，确保 `git commit` 不会因 nothing-to-commit 而失败。
     fixture.write("traced", label.as_bytes());
-    fixture.commit_with(extra_args, label, Some(&trace));
-    let text = fs::read_to_string(&trace).unwrap_or_default();
+    fixture.git(["add", "--all"]);
+    let mut command = fixture.commit_command(extra_args, label, Some(&trace));
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().expect("启动夹具提交");
+    let outcome = await_child(&mut child, COMMIT_DEADLINE);
+    let observed = read_maintenance_trace(&trace);
     let _ = fs::remove_file(&trace);
+    CommitObservation {
+        outcome,
+        trace: observed,
+    }
+}
 
-    // `.git/objects/maintenance.lock` 由 `git maintenance run` 持有；它的增删就是
-    // 平台失败的真实写源，因此这里直接断言是否启动了该子进程及它的生命周期。
-    let mut started_ids = Vec::new();
-    let mut detached = false;
-    for line in text.lines() {
-        if !line.contains("\"event\":\"child_start\"") || !line.contains("\"maintenance\"") {
-            continue;
-        }
-        if let Some(id) = trace_child_id(line) {
-            started_ids.push(id);
-        }
-        detached |= line.contains("\"--detach\"");
+/// 把结局渲染成有界的一行摘要，供断言失败信息使用。
+fn outcome_detail(outcome: &CommitOutcome) -> String {
+    match outcome {
+        CommitOutcome::Succeeded => "succeeded".to_owned(),
+        CommitOutcome::Failed(code) => format!("failed(exit={code:?})"),
+        CommitOutcome::TimedOut => "timed_out".to_owned(),
+        CommitOutcome::WaitErrored => "wait_errored".to_owned(),
+        CommitOutcome::ReapUnconfirmed => "reap_unconfirmed".to_owned(),
     }
-    let exited = text.lines().any(|line| {
-        line.contains("\"event\":\"child_exit\"")
-            && trace_child_id(line).is_some_and(|id| started_ids.contains(&id))
-    });
-    MaintenanceTrace {
-        written: !text.is_empty(),
-        started: !started_ids.is_empty(),
-        detached,
-        exited,
-    }
+}
+
+/// 断言一次有界提交在期限内成功；失败信息带出具体结局。
+fn assert_commit_succeeded(observed: &CommitObservation, stage: &str) {
+    assert!(
+        matches!(observed.outcome, CommitOutcome::Succeeded),
+        "{stage}未在期限内成功（{}）：{observed:?}",
+        outcome_detail(&observed.outcome)
+    );
+}
+
+/// `child_id` 只是发出进程内的序号：同号但不同 `sid` 不得算作维护进程已退出。
+///
+/// 用合成 trace2 文本覆盖三类情形：同 `sid` + 同 `child_id` 计入；同 `child_id`
+/// 但不同 `sid` 不计入；同 `sid` 但不同 `child_id` 也不计入。
+#[test]
+fn maintenance_exit_must_come_from_the_same_parent_sid() {
+    let started = r#"{"event":"child_start","sid":"trace-root","child_id":0,"argv":["git","maintenance","run","--auto","--quiet","--no-detach"]}"#;
+    let nested_sid_exit =
+        r#"{"event":"child_exit","sid":"trace-root/nested","child_id":0,"code":0}"#;
+    let other_child_exit = r#"{"event":"child_exit","sid":"trace-root","child_id":1,"code":0}"#;
+    let same_sid_exit = r#"{"event":"child_exit","sid":"trace-root","child_id":0,"code":0}"#;
+
+    let nested = summarize_trace(&format!("{started}\n{nested_sid_exit}\n"));
+    assert!(nested.started, "{nested:?}");
+    assert!(
+        !nested.exited,
+        "同 child_id 但不同 sid 不得计为已退出：{nested:?}"
+    );
+
+    let other_child = summarize_trace(&format!("{started}\n{other_child_exit}\n"));
+    assert!(
+        !other_child.exited,
+        "同 sid 但不同 child_id 不得计为已退出：{other_child:?}"
+    );
+
+    let matched = summarize_trace(&format!("{started}\n{same_sid_exit}\n"));
+    assert!(
+        matched.exited,
+        "同 sid + 同 child_id 必须计为已退出：{matched:?}"
+    );
 }
 
 /// 夹具提交不得派生后台 `git maintenance`。
@@ -582,47 +770,44 @@ fn traced_commit_spawns_maintenance(
 /// run 45914578287 上 `binary_and_non_utf8_text_keep_distinct_output_contracts` 的整树快照
 /// 只差 `.git/objects/maintenance.lock` 的增删与 `.git/objects` 的 mtime，根因是夹具自身的
 /// `git commit` 派生了 detached `git maintenance run --auto`，与快照断言并发写。
-/// 本用例不靠重跑或 sleep，而是用 trace2 直接证明：受测路径不派生该子进程，
-/// 且显式重新打开维护时同一观察通道能看见它——删掉夹具的 `-c` 守卫即失败。
-/// 正向对照另以 `maintenance.autoDetach=false`、`gc.autoDetach=false` 让提交同步等待维护
-/// 结束，并用同 `child_id` 的 `child_exit` 核实，不留后台进程给夹具回收或后续用例。
+/// 本用例不靠重跑或 sleep，而是用 trace2 直接证明受测路径不派生该子进程。
+///
+/// 正向对照真实走同一条提交路径，只把后台维护重新打开，并要求同步不 detach：
+/// 必须同时看到子进程启动、无 `--detach`、以及同 `sid` + 同 `child_id` 的 `child_exit`。
+/// 两个提交都走有界等待，阻塞会被判成 `TimedOut` / `WaitErrored` / `ReapUnconfirmed`，
+/// 不会拖到 job 超时。
 #[test]
 fn fixture_commits_never_start_background_maintenance() {
     let guarded = Fixture::new(&[]);
-    let observed = traced_commit_spawns_maintenance(&guarded, &[], "guarded\n");
-    assert!(observed.written, "trace2 未写入，本次观察无效");
+    let observed = traced_commit(&guarded, &[], "guarded\n");
+    assert_commit_succeeded(&observed, "受测提交");
     assert!(
-        !observed.started,
+        observed.trace.written,
+        "trace2 未写入，本次观察无效：{observed:?}"
+    );
+    assert!(
+        !observed.trace.started,
         "夹具提交派生了后台 git maintenance 子进程：{observed:?}"
     );
 
     let control = Fixture::new(&[]);
-    let observed = traced_commit_spawns_maintenance(
-        &control,
-        &[
-            "-c",
-            "maintenance.auto=true",
-            "-c",
-            "gc.auto=1",
-            "-c",
-            "maintenance.autoDetach=false",
-            "-c",
-            "gc.autoDetach=false",
-        ],
-        "control\n",
-    );
-    assert!(observed.written, "反向对照的 trace2 未写入");
+    let observed = traced_commit(&control, &CONTROL_MAINTENANCE_ARGS, "control\n");
+    assert_commit_succeeded(&observed, "对照提交");
     assert!(
-        observed.started,
-        "反向对照未观察到 maintenance 子进程，trace2 观察通道失效"
+        observed.trace.written,
+        "对照提交的 trace2 未写入：{observed:?}"
     );
     assert!(
-        !observed.detached,
-        "反向对照的维护子进程仍以 --detach 运行，会残留后台进程：{observed:?}"
+        observed.trace.started,
+        "对照提交未观察到 maintenance 子进程，观察通道失效：{observed:?}"
     );
     assert!(
-        observed.exited,
-        "反向对照未观察到同 child_id 的 child_exit，无法确认维护已结束：{observed:?}"
+        !observed.trace.detached,
+        "对照的维护子进程仍以 --detach 运行，会残留后台进程：{observed:?}"
+    );
+    assert!(
+        observed.trace.exited,
+        "对照未观察到同 sid + 同 child_id 的 child_exit，无法确认维护已结束：{observed:?}"
     );
 }
 
