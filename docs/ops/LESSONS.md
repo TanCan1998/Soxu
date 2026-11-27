@@ -39,6 +39,8 @@
 | `L-018` | 测试夹具根与路径校验 | 断言“拒绝链接/重解析点”的夹具，其合法根必须先取自真实路径（`canonicalize`），再从该真实根派生资产、启动目录与重验目标；未规范化的系统临时目录会让正向构造先被拒绝、负向断言到不了被测分支。规范化**仅限 Unix**：Windows 的 `\\?\` 前缀会破坏 `cmd mklink /J` 与 Node `cwd` 契约。有意构造的链接/junction/逃逸路径一律原样交给被测函数 | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-019` | 平台能力夹具 | 文件名含非法 UTF-8 字节的夹具只在 Linux 建立盘语义：`macos-15` Runner 对 `diff.rs` 同类夹具实测 `fs::write` 返回 `EILSEQ`，`probe.rs`/`worktrees.rs` 的 `create_dir`/`write` 属同因推断且未原生复现，不得借此推断 Darwin 或其他文件系统整体能力。此类用例一律 `#[cfg(target_os = "linux")]`，不得用 `cfg(unix)` 广域桶；测试名与 `cfg` 同口径，并一次性搜完同 crate 兄弟集测 | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-020` | 同因扩围裁决 | 发现不在 Owned Paths 的同因缺陷时，先按 `[BLOCKED / NEED-DECISION]` 上报复现证据与目标执行顺序，由主控裁决把同因点并入同一 PR 扩白名单；不得自行越权修改，也不另开碎片化热修复 PR | `L2 · Seen 1×` | 本文 / `SKILL.md` |
+| `L-021` | Actions 并发块 | GitHub 在**运行时**求值 `concurrency`：`queue: max` 与解析为 `true` 的 `cancel-in-progress`（含动态表达式）共存会让整个 workflow 判非法并**零作业**失败。同一 workflow 必须同时服务「PR 取消」与「main 排队」时只能用 `queue: single`，并在静态契约里拦住 `max` + 动态取消；不要凭 YAML 字面量看似合法就推上去 | `L3 · Seen 1×` | `verify-ci-gate.ps1` / 本文 |
+| `L-022` | 工具链版本源 | CI 与发布链路不得写死 `toolchain:` / `node-version` / `pnpm` 版本：只在检测作业从 `mise.toml` 读一次并写成 outputs，其余作业消费输出，且装完必须实测比对（`-AssertInstalled`）。解析器对缺项/浮动/复合/重复/畸形一律非零退出，**不得回退内置默认值** | `L3 · Seen 1×` | `read-mise-versions.ps1` / `ci.yml` / 本文 |
 
 ---
 
@@ -138,6 +140,16 @@
 - **场景与根因**（`Seen 1× (2026-11-27)`）：`#100` 首轮只修 `diff.rs` 一处，定向扫描发现 `probe.rs`/`worktrees.rs` 两处同因用例不在 Owned Paths 内。若子代理自行扩面即越权；若各自另开 Issue/PR，则需三轮独立验证、三轮 Darwin 重跑才能全部闭合，且每轮都会被前一处先行失败掩盖。
 - **预防动作**：先按 `[BLOCKED / NEED-DECISION]` 上报精确复现、目标执行顺序与掩盖机制，不动手修改；主控裁决后由主控把 Owned Paths 正式扩至同因文件，执行代理在同一工作树/分支续做并保留原环境、参考索引复用与安全边界，不重启代理或另开分支。
 - **验证方式**：三处用例在同一 PR 内同口径门控与改名，一次 WSL 全仓复验三处均实际执行通过；PR 正文与看板同步记录裁决与扩围原因。**状态**：活跃。
+
+### `L-021` GitHub Actions 并发块按运行时求值，`queue: max` 不能与动态取消共存
+- **场景与根因**（`Seen 1× (2026-11-27)`）：`#92` 首版把并发块写成「组名按事件分组 + `cancel-in-progress: ${{ github.event_name == 'pull_request' }}` + `queue: max`」。YAML 里 `cancel-in-progress` 不是字面量 `true`，静态看上去合法；实际推送后 run `46023242089` 只有 run 记录、**零 job**，注解原文：`evaluate plan concurrency: Error when evaluating 'concurrency'. .github/workflows/ci.yml (Line: 26, Col: 10): The combination of 'queue: max' and 'cancel-in-progress: true' is not allowed`。
+- **预防动作**：GitHub 先按事件解析表达式再校验组合，因此动态表达式同样触发非法判定。一个 workflow 若必须同时满足「PR 取消旧 run」与「main 保留在途并排队」，只能显式写 `queue: single`；要真正用 `queue: max`，就得把取消与非取消拆到不同 workflow（或不同 job 级并发），不能放在同一并发块。把这条规则写进静态契约（`concurrency_queue_max_with_dynamic_cancel`），并补一条「把 `single` 改成 `max` 必须失败」的负向回归。
+- **验证方式**：修复后同一 PR 的 run `46024301919`（attempt 1）全 8 job success；契约负例在本地回归矩阵中拦截该组合。**状态**：活跃。
+
+### `L-022` 工具链版本只从 `mise.toml` 读一次，且装完必须实测比对
+- **场景与根因**（`Seen 1× (2026-11-27)`）：仓库以 `mise.toml` 锁定 Rust/Node/pnpm，但工作流里同时存在 `toolchain: 1.99.1` 与 `node-version: '26'`、`pnpm version: 12` 三类硬编码，发布仓更是 `toolchain: stable`。任何一次版本升级都只改 `mise.toml`，CI 与发布树则继续用旧值，且**不会报错**——证据里真正跑出来的版本与声明不同，逐平台证据因此失真。
+- **预防动作**：① 新增严格解析器，只在检测作业读一次并写成 outputs；② 其余作业一律消费 outputs，禁止再写字面量；③ 安装后立刻跑 `-AssertInstalled` 把实测 rustc/node/pnpm 与声明比对，让「参数写对但没真装上」也失败；④ 解析器对缺项、范围/浮动/复合版本、重复声明、未知工具与畸形 TOML 一律非零退出，绝不回退内置默认值；⑤ 缓存键把工具链版本作为维度，避免跨版本复用缓存把证据混在一起。
+- **验证方式**：冷/热两次同 SHA run 的三平台证据均为 `rustc 1.99.1` / `cargo 1.99.1`，PWA 证据为 `node v26.13.1` / `pnpm 12.21.0`，与 `mise.toml` 一致；本地 `test-read-mise-versions.ps1` 81 项断言与 `test-ci-gate.ps1` 的硬编码负向变体共同防守。**状态**：活跃。
 
 ---
 
