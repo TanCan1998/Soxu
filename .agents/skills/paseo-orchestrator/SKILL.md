@@ -100,7 +100,7 @@ $miseEnv = ($miseEnvJson | Out-String) | ConvertFrom-Json
 foreach ($entry in $miseEnv.PSObject.Properties) {
   [Environment]::SetEnvironmentVariable($entry.Name, [string]$entry.Value, "Process")
 }
-$env:CARGO_TARGET_DIR = Join-Path $PWD.Path "../.cargo-target/soxu-示例任务" # 替换为任务书指定目录
+$env:CARGO_TARGET_DIR = Join-Path $PWD.Path "target" # mise.toml 默认已指向检出内 target/；并行任务确需额外隔离时按任务书覆写
 pwsh -NoProfile -File scripts/mise-doctor.ps1
 cargo --version
 pwsh -NoProfile -File scripts/check-all.ps1

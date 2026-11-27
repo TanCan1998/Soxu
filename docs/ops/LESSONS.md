@@ -47,9 +47,9 @@
 
 ## 三、经验明细（L2 / L3）
 
-### `L-001` 并行隔离禁止 `mise run`，必须进程内注入环境并覆写独立 `CARGO_TARGET_DIR`
-- **场景与根因**（`Seen 3× (2026-11-25, 2026-11-26)`）：`mise run check-all` 会按 `mise.toml` 重新加载默认 `CARGO_TARGET_DIR = "../.cargo-target/soxu"`，多条 Worktree 并行时抢占同一 Cargo 文件锁。
-- **预防动作**：先注入 `mise env --json`（`MISE_DISABLE_TOOLS=java,maven`、`PYTHONUTF8=1`）到当前进程，再显式覆写独立 `$env:CARGO_TARGET_DIR`，随后直接执行 `mise-doctor.ps1`、`cargo` 或 `check-all.ps1`。
+### `L-001` 并行隔离禁止 `mise run`，必须进程内注入环境并使用检出内 `CARGO_TARGET_DIR`
+- **场景与根因**（`Seen 3× (2026-11-25, 2026-11-26)`）：`mise run check-all` 会按 `mise.toml` 重新加载 `CARGO_TARGET_DIR`，历史上默认共享 `../.cargo-target/soxu`，多条 Worktree 并行时抢占同一 Cargo 文件锁。
+- **预防动作**：先注入 `mise env --json`（`MISE_DISABLE_TOOLS=java,maven`、`PYTHONUTF8=1`）到当前进程，再确认 `$env:CARGO_TARGET_DIR`；`mise.toml` 自 2026-11-28 起默认指向检出内 `target/`（`.gitignore` 已注册 `/target/`），各 Worktree 天然隔离且归档时随目录回收；如需额外隔离（如主检出与 Worktree 同时构建）再显式覆写独立目录，随后直接执行 `mise-doctor.ps1`、`cargo` 或 `check-all.ps1`。
 - **验证方式**：多路并行无 `Blocking waiting for file lock` 且产物落入各自缓存目录；**状态**：活跃（已晋升入 `CODE_STANDARDS.md`）。
 
 ### `L-002` WSL Linux 真机构建绕开 `mise` shims 与 Windows `.git` 隔离约定

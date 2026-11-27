@@ -100,7 +100,7 @@
 2. **离开/收口写入义务**：
    - 每完成一个 Issue、合入一个 PR 或切换里程碑时，主控或负责合入的 Agent 必须同步更新 `docs/ops/PROGRESS.md` 中的「当前阶段」、「进行中工作区/PR」与「下一步待执行队列」；若本波捕获到可复用闭环经验或规则晋升，同步在收口/微复盘时更新 `docs/ops/LESSONS.md`。
 3. **AGY 桌面端与 Codex 桌面端双主控切换与隔离约定**：
-   - **共享层**：双方共用仓库内 `AGENTS.md`、`docs/ops/PROGRESS.md`、`docs/ops/DECISIONS.md`、`docs/ops/CODE_STANDARDS.md`、`docs/ops/LESSONS.md`、`aoci.txt` + `.aoci/` 认知索引、`.agents/skills/` 共享技能、Cargo 共享缓存（`../.cargo-target/soxu`）及本机 Paseo 守护进程下的项目与 Worktree 池（统一通过 `pwsh -NoProfile -File scripts/paseo-ctl.ps1` 自动探测并唤醒控制）。
+   - **共享层**：双方共用仓库内 `AGENTS.md`、`docs/ops/PROGRESS.md`、`docs/ops/DECISIONS.md`、`docs/ops/CODE_STANDARDS.md`、`docs/ops/LESSONS.md`、`aoci.txt` + `.aoci/` 认知索引、`.agents/skills/` 共享技能、各检出自带的 `/target/` 构建目录（`mise.toml` 指向检出内，`.gitignore` 已注册 `/target/`，工作树归档时随目录一并回收）及本机 Paseo 守护进程下的项目与 Worktree 池（统一通过 `pwsh -NoProfile -File scripts/paseo-ctl.ps1` 自动探测并唤醒控制）。
    - **隔离层**：双方宿主元数据与全局配置完全隔离（AGY 使用 `~/.gemini/config/projects/`，Codex 使用 `~/.codex/state_5.sqlite` 及受 `.gitignore` 保护的 `.codex/config.toml`），互不篡改；仓库主检出目录仅作为**主控编排与审查台（Control Plane）**，严禁双端同时在主检出并发修改业务代码，功能开发一律通过 Paseo `--isolation worktree` 下沉至独立分支并遵守 Issue `Owned Paths`。
 
 <!-- aoci:begin -->
