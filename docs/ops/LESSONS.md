@@ -41,6 +41,7 @@
 | `L-020` | 同因扩围裁决 | 发现不在 Owned Paths 的同因缺陷时，先按 `[BLOCKED / NEED-DECISION]` 上报复现证据与目标执行顺序，由主控裁决把同因点并入同一 PR 扩白名单；不得自行越权修改，也不另开碎片化热修复 PR | `L2 · Seen 1×` | 本文 / `SKILL.md` |
 | `L-021` | Actions 并发块 | GitHub 在**运行时**求值 `concurrency`：`queue: max` 与解析为 `true` 的 `cancel-in-progress`（含动态表达式）共存会让整个 workflow 判非法并**零作业**失败。同一 workflow 必须同时服务「PR 取消」与「main 排队」时只能用 `queue: single`，并在静态契约里拦住 `max` + 动态取消；不要凭 YAML 字面量看似合法就推上去 | `L3 · Seen 1×` | `verify-ci-gate.ps1` / 本文 |
 | `L-022` | 工具链版本源 | CI 与发布链路不得写死 `toolchain:` / `node-version` / `pnpm` 版本：只在检测作业从 `mise.toml` 读一次并写成 outputs，其余作业消费输出，且装完必须实测比对（`-AssertInstalled`）。解析器对缺项/浮动/复合/重复/畸形一律非零退出，**不得回退内置默认值** | `L3 · Seen 1×` | `read-mise-versions.ps1` / `ci.yml` / 本文 |
+| `L-023` | CI 触发丢失兜底 | PR push（synchronize）/ reopen 后若远端长时间无对应 run（用 `actions/runs?head_sha=<sha>` 查 API 计数为 0 即确认事件丢失，不要反复盲推或重开 PR 空转），先等一个队列周期，再用 `gh workflow run ci.yml --ref <分支> -f mode=scope` 对同一棵树做 dispatch 复验并在 PR 说明单列该 run 证据；事件恢复后以正式 pull_request run 作为最终合并门禁 | `L2 · Seen 1×` | 本文 / 波次验收 |
 
 ---
 
@@ -152,6 +153,11 @@
 - **验证方式**：冷/热两次同 SHA run 的三平台证据均为 `rustc 1.99.1` / `cargo 1.99.1`，PWA 证据为 `node v26.13.1` / `pnpm 12.21.0`，与 `mise.toml` 一致；本地 `test-read-mise-versions.ps1` 81 项断言与 `test-ci-gate.ps1` 的硬编码负向变体共同防守。**状态**：活跃。
 
 ---
+
+### `L-023` GitHub `pull_request` 触发丢失时的 dispatch 兜底复验
+- **场景与根因**（`Seen 1× (2026-11-28)`）：PR `#121` 的热修提交（`592eb2a`）与空提交强制触发（`3667f99`）均未产生任何 CI run，`gh api actions/runs?head_sha=<sha>` 计数为 0；期间主线 push run 正常创建，说明并非配额或仓库级禁用，属单次事件投递丢失。关闭再重开 PR 亦未触发。
+- **预防动作**：确认 head_sha 无 run 后不盲推、不无脑重开；等待一个队列周期（同并发组在途 run 完成）后仍未触发，改用 `gh workflow run ci.yml --ref <分支> -f mode=scope` 对同一棵树做 workflow_dispatch 复验（独立并发分组，不占主线槽位），并在 PR 说明单列该 run 作为三平台证据；本次在合并 `origin/main` 后的推送中事件自然恢复，最终以正式 pull_request run `46065749309` 作为合并门禁。
+- **验证方式**：dispatch run `46063223938`（Darwin Clippy 通过）与 pull_request run `46065749309`（全绿）双证据落档；**状态**：活跃。
 
 ## 四、已自动化防呆归档区
 

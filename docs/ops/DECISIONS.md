@@ -82,6 +82,11 @@
   | PWA 作业 | — | — | node `v26.13.1` / pnpm `12.21.0` |
 
   **不宣称整体提速**：热缓存主要改善 Clippy（linux 32.4s→4.8s、windows 31.9s→9.5s、macos 24.5s→13.0s），而 `cargo-test` 在 macos 与 windows 上并未变快（macos 51.7s→77.2s，windows 130.9s→126.7s），`cargo-fetch` 在 macos/windows 上反而变慢。这些是真实观测值，受 Runner 方差影响，不构成"缓存使整体构建更快"的结论。
+
+## ADR-012：GPUI 依赖线采用 `gpui-pre =0.3.14` 改名包 + `gpui-component 0.11.0`
+- **状态**：已采纳（2026-11-28，`#118` / PR `#120`）
+- **背景**：crates.io 原名 `gpui` 最新稳定版为 0.2.2（无非 yanked 的 0.3.x），而 `gpui-component` 最新稳定版 0.11.0 硬绑定 `gpui =0.3.14` 且 `package = "gpui-pre"`（Zed gpui 0.3.x 线的改名发行，上游 `zed-industries/zed`）。与 `gpui 0.2.2` 兼容的组件库最高仅 0.5.1；`gpui 0.2.2 + gpui-component 0.11.0` 虽可锁文件，但 `cargo tree` 实证同树出现两套互不兼容的 gpui 类型实现，映射层必然错位。
+- **决策**：以「组件库保持最新稳定版 + gpui 单实现」为准，锁定 `gpui = { package = "gpui-pre", version = "=0.3.14" }` 与 `gpui-component = "0.11.0"`；PR 记录改名包来源与冲突证据，`[profile.dev.package."*"] opt-level = 3` 仅提速 dev 依赖包、不改 release。`exp/93-gpui-macos-probe` 基于 0.2.2 的测试蓝图在接入真实视图时须按 0.2.2→0.3.x 差异清单重新实测，不得直接沿用。
 - **并发实测**（真实 run，禁止 push `main`，故 main 自身 ref 未直接实测）：
   - **PR 取消**：run `46026390870`（`ee8d54c`，创建 15:36:21，已 in_progress）被随后创建的 run `46026504778`（`686b405`，创建 15:37:08）取消；已完成的 `Detect` / `Rust Format` / `PWA` 保留 success，`Governance` 与三个 `Rust` 矩阵实例为 cancelled，`CI Gate` 按契约判 failure——取消不计为通过。
   - **手动触发独立分组**：run `46026504778`（pull_request，首个 job 15:37:47 起）与 run `46026938724`（workflow_dispatch，首个 job 15:40:10 起）**同时 in_progress**（重叠 15:40:10–15:43:08），证明 dispatch 组与 PR 组互不占位。
