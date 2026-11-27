@@ -1364,10 +1364,16 @@ try {
   $testLog = Join-Path $collectDir "test.log"
   Set-Content -LiteralPath $fetchLog -Value "Updating crates.io index" -NoNewline -Encoding utf8
   Set-Content -LiteralPath $clippyLog -Value "Finished dev profile target(s)" -NoNewline -Encoding utf8
+  # 顶层多套件形状：每个 Cargo 套件边界内恰好一条 test result，才能可靠累加。
   $testLogBody = @(
-    "running 3 tests"
-    "test result: ok. 156 passed; 0 failed; 5 ignored; 0 measured; 2 filtered out; finished in 1.20s"
-    "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s"
+    '   Running unittests src\lib.rs (target\debug\deps\soxu-fixture.exe)'
+    ''
+    'running 156 tests'
+    'test result: ok. 156 passed; 0 failed; 5 ignored; 0 measured; 2 filtered out; finished in 1.20s'
+    '   Running tests\extra.rs (target\debug\deps\extra-fixture.exe)'
+    ''
+    'running 12 tests'
+    'test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s'
   ) -join "`n"
   Set-Content -LiteralPath $testLog -Value $testLogBody -NoNewline -Encoding utf8
 
@@ -1491,6 +1497,214 @@ try {
     Assert-Check ($failedEvidence.result.status -eq "failed") "存在失败阶段时结语必须为 failed"
     Assert-Fail "证据失败：采集器记录的编译中断被 Gate 拒绝" `
       (Invoke-GateEvidence -PlanJson $evPlan -Documents @($failedEvidence, $goodDocs[1], $goodDocs[2]) -JobsJson (New-JobsJson @((New-MatrixJobRow "windows" -Conclusion "failure"), (New-MatrixJobRow "linux"), (New-MatrixJobRow "macos-arm64")))) 'evidence_stage_not_passed:windows/cargo-clippy=build_failed'
+  }
+
+  # ============ 三·三·二、日志形状：嵌套派生进程不充顶层计数 ============
+  # 裁决 A：可可靠归属（每个套件边界内恰好一条 test result）才计数；
+  # 嵌套/交错/边界外一律 countsKnown=false + counts=null + 稳定脱敏原因，不猜数字。
+  function Invoke-LogShapeStage([string]$Tag, [string]$LogBody, [int]$ExitCode = 0, [string]$CollectorOverride = "") {
+    $shapeDir = Join-Path $tempRoot ("shape-" + $Tag + "-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $shapeDir -Force | Out-Null
+    $logPath = Join-Path $shapeDir 'run.log'
+    Set-Content -LiteralPath $logPath -Value $LogBody -Encoding utf8 -NoNewline
+    $stagesPath = Join-Path $shapeDir 'stages.json'
+    $target = if ([string]::IsNullOrWhiteSpace($CollectorOverride)) { $collectorPath } else { $CollectorOverride }
+    $result = Invoke-Script $target @(
+      '-Mode', 'Stage', '-StagesPath', $stagesPath, '-Name', 'cargo-test',
+      '-Command', 'cargo test --workspace --locked', '-ExitCode', "$ExitCode", '-LogPath', $logPath
+    )
+    $record = $null
+    if (Test-Path -LiteralPath $stagesPath) {
+      $record = @((Get-Content -LiteralPath $stagesPath -Raw -Encoding utf8) | ConvertFrom-Json -Depth 12)[0]
+    }
+    return [pscustomobject]@{ Code = $result.Code; Output = $result.Output; Record = $record; Dir = $shapeDir; LogPath = $logPath }
+  }
+
+  # 嵌套派生进程形状：复刻 worktree_lifecycle 夹具，顶层 138 + 9 条子进程汇总。
+  $suiteSpecs = @(
+    @{ Path = 'unittests src/lib.rs (target/debug/deps/git-lib)'; Count = 27 }
+    @{ Path = 'tests/checkpoint.rs (target/debug/deps/checkpoint-1)'; Count = 8 }
+    @{ Path = 'tests/diff.rs (target/debug/deps/diff-2)'; Count = 13 }
+    @{ Path = 'tests/fixed_diff.rs (target/debug/deps/fixed-diff-3)'; Count = 7 }
+    @{ Path = 'tests/probe.rs (target/debug/deps/probe-4)'; Count = 9 }
+    @{ Path = 'tests/project.rs (target/debug/deps/project-5)'; Count = 5 }
+    @{ Path = 'tests/repository_create.rs (target/debug/deps/repo-6)'; Count = 28 }
+    @{ Path = 'tests/status.rs (target/debug/deps/status-7)'; Count = 7 }
+    @{ Path = 'tests/worktree_checkout.rs (target/debug/deps/wc-8)'; Count = 6 }
+    @{ Path = 'tests/worktree_lifecycle.rs (target/debug/deps/wl-9)'; Count = 17; Nested = 9 }
+    @{ Path = 'tests/worktrees.rs (target/debug/deps/wt-10)'; Count = 11 }
+  )
+  $nestedLogLines = [System.Collections.Generic.List[string]]::new()
+  foreach ($spec in $suiteSpecs) {
+    $nestedLogLines.Add("   Running $($spec.Path)")
+    $nestedLogLines.Add('')
+    $nestedLogLines.Add("running $($spec.Count) tests")
+    if ($spec.ContainsKey('Nested')) {
+      for ($n = 0; $n -lt $spec.Nested; $n++) {
+        $nestedLogLines.Add('test fixture_worker ... ok')
+        $nestedLogLines.Add('running 1 test')
+        $nestedLogLines.Add('test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.02s')
+      }
+    }
+    $nestedLogLines.Add("test result: ok. $($spec.Count) passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s")
+  }
+  $nestedLogLines.Add('   Doc-tests soxu_git')
+  $nestedLogLines.Add('')
+  $nestedLogLines.Add('running 0 tests')
+  $nestedLogLines.Add('test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s')
+  $nestedLogBody = ($nestedLogLines -join "`n")
+
+  $shapeNested = Invoke-LogShapeStage 'nested' $nestedLogBody
+  Assert-Check ($shapeNested.Code -eq 0) "嵌套形状 Stage 必须能记录（实际 exit $($shapeNested.Code)）"
+  Assert-Check ($null -ne $shapeNested.Record) "嵌套形状必须产出阶段记录"
+  if ($null -ne $shapeNested.Record) {
+    Assert-Check ($shapeNested.Record.countsKnown -eq $false) "嵌套派生进程汇总不得充顶层计数（实际 countsKnown=$($shapeNested.Record.countsKnown)）"
+    Assert-Check ($null -eq $shapeNested.Record.counts) "计数未知时 counts 必须为 null 而不是数字"
+    Assert-Check ($shapeNested.Record.countsReason -eq 'nested_test_result_lines') "未知原因必须稳定可审计（实际 $($shapeNested.Record.countsReason)）"
+    Assert-Check ($shapeNested.Record.testResultLines -eq 21) "应识别全部 21 条 test result 行（实际 $($shapeNested.Record.testResultLines)）"
+    Assert-Check ($shapeNested.Record.suiteCount -eq 12) "应识别 12 个 Cargo 套件边界（实际 $($shapeNested.Record.suiteCount)）"
+    Assert-Check ($shapeNested.Record.nestedResultLines -eq 9) "应识别 9 条派生进程汇总（实际 $($shapeNested.Record.nestedResultLines)）"
+  }
+
+  # 回归敏感度：恢复旧“全文求和”实现必须给出 147，证明该用例确实在防守。
+  $collectorText = Get-Content -LiteralPath $collectorPath -Raw -Encoding utf8
+  $functionMatch = [regex]::Match($collectorText, '(?s)function Get-LogObservation\(\[string\]\$Path\) \{.*?\r?\n\}\r?\n')
+  Assert-Check ($functionMatch.Success) "突变测试锚点缺失：未找到 Get-LogObservation 完整函数体"
+  if ($functionMatch.Success) {
+    $legacyFunction = @'
+function Get-LogObservation([string]$Path) {
+  $observation = [pscustomobject]@{ CountsKnown = $false; Counts = $null; CountsReason = "legacy"; TestResultLines = 0; SuiteCount = 0; NestedResultLines = 0; BuildFailed = $false; TestsFailed = $false }
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $observation }
+  $text = Get-Content -LiteralPath $Path -Raw -Encoding utf8
+  if ($text -match 'error\[E[0-9]+\]' -or $text -match 'could not compile') { $observation.BuildFailed = $true }
+  $p = 0; $f = 0; $i = 0; $m = 0; $x = 0; $seen = $false
+  foreach ($match in [regex]::Matches($text, 'test result:\s*(?<verdict>[A-Za-z]+)\.\s*(?<p>\d+)\s+passed;\s*(?<f>\d+)\s+failed;\s*(?<i>\d+)\s+ignored;\s*(?<m>\d+)\s+measured;\s*(?<x>\d+)\s+filtered out')) {
+    $seen = $true
+    $p += [int]$match.Groups['p'].Value; $f += [int]$match.Groups['f'].Value
+    $i += [int]$match.Groups['i'].Value; $m += [int]$match.Groups['m'].Value; $x += [int]$match.Groups['x'].Value
+    if ($match.Groups['verdict'].Value -eq 'FAILED') { $observation.TestsFailed = $true }
+  }
+  if ($seen) {
+    $observation.CountsKnown = $true
+    $observation.Counts = [ordered]@{ passed = $p; failed = $f; ignored = $i; measured = $m; filtered = $x }
+    $observation.TestResultLines = ([regex]::Matches($text, 'test result:')).Count
+  }
+  if ($f -gt 0) { $observation.TestsFailed = $true }
+  return $observation
+}
+'@
+    $legacyCollector = Join-Path $tempRoot 'collect-ci-evidence-legacy.ps1'
+    $legacyText = $collectorText.Substring(0, $functionMatch.Index) + $legacyFunction + $collectorText.Substring($functionMatch.Index + $functionMatch.Length)
+    Set-Content -LiteralPath $legacyCollector -Value $legacyText -Encoding utf8 -NoNewline
+
+    $shapeLegacy = Invoke-LogShapeStage 'nested-legacy' $nestedLogBody 0 $legacyCollector
+    Assert-Check ($null -ne $shapeLegacy.Record) "旧实现突变体必须能产出阶段记录"
+    if ($null -ne $shapeLegacy.Record) {
+      Assert-Check ($shapeLegacy.Record.countsKnown -eq $true) "旧实现确实会把嵌套行当计数（否则该回归无意义）"
+      Assert-Check ($shapeLegacy.Record.counts.passed -eq 147) "旧实现对同一日志给出 147（138+9），证明差异可稳定复现（实际 $($shapeLegacy.Record.counts.passed)）"
+    }
+  }
+
+  # 合法顶层筛选：单套件只有一条 result 时 filtered>0 仍必须正确计数。
+  $shapeFiltered = Invoke-LogShapeStage 'single-filtered' @'
+running 8 tests
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.10s
+'@
+  if ($null -ne $shapeFiltered.Record) {
+    Assert-Check ($shapeFiltered.Record.countsKnown -eq $true) "单套件单条 result 必须可计数"
+    Assert-Check ($shapeFiltered.Record.counts.passed -eq 5 -and $shapeFiltered.Record.counts.filtered -eq 3) "合法顶层 filtered 必须原样计入（实际 $($shapeFiltered.Record.counts | ConvertTo-Json -Compress)）"
+    Assert-Check ($shapeFiltered.Record.countsReason -eq 'single_suite') "无边界但仅一条 result 应标记 single_suite"
+  }
+
+  # 无足够边界的多行形状：宁可未知。
+  $shapeAmbiguous = Invoke-LogShapeStage 'unattributed' @'
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s
+'@
+  if ($null -ne $shapeAmbiguous.Record) {
+    Assert-Check ($shapeAmbiguous.Record.countsKnown -eq $false -and $null -eq $shapeAmbiguous.Record.counts) "无套件边界的多行不得猜总数"
+    Assert-Check ($shapeAmbiguous.Record.countsReason -eq 'unattributed_test_result_lines') "无边界多行原因必须稳定（实际 $($shapeAmbiguous.Record.countsReason)）"
+  }
+
+  # 套件边界之前的 result 行无法归属。
+  $shapeOutside = Invoke-LogShapeStage 'outside' @'
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s
+   Running tests/a.rs (target/debug/deps/a-d)
+
+running 2 tests
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s
+'@
+  if ($null -ne $shapeOutside.Record) {
+    Assert-Check ($shapeOutside.Record.countsKnown -eq $false) "边界外 result 行不得参与累加"
+    Assert-Check ($shapeOutside.Record.countsReason -eq 'result_outside_suite_boundary') "边界外原因必须稳定（实际 $($shapeOutside.Record.countsReason)）"
+  }
+
+  # 未知计数不得掩盖真实失败：嵌套 + 退出码 101 + FAILED 必须仍判 test_failed。
+  $shapeNestedFailed = Invoke-LogShapeStage 'nested-failed' @'
+   Running tests\wl.rs (target\debug\deps\wl-c.exe)
+
+running 3 tests
+running 1 test
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.02s
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.4s
+'@ 101
+  if ($null -ne $shapeNestedFailed.Record) {
+    Assert-Check ($shapeNestedFailed.Record.status -eq 'test_failed') "计数未知不得掩盖测试失败（实际 $($shapeNestedFailed.Record.status)）"
+    Assert-Check ($shapeNestedFailed.Record.countsKnown -eq $false -and $null -eq $shapeNestedFailed.Record.counts) "失败时计数仍应保持未知而非伪造"
+  }
+
+  # 编译中断：计数未知 + build_failed，而不是测试失败。
+  $shapeBuild = Invoke-LogShapeStage 'build' @'
+   Compiling soxu-git v0.1.0
+
+error[E0432]: unresolved import
+error: could not compile soxu-git (lib) due to 2 previous errors
+'@ 101
+  if ($null -ne $shapeBuild.Record) {
+    Assert-Check ($shapeBuild.Record.status -eq 'build_failed') "编译中断必须识别为 build_failed（实际 $($shapeBuild.Record.status)）"
+    Assert-Check ($shapeBuild.Record.countsKnown -eq $false -and $null -eq $shapeBuild.Record.counts) "编译中断不得产出计数"
+  }
+
+  # 真实 Stage → Finalize → Evidence 往返：嵌套日志产出的未知计数阶段必须被契约接受，
+  # 且不得被当成数字使用（未知是合法显式表态，但仍无法冒充顶层汇总）。
+  if ($null -ne $shapeNested.Record) {
+    $nestedRunDir = $shapeNested.Dir
+    $nestedFetchLog = Join-Path $nestedRunDir 'fetch.log'
+    $nestedClippyLog = Join-Path $nestedRunDir 'clippy.log'
+    Set-Content -LiteralPath $nestedFetchLog -Value 'Updating crates.io index' -Encoding utf8 -NoNewline
+    Set-Content -LiteralPath $nestedClippyLog -Value 'Finished dev profile' -Encoding utf8 -NoNewline
+    $nestedStagesPath = Join-Path $nestedRunDir 'stages-rt.json'
+    foreach ($stageSpec in @(
+        @{ Name = 'cargo-fetch'; Log = $nestedFetchLog },
+        @{ Name = 'cargo-clippy'; Log = $nestedClippyLog }
+      )) {
+      $null = Invoke-Script $collectorPath @('-Mode', 'Stage', '-StagesPath', $nestedStagesPath, '-Name', $stageSpec.Name, '-ExitCode', '0', '-LogPath', $stageSpec.Log)
+    }
+    # 嵌套测试阶段（复用同一日志，仍不可归属）
+    $null = Invoke-Script $collectorPath @('-Mode', 'Stage', '-StagesPath', $nestedStagesPath, '-Name', 'cargo-test', '-ExitCode', '0', '-LogPath', $shapeNested.LogPath)
+
+    $nestedEvidencePath = Join-Path $nestedRunDir 'evidence.json'
+    $nestedFinalize = Invoke-Script $collectorPath @(
+      '-Mode', 'Finalize', '-StagesPath', $nestedStagesPath, '-OutputPath', $nestedEvidencePath,
+      '-Kind', 'platform', '-Platform', 'windows',
+      '-RunnerLabel', 'windows-2025', '-Os', 'Windows', '-Arch', 'X64',
+      '-RunId', $script:testRunId, '-RunAttempt', $script:testAttempt,
+      '-Repository', 'TanCan1998/Soxu', '-EventName', 'pull_request',
+      '-BaseSha', (("b" * 40) -join ""), '-HeadSha', (("c" * 40) -join ""),
+      '-CheckoutSha', $script:testSha,
+      '-WorkflowRef', 'stub/mirror/.github/workflows/ci.yml@refs/heads/main',
+      '-PlanJson', $evPlan, '-ResultStatus', 'passed',
+      '-StartedAt', $script:testStageStarted, '-CompletedAt', $script:testStageCompleted
+    )
+    Assert-Check ($nestedFinalize.Code -eq 0) "嵌套日志的 Finalize 必须成功（实际 exit $($nestedFinalize.Code)：$($nestedFinalize.Output.Trim())）"
+    if (Test-Path -LiteralPath $nestedEvidencePath) {
+      $nestedDoc = (Get-Content -LiteralPath $nestedEvidencePath -Raw -Encoding utf8) | ConvertFrom-Json -Depth 20
+      $nestedTestStage = @($nestedDoc.stages | Where-Object { $_.name -eq 'cargo-test' })[0]
+      Assert-Check ($null -ne $nestedTestStage -and $nestedTestStage.countsKnown -eq $false -and $null -eq $nestedTestStage.counts) "往返后的证据必须保留“计数未知”事实"
+      Assert-Check ($null -ne $nestedTestStage -and [string]$nestedTestStage.countsReason -eq 'nested_test_result_lines') "证据必须保留脱敏原因"
+      Assert-Pass "证据通过：嵌套日志产生的未知计数阶段被 Evidence 接受" `
+        (Invoke-GateEvidence -PlanJson $evPlan -Documents @($nestedDoc, $goodDocs[1], $goodDocs[2]) -JobsJson $goodJobs)
+    }
   }
 
   # ============ 三·四、矩阵作业的 Verify 逐实例来源 ============

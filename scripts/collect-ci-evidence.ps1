@@ -115,23 +115,103 @@ function Write-Stages([object[]]$Stages) {
 }
 
 # 从 cargo 测试/构建日志里提取真实计数与失败分型。
-# 无法解析计数时保持 countsKnown=false，绝不用 0 冒充“0 项通过”。
+# 计数只接受能可靠归属的 test result 行：同一 Cargo 套件边界内出现多条 test result
+# 说明存在派生进程或输出交错，归属不可靠——此时保持 countsKnown=false、counts=null
+# 并给出稳定脱敏原因，绝不靠“最后一条”“filtered 值”或“子进程通常会被等待”猜顶层。
 function Get-LogObservation([string]$Path) {
   $observation = [pscustomobject]@{
-    CountsKnown = $false
-    Counts      = $null
-    BuildFailed = $false
-    TestsFailed = $false
+    CountsKnown       = $false
+    Counts            = $null
+    CountsReason      = "log_missing"
+    TestResultLines   = 0
+    SuiteCount        = 0
+    NestedResultLines = 0
+    BuildFailed       = $false
+    TestsFailed       = $false
   }
   if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
     return $observation
   }
   $text = Get-Content -LiteralPath $Path -Raw -Encoding utf8
-  if ([string]::IsNullOrEmpty($text)) { return $observation }
+  if ([string]::IsNullOrEmpty($text)) {
+    $observation.CountsReason = "log_empty"
+    return $observation
+  }
 
   # 编译中断：Rust 报错前缀或“could not compile”出现在输出里。
+  # 这与计数是否可知无关，未知计数不能掩盖失败。
   if ($text -match 'error\[E[0-9]+\]' -or $text -match 'could not compile') {
     $observation.BuildFailed = $true
+  }
+
+  # Cargo 只在顶层打印套件边界；段内多条 test result 即派生进程输出。
+  # Windows 上 cargo 打印 Running tests\\x.rs，Linux 上为 tests/x.rs，两者都必须识别。
+  $suitePattern = '^\s*(?:Running unittests |Running tests[/\\]|Doc-tests )'
+  $resultPattern = 'test result:\s*(?<verdict>[A-Za-z]+)\.\s*(?<p>\d+)\s+passed;\s*(?<f>\d+)\s+failed;\s*(?<i>\d+)\s+ignored;\s*(?<m>\d+)\s+measured;\s*(?<x>\d+)\s+filtered out'
+
+  $segments = [System.Collections.Generic.List[object]]::new()
+  $outsideResults = [System.Collections.Generic.List[object]]::new()
+  $current = $null
+  $totalResultLines = 0
+  foreach ($line in ($text -split "`r?`n")) {
+    if ($line -match $suitePattern) {
+      $current = [pscustomobject]@{ Results = [System.Collections.Generic.List[object]]::new() }
+      $segments.Add($current)
+      continue
+    }
+    $match = [regex]::Match($line, $resultPattern)
+    if (-not $match.Success) { continue }
+    $totalResultLines++
+    $row = [pscustomobject]@{
+      Passed   = [int]$match.Groups['p'].Value
+      Failed   = [int]$match.Groups['f'].Value
+      Ignored  = [int]$match.Groups['i'].Value
+      Measured = [int]$match.Groups['m'].Value
+      Filtered = [int]$match.Groups['x'].Value
+      Verdict  = $match.Groups['verdict'].Value
+    }
+    if ($row.Verdict -eq 'FAILED') { $observation.TestsFailed = $true }
+    if ($null -eq $current) { $outsideResults.Add($row) } else { $current.Results.Add($row) }
+  }
+  $observation.TestResultLines = $totalResultLines
+  $observation.SuiteCount = $segments.Count
+
+  $rows = [System.Collections.Generic.List[object]]::new()
+  $reason = ""
+  if ($segments.Count -eq 0) {
+    # 无套件边界：只有恰好一条 result 才能当作单测试套件的真实汇总。
+    if ($outsideResults.Count -eq 1) {
+      $rows.Add($outsideResults[0])
+    } elseif ($totalResultLines -eq 0) {
+      $reason = "no_test_result_lines"
+    } else {
+      $reason = "unattributed_test_result_lines"
+    }
+  } elseif ($outsideResults.Count -gt 0) {
+    # 边界前的 result 行无法归属任何套件，不猜。
+    $reason = "result_outside_suite_boundary"
+  } else {
+    $nested = 0
+    $ambiguous = $false
+    foreach ($segment in $segments) {
+      if ($segment.Results.Count -eq 0) { continue }
+      if ($segment.Results.Count -eq 1) { $rows.Add($segment.Results[0]); continue }
+      $nested += $segment.Results.Count - 1
+      $ambiguous = $true
+    }
+    $observation.NestedResultLines = $nested
+    if ($ambiguous) {
+      $reason = "nested_test_result_lines"
+    } elseif ($rows.Count -eq 0) {
+      $reason = "no_test_result_lines"
+    }
+  }
+
+  if ($reason -ne "") {
+    $observation.CountsKnown = $false
+    $observation.Counts = $null
+    $observation.CountsReason = $reason
+    return $observation
   }
 
   $passed = 0
@@ -139,26 +219,22 @@ function Get-LogObservation([string]$Path) {
   $ignored = 0
   $measured = 0
   $filtered = 0
-  $seen = $false
-  foreach ($match in [regex]::Matches($text, 'test result:\s*(?<verdict>[A-Za-z]+)\.\s*(?<p>\d+)\s+passed;\s*(?<f>\d+)\s+failed;\s*(?<i>\d+)\s+ignored;\s*(?<m>\d+)\s+measured;\s*(?<x>\d+)\s+filtered out')) {
-    $seen = $true
-    $passed += [int]$match.Groups['p'].Value
-    $failed += [int]$match.Groups['f'].Value
-    $ignored += [int]$match.Groups['i'].Value
-    $measured += [int]$match.Groups['m'].Value
-    $filtered += [int]$match.Groups['x'].Value
-    if ($match.Groups['verdict'].Value -eq 'FAILED') { $observation.TestsFailed = $true }
+  foreach ($row in $rows) {
+    $passed += $row.Passed
+    $failed += $row.Failed
+    $ignored += $row.Ignored
+    $measured += $row.Measured
+    $filtered += $row.Filtered
   }
-  if ($seen) {
-    $observation.CountsKnown = $true
-    $observation.Counts = [ordered]@{
-      passed   = $passed
-      failed   = $failed
-      ignored  = $ignored
-      measured = $measured
-      filtered = $filtered
-    }
-    if ($failed -gt 0) { $observation.TestsFailed = $true }
+  if ($failed -gt 0) { $observation.TestsFailed = $true }
+  $observation.CountsKnown = $true
+  $observation.CountsReason = if ($segments.Count -eq 0) { "single_suite" } else { "suite_bounded" }
+  $observation.Counts = [ordered]@{
+    passed   = $passed
+    failed   = $failed
+    ignored  = $ignored
+    measured = $measured
+    filtered = $filtered
   }
   return $observation
 }
@@ -199,13 +275,18 @@ function Invoke-StageMode {
   }
 
   $record = [ordered]@{
-    name          = Get-SanitizedText $Name
-    command       = Get-SanitizedText $Command
-    status        = $status
-    exitCode      = [int]$ExitCode
-    durationMs    = if ($DurationMs -ge 0) { [int]$DurationMs } else { $null }
-    countsKnown   = [bool]$countsKnown
-    counts        = $counts
+    name             = Get-SanitizedText $Name
+    command          = Get-SanitizedText $Command
+    status           = $status
+    exitCode         = [int]$ExitCode
+    durationMs       = if ($DurationMs -ge 0) { [int]$DurationMs } else { $null }
+    countsKnown      = [bool]$countsKnown
+    counts           = $counts
+    # 计数结论的可审计依据（加法字段）：未知时说明为什么未知。
+    countsReason     = if (-not [string]::IsNullOrWhiteSpace($CountsJson)) { "explicit" } elseif ($null -ne $observation) { [string]$observation.CountsReason } else { "no_log" }
+    testResultLines  = if ($null -ne $observation) { [int]$observation.TestResultLines } else { 0 }
+    suiteCount       = if ($null -ne $observation) { [int]$observation.SuiteCount } else { 0 }
+    nestedResultLines = if ($null -ne $observation) { [int]$observation.NestedResultLines } else { 0 }
   }
 
   $stages = [System.Collections.Generic.List[object]]::new()
