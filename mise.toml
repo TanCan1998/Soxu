@@ -10,7 +10,7 @@ pnpm = "12.21.0"
 
 [env]
 # 跨主工作区与多 Agent Worktree 复用同一构建缓存目录（避免硬编码个人盘符路径且节省数十 GB 空间）
-CARGO_TARGET_DIR = "{{ config_root }}/../.cargo-target/soxu"
+CARGO_TARGET_DIR = "{{ config_root }}/target"
 # 统一使用 mise 锁定的 pnpm 版本，禁止按 packageManager 字段自动下载旧版
 PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS = "false"
 
