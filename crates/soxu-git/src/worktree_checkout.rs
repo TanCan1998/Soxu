@@ -1,6 +1,7 @@
 //! 对持久注册请求执行一次受控检出。
 
 use std::io;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -86,6 +87,16 @@ pub(crate) fn is_checkout_verified(
     let status = journal::read(state_root.path(), request_id)?;
     state_root.refresh()?;
     Ok(status == CheckoutStatus::Verified)
+}
+
+/// 只读读取单条检出留痕；供恢复预览复用同一持久日志。
+pub(crate) fn read_checkout_journal(
+    state_root: &Path,
+    request_id: &str,
+) -> Result<CheckoutStatus, io::Error> {
+    validate_request_id(request_id)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+    journal::read(state_root, request_id)
 }
 
 impl GitProbe {
