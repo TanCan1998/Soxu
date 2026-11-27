@@ -861,7 +861,7 @@ fn rewrite_intent(
     state::rewrite_intent(state_root, &bytes, &intent.request_id)
 }
 
-fn read_intents(
+pub(crate) fn read_intents(
     state_root: &AuthorizedDirectory,
 ) -> Result<Vec<PersistentIntent>, WorktreeLifecycleError> {
     let Some(intents) = state::read_intents_directory(state_root)? else {

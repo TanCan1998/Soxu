@@ -10,6 +10,7 @@ mod repository_create;
 mod status;
 mod worktree_checkout;
 mod worktree_lifecycle;
+mod worktree_recovery;
 mod worktrees;
 
 pub use checkpoint::{
@@ -41,6 +42,15 @@ pub use worktree_lifecycle::{
     ExecutionRecord, ExecutionResult, ExecutionStage, PersistentIntent, RegistrationObservation,
     RegistrationOutcome, TargetState, VerifiedRegistration, WorktreeLifecycleError,
     WorktreeRegistrationCoordinator, WorktreeRegistrationRequest,
+};
+
+pub use worktree_recovery::{
+    EvidenceGap, ObservedWorktreeState, PartialCleanupPreview, PartialCleanupRejection,
+    PartialCleanupScope, PreviewObservation, PreviewOutcome, PrunePreview, PrunePreviewCandidate,
+    PruneRejection, RecoveryOperation, RecoveryPreviewError, RecoveryPreviewRequest,
+    RemoveRegistrationPreview, RemoveRegistrationRejection, RemoveRegistrationScope, RepairPreview,
+    RepairPreviewCandidate, RepairRejection, UnlockPreview, UnlockPreviewCandidate,
+    UnlockRejection, WorktreeObservationKind,
 };
 
 pub use worktrees::{

@@ -2,6 +2,19 @@
 
 M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控检出。M3d 提供已跟踪文件的四种只读 Diff，以及只接受已授权 Checkpoint 或完整本地提交的固定端点双端 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
 
+## Worktree 只读恢复预览（M3 #57-2）
+
+`GitProbe::recovery_preview(RecoveryPreviewRequest)` 为 `unlock`、`repair`、`prune`、移除注册与清理部分落盘五类恢复操作建立只读预览契约：输出候选身份、影响对象、证据缺口与不确定性，供宿主生成二次授权摘要。本模块零写入、零推断性自愈；执行与持久日志属后续工作包（`execute.rs` / `journal.rs`）。
+
+- **观察状态**：`recovery_preview` 复用 `open_local_project` + `list_worktrees` 建立快照，把设计文档第 5 节表格的全部观察状态分类为 `WorktreeObservationKind`：有效保护锁（清单 `locked` 且授权目标确认为可达目录）、疑似孤立锁（有锁但无目标/意图证据）、prunable 或路径不可达、卷离线与身份漂移、`Unavailable`/bare/HEAD 异常、`Prepared`/`Started` 结果未定、`Pending`/`Disabled` 检出。证据缺口用 `EvidenceGap` 逐项记录，不推断注册路径的存在性或健康度。
+- **unlock 预览**：绑定唯一 linked 注册、原始锁理由字节与失去锁保护的影响说明。无 linked 注册、无锁或锁租约证据不足（未知所有者、卷离线、记录不一致）时分别拒绝，保留锁。
+- **repair 预览**：原生命令不提供 dry-run 也不支持按候选过滤；预览只在「prunable 候选可绑定显式授权目录目标」时给出候选集合，多候选或存在未授权的 prunable 注册时以 `ScopeUnbounded` 明确拒绝范围界定。
+- **prune 预览**：以固定默认过期策略执行 `worktree prune --dry-run --verbose`（禁 `--expire=now`），候选记录逐字节保留（实测 Git for Windows 2.56 把候选清单输出到 stderr、退出码 0），并附预览后完整清单供执行前漂移比对。存在无法确认在线状态的锁定注册时拒绝授权——锁定的失联注册不出现在 prune 候选中，须先裁决锁归属。
+- **移除注册预览**：区分失联注册（只走受控 prune，禁止手工删除管理目录）与在线 linked 工作树；在线判定要求授权目标确认为目录，清洁度复用源仓库 `status` 快照，锁保护或清洁度无法证明时拒绝。
+- **清理部分落盘预览**：绑定请求 ID，只读回查协调域意图与检出留痕；执行结果未定（`Prepared`/`Started`/`Unknown`）时禁止清理；目标缺失且无异议时才允许进入授权，目录存在或含其他内容时按归属无法证明拒绝。
+- **可见性最小扩围（主控裁决放行）**：`worktree_lifecycle::read_intents` 改为 `pub(crate)`、`worktree_checkout` 新增 `pub(crate) read_checkout_journal` 只读访问器，供预览复用既有持久日志解码；不改持久格式、行为或签名语义。
+- 验证：`tests/worktree_recovery_preview.rs` 在 Windows 以真实 Git 夹具覆盖有效保护锁、疑似孤立锁拒绝、prune 候选与锁定裁决拒绝、repair 范围拒绝、在线干净/失联移除分类、请求 ID 绑定与未知请求拒绝、相对路径/普通目录拒绝；每个预览前后对夹具整树快照断言零写入。Linux 专属 HEAD 损坏用例由 Unix 门控执行。
+
 ## 轮次 Checkpoint
 
 调用方用 `CheckpointScope::new()` 创建工作区和会话的私有作用域，并把同一作用域用于该会话后续轮次。`GitProbe::capture_checkpoint(root, &options)` 接收工作树根、轮次和既有的应用独占状态目录。状态目录须在工作树及 Git 元数据之外。Linux 上目录须拒绝组和其他用户访问，Windows 上由宿主提供独占 ACL。同一应用使用同一状态目录协调工作树锁。调用方可从 `CheckpointRecord::summary()` 取得既有的四字段摘要，`changed_files` 统计基树与捕获树之间禁用 rename 配对后的变更路径数。
