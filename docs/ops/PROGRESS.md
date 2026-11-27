@@ -130,7 +130,21 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 | :--- | :--- | :--- | :--- |
 | `#90` 原生矩阵冻结源码热修复 | `fix/native-matrix-blockers` / `wks_4e0ff3d28c954665` | 第二轮有界修订已提交，待主控独立复验与锁 SHA 合入（与 `#88` 并行，不改 CI 工作流/脚本） | `soxu-git/src/repository_create/platform.rs`（最小条件编译/告警修正）、`soxu-git/tests/diff.rs`（夹具隔离、有界维护回归）、本看板、`LESSONS.md`、本分支 AOCI |
 
+#### 在办热修复：Darwin Daemon 测试导入（`#94`）
+
+| Issue / 任务 | 分支 / Paseo 工作区 | 状态 | Owned Paths |
+| :--- | :--- | :--- | :--- |
+| `#94` Darwin Daemon 测试导入热修复 | `fix/94-daemon-darwin-test-imports` / `wks_fa74a88079bc342e` | 本地候选已提交，待主控独立复验与推送；Darwin 原生回退证据待 `#88` 合流后的真实 `macos-15` Runner 补齐 | `crates/soxu-daemon/tests/worktree_lifecycle.rs`（最小平台导入）、本看板、`LESSONS.md` 的 `L-013`、本分支 AOCI |
+
+`#89` head `3db8969` 的 run `45929401718`（attempt 1，Darwin job `140278345298`）在 `Run Clippy` 报 `crates/soxu-daemon/tests/worktree_lifecycle.rs` 三处 `unused import`：`state::WorktreeAdmissionRequest`、`soxu_git::GitProbe`、`WORKTREE_CONTEXT_FILE`，测试步骤 skipped（证据记录为 `build_failed`，并非测试失败或原生通过）。三个符号的**全部**使用点只落在 `#[cfg(windows)]` 的系统拒绝用例与 `#[cfg(target_os = "linux")]` 的 `linux` 模块内，macOS 编译面一处也没有。修复保持最小：把三者从顶层无条件 `use` 移出，改为与用例同口径的 `#[cfg(any(windows, target_os = "linux"))]` 单条导入，测试体、断言、`Unsupported`/`UnsupportedFilesystem` 与权限边界一字未改，未加 `#[allow]`、未删用例、未屏蔽任何测试目标。
+
 ### 3.2 已合入交付与验收证据边界
+
+- `#94` Darwin Daemon 测试导入热修复的本地验收边界（基线 `354fbd7`，已含 `#90` 的原生矩阵热修复；与 `#88` 并行，仅动测试文件导入面）：
+  - **Windows**（Rust `1.99.1`，独立 `CARGO_TARGET_DIR=F:/workplace/Paseo/work/.cargo-target/soxu-94-daemon-darwin`）：`cargo fmt --all -- --check` 与 `cargo clippy -p soxu-daemon --all-targets --locked -- -D warnings` 均 `exit 0`；`cargo test -p soxu-daemon --test worktree_lifecycle --locked` `3 passed`（`2` 无条件 + `1` 个 `#[cfg(windows)]` 用例）；`pwsh -NoProfile -File scripts/check-all.ps1 -BaseRef origin/main` `exit 0`，按所选范围各步均通过：`[1/7]` 提交历史与隐私、`[4/7]` fmt、`[5/7]` 增量 Clippy、`[6/7]` 增量测试实际执行，`[2/7]` 设计令牌同源、`[3/7]` 设计规范与 Paseo 编排回归、`[7/7]` 移动端 Web/PWA 构建均**按计划跳过**（未触及对应前端、设计系统与脚本）。
+  - **WSL `Ubuntu 26.04.1`**（x86_64，独立 `CARGO_TARGET_DIR=/root/.cache/soxu-94-daemon-darwin`）：因 WSL 侧 `mise.toml` 未 trust，改用实体工具链 `/root/.rustup/toolchains/1.99.1-x86_64-unknown-linux-gnu/bin` 与实体 `node 26.13.1` `bin`（`rustc`/`cargo` 均为 `1.99.1`），未执行 `mise trust`；`cargo clippy -p soxu-daemon --all-targets --locked -- -D warnings` `exit 0`（`19s`），`worktree_lifecycle` `8 passed`（`2` 无条件 + `6` 个 `linux` 模块用例），均以 `${PIPESTATUS[0]}` 取真实退出码；未在 WSL 内对 Windows `.git` 工作树执行 `git`。该轮范围为主控指定的 `soxu-daemon` 包，主控的全 workspace 验证另记。
+  - **Darwin：交叉未完成，真机未验。** `cargo clippy --target aarch64-apple-darwin -p soxu-daemon --all-targets --locked -- -D warnings` `exit 101`，停在 `libsqlite3-sys` 的 `cc-rs`：`failed to find tool "cc": program not found`。这是 C 工具链/SDK 边界，**不是**测试目标 Clippy 已通过的证据；本轮未装 SDK 或交叉编译器、未改依赖，亦不描述为原生通过。真实 Darwin 回退证据（原错误 + 修复后同一目标 Clippy）待 `#88` 合流后的 `macos-15` ARM64 Runner 补齐。
+  - **双平台通过不等于 Darwin 通过**：macOS 编译面保留的是无条件顶层代码，不含 `#[cfg(windows)]` 用例与 `#[cfg(target_os = "linux")]` 模块。Windows 与 Linux 的 `--all-targets` Clippy 全绿只证明各自编译面干净，**不**是 Darwin lint 证据；对三符号逐处比对使用点（确认其使用点只落在已门控的用例与模块内）只是定位手段，不能替代 Darwin 原生验证。
 
 - M3b（`#39` / PR `#41`）已合入 `7cea1c4`，交付 `GitProbe::open_local_project`，规范化显式绝对目录，返回 `LocalProject::Directory` 或 `LocalProject::GitWorktree(WorktreeIdentity)`。根与子目录归于同一工作树；linked worktree 保留独立工作树根、Git 目录及共享 common dir。bare、损坏仓库、Git 元数据目录和权限错误不得降级普通目录。打开仅查身份，不扫描完整 status，不初始化、克隆、创建工作树或写入。`cargo test -p soxu-git` 25 项专项通过（其中本地项目夹具 5 项），根依赖、协议和 M3a 公开契约保持不变。
 

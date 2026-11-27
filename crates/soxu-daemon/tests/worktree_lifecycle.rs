@@ -1,7 +1,6 @@
-use soxu_daemon::{DaemonState, SqliteStore, build_router, state::WorktreeAdmissionRequest};
+use soxu_daemon::{DaemonState, SqliteStore, build_router};
 use soxu_drivers::{NativeCliKind, NativeDriver};
-use soxu_git::GitProbe;
-use soxu_magpie::{EnvironmentMode, WORKTREE_CONTEXT_FILE};
+use soxu_magpie::EnvironmentMode;
 use soxu_protocol::{
     ActiveTurnBehavior, ErrorCode, PermissionLevel, ProjectSummary, RpcCommand, RpcRequest,
     RpcResponse, RpcResultData, SessionSummary, SessionTarget, WorkspaceBucket, WorkspaceIsolation,
@@ -17,6 +16,13 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+
+#[cfg(any(windows, target_os = "linux"))]
+use soxu_daemon::state::WorktreeAdmissionRequest;
+#[cfg(any(windows, target_os = "linux"))]
+use soxu_git::GitProbe;
+#[cfg(any(windows, target_os = "linux"))]
+use soxu_magpie::WORKTREE_CONTEXT_FILE;
 
 fn daemon(repository: &Path) -> DaemonState {
     daemon_with_environment(repository, None, EnvironmentMode::StandaloneNative)
