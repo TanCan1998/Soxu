@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-27T08:08:00Z",
+  "updated_at": "2026-11-27T10:21:34Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "0df88a020b82916217cf7b34b34d151d0f1d1096791fc235e9d614b1366ab68f",
-      "size": 92357,
-      "normalized_sha256": "0df88a020b82916217cf7b34b34d151d0f1d1096791fc235e9d614b1366ab68f"
+      "sha256": "80505ac5a9631ce457ee6d4fcb4035b2b68ec1b35a2f6091f157cffaf7269578",
+      "size": 92416,
+      "normalized_sha256": "80505ac5a9631ce457ee6d4fcb4035b2b68ec1b35a2f6091f157cffaf7269578"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -851,21 +851,21 @@
     },
     "crates/soxu-git/tests/fixed_diff.rs": {
       "role": "observe",
-      "sha256": "7ca4b4dc3ef01cfd5b93606311c4289a22af85e9f105644cff9b572d286ef37b",
-      "size": 25745,
-      "normalized_sha256": "7ca4b4dc3ef01cfd5b93606311c4289a22af85e9f105644cff9b572d286ef37b"
+      "sha256": "1d3c78df07387c6e3bf0660368e3dd5fb644de8be8455133c4177e14eafdd03a",
+      "size": 25872,
+      "normalized_sha256": "1d3c78df07387c6e3bf0660368e3dd5fb644de8be8455133c4177e14eafdd03a"
     },
     "crates/soxu-git/tests/probe.rs": {
       "role": "observe",
-      "sha256": "44fda890c23a841530c301dfd56764b3cb876b384cbe90f8a4c3f0380a2bfe44",
-      "size": 19360,
-      "normalized_sha256": "44fda890c23a841530c301dfd56764b3cb876b384cbe90f8a4c3f0380a2bfe44"
+      "sha256": "023f38788880328b571073ff5aa0aaaf0955cf8452167d324c8665541aff1b8e",
+      "size": 33557,
+      "normalized_sha256": "023f38788880328b571073ff5aa0aaaf0955cf8452167d324c8665541aff1b8e"
     },
     "crates/soxu-git/tests/project.rs": {
       "role": "observe",
-      "sha256": "ca8b2f0714d11d0c8631c871c2543af29bfa03a8a1f55f1697ab512b77984a28",
-      "size": 13338,
-      "normalized_sha256": "ca8b2f0714d11d0c8631c871c2543af29bfa03a8a1f55f1697ab512b77984a28"
+      "sha256": "5e59c4f2b3ade293f802b5a42396634e42b36b911d392211544b99444b668c54",
+      "size": 13517,
+      "normalized_sha256": "5e59c4f2b3ade293f802b5a42396634e42b36b911d392211544b99444b668c54"
     },
     "crates/soxu-git/tests/repository_create.rs": {
       "role": "observe",
@@ -893,9 +893,9 @@
     },
     "crates/soxu-git/tests/worktrees.rs": {
       "role": "observe",
-      "sha256": "18383df5aac911543252ee2676ab7c936830e3efddccb005940126763f0b4d95",
-      "size": 22976,
-      "normalized_sha256": "18383df5aac911543252ee2676ab7c936830e3efddccb005940126763f0b4d95"
+      "sha256": "1796c24e14f232dd826f81f8196aba6faa9be9386fc700cc817f923790731ff5",
+      "size": 23155,
+      "normalized_sha256": "1796c24e14f232dd826f81f8196aba6faa9be9386fc700cc817f923790731ff5"
     },
     "crates/soxu-magpie/Cargo.toml": {
       "role": "index",
@@ -1139,15 +1139,15 @@
     },
     "docs/ops/LESSONS.md": {
       "role": "index",
-      "sha256": "3d91f10ab81f3db7ef0f842a7b7c76c79b8272a8900926d32c0151f646e10679",
-      "size": 31649,
-      "normalized_sha256": "3d91f10ab81f3db7ef0f842a7b7c76c79b8272a8900926d32c0151f646e10679"
+      "sha256": "986ff6f875a939e4a5c1a61a947db2db1324959ae03cd4a41c4e6e856b58c501",
+      "size": 33754,
+      "normalized_sha256": "986ff6f875a939e4a5c1a61a947db2db1324959ae03cd4a41c4e6e856b58c501"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "0ceb68f20112d80a704399492dec0a3cf8389b20222f24b6fb44896bb6c49f04",
-      "size": 66169,
-      "normalized_sha256": "0ceb68f20112d80a704399492dec0a3cf8389b20222f24b6fb44896bb6c49f04"
+      "sha256": "6c61ae53765abf6c89dd2f2f6196e294dc050c42954f005e5ec03bc2de6bc72b",
+      "size": 74162,
+      "normalized_sha256": "6c61ae53765abf6c89dd2f2f6196e294dc050c42954f005e5ec03bc2de6bc72b"
     },
     "docs/user/getting-started.md": {
       "role": "index",
