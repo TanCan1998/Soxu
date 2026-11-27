@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-27T07:39:47Z",
+  "updated_at": "2026-11-27T07:59:09Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "4133c3313c5d57fe93a5319328e4dfebe97f7cb578de32ab91a4877e05132014",
-      "size": 92329,
-      "normalized_sha256": "4133c3313c5d57fe93a5319328e4dfebe97f7cb578de32ab91a4877e05132014"
+      "sha256": "c84ca657d8aee02191cedac376e2fe0c8c9d85688665daafe4d4eae09cc4d669",
+      "size": 92357,
+      "normalized_sha256": "c84ca657d8aee02191cedac376e2fe0c8c9d85688665daafe4d4eae09cc4d669"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -869,9 +869,9 @@
     },
     "crates/soxu-git/tests/repository_create.rs": {
       "role": "observe",
-      "sha256": "8b9d1dea39209d72669a84464f88169f58c28d2c4acf7a1d7f250bc197192bee",
-      "size": 47785,
-      "normalized_sha256": "8b9d1dea39209d72669a84464f88169f58c28d2c4acf7a1d7f250bc197192bee"
+      "sha256": "9d1ebb3dae1ad3855ad095e0e4d0cbe876ecbf27d3556d00fa435fa21c9f84f3",
+      "size": 55925,
+      "normalized_sha256": "9d1ebb3dae1ad3855ad095e0e4d0cbe876ecbf27d3556d00fa435fa21c9f84f3"
     },
     "crates/soxu-git/tests/status.rs": {
       "role": "observe",
@@ -1139,15 +1139,15 @@
     },
     "docs/ops/LESSONS.md": {
       "role": "index",
-      "sha256": "94fb54dcedfc7004f293b6f5c77c3ab8aae23bf4d9699761ab2ebdaa4603b5d9",
-      "size": 30471,
-      "normalized_sha256": "94fb54dcedfc7004f293b6f5c77c3ab8aae23bf4d9699761ab2ebdaa4603b5d9"
+      "sha256": "c34ed7531f9907ac076ef5140df321e3a8fc3501f19933bf584797c082742877",
+      "size": 31652,
+      "normalized_sha256": "c34ed7531f9907ac076ef5140df321e3a8fc3501f19933bf584797c082742877"
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "4acbaffb83c45cc4805e74540e21365f340dba5c7168c9aadee5a470cb933e1f",
-      "size": 59161,
-      "normalized_sha256": "4acbaffb83c45cc4805e74540e21365f340dba5c7168c9aadee5a470cb933e1f"
+      "sha256": "6d7de145d2412ffcfae4a26b32ab0e1d7a468e508d51b83c65d17049667d623c",
+      "size": 65655,
+      "normalized_sha256": "6d7de145d2412ffcfae4a26b32ab0e1d7a468e508d51b83c65d17049667d623c"
     },
     "docs/user/getting-started.md": {
       "role": "index",
