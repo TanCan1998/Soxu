@@ -19,11 +19,11 @@ const buttonVariants = cva(
           "bg-[var(--soxu-semantic-danger-soft)] text-[var(--soxu-semantic-danger)] border border-[var(--soxu-semantic-danger-border)] hover:brightness-110",
       },
       size: {
-        default: "h-8 px-3",
-        sm: "h-7 px-2.5 text-[11.5px] soxu-hit-44",
+        default: "h-9 px-3.5",
+        sm: "h-8 px-3 text-xs soxu-hit-44",
         lg: "h-12 px-4 text-sm rounded-xl",
-        icon: "h-8 w-8 rounded-full soxu-hit-44",
-        "icon-sm": "h-7 w-7 rounded-md soxu-hit-44",
+        icon: "h-9 w-9 rounded-full soxu-hit-44",
+        "icon-sm": "h-8 w-8 rounded-lg soxu-hit-44",
       },
     },
     defaultVariants: {

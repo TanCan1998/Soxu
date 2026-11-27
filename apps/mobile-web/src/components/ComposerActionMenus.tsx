@@ -1,6 +1,7 @@
 import {
   AtSign,
   Check,
+  ChevronDown,
   Compass,
   Eye,
   FileCode2,
@@ -106,6 +107,13 @@ const PERM_TONE_SURFACE: Record<"neutral" | "accent" | "warning" | "danger", str
   danger: "border-[var(--soxu-semantic-danger)]/45 bg-[var(--soxu-semantic-danger-soft)] hover:border-[var(--soxu-semantic-danger)]/75",
 };
 
+const PERM_TONE_TEXT: Record<"neutral" | "accent" | "warning" | "danger", string> = {
+  neutral: "text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)]",
+  accent: "text-[var(--soxu-semantic-accent)]",
+  warning: "text-[var(--soxu-semantic-warning)]",
+  danger: "text-[var(--soxu-semantic-danger)]",
+};
+
 /**
  * 输入框内部上方挂载的结构化上下文与移交标签条（参考 Agy 桌面端）。
  */
@@ -199,9 +207,9 @@ export function ComposerPlusMenu({ hasWorkspace, onAddChip }: ComposerPlusMenuPr
               <button
                 type="button"
                 aria-label={t("composer.addMore")}
-                className="soxu-hit-44 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--soxu-surface-control)] hover:bg-[var(--soxu-interaction-selected)] text-[var(--soxu-text-primary)] cursor-pointer transition-colors"
+                className="soxu-hit-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-transparent hover:bg-[var(--soxu-interaction-hover)] text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)] cursor-pointer transition-colors"
               >
-                <Plus className="h-4 w-4" strokeWidth={1.75} />
+                <Plus className="h-[18px] w-[18px]" strokeWidth={1.75} />
               </button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
@@ -290,11 +298,12 @@ interface ComposerPermissionButtonProps {
   onSelectPerm: (level: PermissionLevel, label: string) => void;
   onOpenSheet?: () => void;
   isMac?: boolean;
+  showLabel?: boolean;
 }
 
 /**
- * 常驻输入舱操作权限纯图标按钮：
- * 绝不折叠进更多栏，按钮本体仅展示随当前权限档位变化的独立图标，悬浮提供档位说明与快捷键提示。
+ * 常驻输入舱操作权限按钮：
+ * 绝不折叠进更多栏，支持紧凑纯图标模式或参考 Codex 风格的轻量无框文字+图标模式，悬浮提供档位说明与快捷键提示。
  */
 export function ComposerPermissionButton({
   agentId,
@@ -302,19 +311,33 @@ export function ComposerPermissionButton({
   onSelectPerm,
   onOpenSheet,
   isMac = false,
+  showLabel = false,
 }: ComposerPermissionButtonProps) {
   const { t } = useI18n();
   const profile = getAgentProfile(agentId);
   const activeMeta = getPermissionMeta(agentId, permLevel);
   const effectiveLevel = activeMeta.id;
 
-  const triggerButton = (
+  const triggerButton = showLabel ? (
     <button
       type="button"
       onClick={onOpenSheet}
       aria-label={t("composer.permTooltipTitle", { label: activeMeta.label })}
       className={cn(
-        "soxu-hit-44 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border cursor-pointer transition-colors",
+        "soxu-hit-44 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-transparent bg-transparent hover:bg-[var(--soxu-interaction-hover)] cursor-pointer transition-colors text-xs font-medium shrink-0",
+        PERM_TONE_TEXT[activeMeta.tone],
+      )}
+    >
+      <PermissionIcon level={effectiveLevel} />
+      <span className="whitespace-nowrap">{activeMeta.label}</span>
+    </button>
+  ) : (
+    <button
+      type="button"
+      onClick={onOpenSheet}
+      aria-label={t("composer.permTooltipTitle", { label: activeMeta.label })}
+      className={cn(
+        "soxu-hit-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border cursor-pointer transition-colors",
         PERM_TONE_SURFACE[activeMeta.tone],
       )}
     >
@@ -441,7 +464,7 @@ export function ComposerTurnBehaviorGroup({
     <div
       role="group"
       aria-label="回合投递模式"
-      className="inline-flex h-7 items-center gap-1 [@media(pointer:coarse)]:gap-1.5 rounded-full bg-[var(--soxu-surface-control)] border border-[var(--soxu-border-hairline)] p-0.5 shrink-0"
+      className="inline-flex h-8 items-center gap-1 [@media(pointer:coarse)]:gap-1.5 rounded-full bg-[var(--soxu-surface-control)] border border-[var(--soxu-border-hairline)] p-0.5 shrink-0"
     >
       {items.map((item) => {
         const active = mode === item.id;
@@ -455,7 +478,7 @@ export function ComposerTurnBehaviorGroup({
                 aria-label={item.label}
                 aria-pressed={active}
                 className={cn(
-                  "soxu-hit-44 inline-flex h-[22px] w-[22px] [@media(pointer:coarse)]:h-[26px] [@media(pointer:coarse)]:w-[26px] items-center justify-center rounded-full cursor-pointer transition-colors",
+                  "soxu-hit-44 inline-flex h-7 w-7 items-center justify-center rounded-full cursor-pointer transition-colors",
                   active
                     ? item.activeClass
                     : "border border-transparent text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-interaction-hover)]",
@@ -485,6 +508,7 @@ interface ComposerHandoffMenuProps {
   currentModel: string;
   currentThinking: string;
   selectedHandoff?: HandoffSelection;
+  iconOnly?: boolean;
   onSelectHandoff: (chipDraft: Omit<ComposerChip, "id">) => void;
   onClearHandoff: () => void;
   onOpenSheet?: () => void;
@@ -687,13 +711,14 @@ export function HandoffConfigPanel({
 
 /**
  * 可选目标 Agent、模型与思考强度的移交面板：
- * 选中后仅改变按钮自身激活样式（紫色柔底与边框），不改变按钮内部图标(@)与文字(移交)。
+ * 默认以纯净 `@` 图标按钮呈现（iconOnly=true），减少占用空间，激活态显示紫色柔底、边框与角标点，完整配置面板功能不变。
  */
 export function ComposerHandoffMenu({
   currentCli,
   currentModel,
   currentThinking,
   selectedHandoff,
+  iconOnly = true,
   onSelectHandoff,
   onClearHandoff,
   onOpenSheet,
@@ -705,20 +730,38 @@ export function ComposerHandoffMenu({
     ? resolveHandoffDraft(selectedHandoff.targetAgent, selectedHandoff.targetModel, selectedHandoff.targetThinking).label
     : null;
 
-  const triggerBtn = (
+  const triggerBtn = iconOnly ? (
     <button
       type="button"
       onClick={onOpenSheet}
       aria-pressed={Boolean(selectedHandoff)}
       aria-label={t("composer.handoffChoose")}
       className={cn(
-        "soxu-hit-44 inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] border cursor-pointer transition-colors shrink-0",
+        "soxu-hit-44 relative inline-flex items-center justify-center h-8 w-8 rounded-full border cursor-pointer transition-colors shrink-0",
+        selectedHandoff
+          ? "bg-[var(--soxu-semantic-handoff-soft)] border-[var(--soxu-semantic-handoff)]/60 text-[var(--soxu-semantic-handoff)]"
+          : "bg-transparent border-transparent text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-interaction-hover)]",
+      )}
+    >
+      <AtSign className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+      {selectedHandoff && (
+        <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-[var(--soxu-semantic-handoff)]" />
+      )}
+    </button>
+  ) : (
+    <button
+      type="button"
+      onClick={onOpenSheet}
+      aria-pressed={Boolean(selectedHandoff)}
+      aria-label={t("composer.handoffChoose")}
+      className={cn(
+        "soxu-hit-44 inline-flex items-center gap-1 h-8 px-2.5 rounded-full text-[11.5px] border cursor-pointer transition-colors shrink-0",
         selectedHandoff
           ? "bg-[var(--soxu-semantic-handoff-soft)] border-[var(--soxu-semantic-handoff)]/60 text-[var(--soxu-semantic-handoff)] font-medium"
           : "bg-transparent border-transparent text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)]",
       )}
     >
-      <AtSign className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+      <AtSign className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
       <span>{t("composer.handoff")}</span>
     </button>
   );
@@ -759,6 +802,224 @@ export function ComposerHandoffMenu({
           selectedHandoff={selectedHandoff}
           onSelectHandoff={onSelectHandoff}
           onClearHandoff={onClearHandoff}
+          onDone={() => setOpen(false)}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+interface AgentModelConfigPanelProps {
+  cli: string;
+  model: string;
+  thinking: string;
+  onSelectCli: (nextCliId: string) => void;
+  onSelectModel: (nextModelId: string) => void;
+  onSelectThinking: (nextThinking: string) => void;
+  onDone?: () => void;
+}
+
+/**
+ * 代理驱动 + 模型 + 思考强度三合一配置面板（桌面下拉面板与移动端 Sheet 共用）。
+ */
+export function AgentModelConfigPanel({
+  cli,
+  model,
+  thinking,
+  onSelectCli,
+  onSelectModel,
+  onSelectThinking,
+  onDone,
+}: AgentModelConfigPanelProps) {
+  const profile = getAgentProfile(cli);
+  const models = getAgentModels(cli);
+  const activeModelMeta = models.find((m) => m.id === model) ?? models[0];
+
+  return (
+    <div className="space-y-3">
+      {/* 1. 原生代理驱动 */}
+      <div className="space-y-1.5">
+        <div className="text-[11px] font-medium text-[var(--soxu-text-tertiary)]">原生代理驱动</div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {CLI_OPTIONS.map((c) => {
+            const active = cli === c.id;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                disabled={!c.available}
+                onClick={() => onSelectCli(c.id)}
+                className={cn(
+                  "min-h-[38px] flex items-center justify-between gap-1.5 rounded-lg border px-2.5 py-1.5 text-left text-[11.5px] transition-colors",
+                  c.available ? "cursor-pointer" : "opacity-45 cursor-not-allowed",
+                  active
+                    ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)]"
+                    : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-hairline)] text-[var(--soxu-text-secondary)] hover:border-[var(--soxu-border-subtle)] hover:text-[var(--soxu-text-primary)]",
+                )}
+              >
+                <span className="inline-flex items-center gap-1.5 min-w-0">
+                  <AgentIcon agent={c.id} className="h-3.5 w-3.5 shrink-0" />
+                  <span className="soxu-mono font-medium truncate">{c.id}</span>
+                </span>
+                <span className="text-[10px] text-[var(--soxu-text-tertiary)] shrink-0">
+                  {c.available ? `v${c.ver}` : "未装"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <DropdownMenuSeparator className="my-1" />
+
+      {/* 2. 模型选择 */}
+      <div className="space-y-1.5">
+        <div className="text-[11px] font-medium text-[var(--soxu-text-tertiary)]">{profile.displayName} 支持的模型</div>
+        <div className="space-y-1 max-h-40 overflow-y-auto pr-0.5">
+          {models.map((m) => {
+            const active = model === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onSelectModel(m.id)}
+                className={cn(
+                  "w-full min-h-[36px] flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[11.5px] cursor-pointer transition-colors",
+                  active
+                    ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)]"
+                    : "bg-transparent border-[var(--soxu-border-hairline)] text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)]",
+                )}
+              >
+                <span className="soxu-mono truncate">{m.id}</span>
+                <span className="inline-flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] text-[var(--soxu-text-tertiary)]">{m.tier}</span>
+                  {active && <Check className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)]" strokeWidth={2} />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. 思考深度 */}
+      <div className="space-y-1.5">
+        <div className="text-[11px] font-medium text-[var(--soxu-text-tertiary)]">思考深度</div>
+        {profile.supportsThinking ? (
+          <div className="flex flex-wrap gap-1.5">
+            {activeModelMeta.thinkingOptions.map((lv) => {
+              const active = thinking === lv;
+              return (
+                <button
+                  key={lv}
+                  type="button"
+                  onClick={() => onSelectThinking(lv)}
+                  className={cn(
+                    "min-h-[32px] px-3 rounded-full text-[11.5px] border cursor-pointer transition-colors",
+                    active
+                      ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)] text-[var(--soxu-text-primary)] font-semibold"
+                      : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-subtle)] text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)]",
+                  )}
+                >
+                  {THINKING_LABELS[lv] ?? lv}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-[11px] text-[var(--soxu-text-tertiary)]">当前代理驱动由模型自行决策，无需独立配置思考强度</div>
+        )}
+      </div>
+
+      {onDone && (
+        <div className="flex justify-end pt-2 border-t border-[var(--soxu-border-hairline)]">
+          <Button size="sm" variant="default" className="h-8 px-4" onClick={onDone}>
+            完成
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ComposerAgentModelPickerProps {
+  cli: string;
+  model: string;
+  thinking: string;
+  onSelectCli: (nextCliId: string) => void;
+  onSelectModel: (nextModelId: string) => void;
+  onSelectThinking: (nextThinking: string) => void;
+  onOpenSheet?: () => void;
+  className?: string;
+}
+
+/**
+ * 参考 Codex 风格的无外框一体化「驱动图标 + 模型 · 思考强度」组合触发器：
+ * 显著减少胶囊边框与重复文字，同时点击一次即可联动切换原生驱动、模型与思考深度。
+ */
+export function ComposerAgentModelPicker({
+  cli,
+  model,
+  thinking,
+  onSelectCli,
+  onSelectModel,
+  onSelectThinking,
+  onOpenSheet,
+  className,
+}: ComposerAgentModelPickerProps) {
+  const [open, setOpen] = useState(false);
+  const profile = getAgentProfile(cli);
+  const shortModel = model.replace("group/", "").replace("auto/", "");
+  const thinkLabel = profile.supportsThinking ? (THINKING_LABELS[thinking] ?? thinking) : null;
+
+  const triggerBtn = (
+    <button
+      type="button"
+      onClick={onOpenSheet}
+      aria-label={`当前驱动 ${cli}，模型 ${shortModel}${thinkLabel ? `，思考 ${thinkLabel}` : ""}`}
+      className={cn(
+        "soxu-hit-44 inline-flex items-center gap-1.5 h-8 px-2 rounded-lg border border-transparent bg-transparent hover:bg-[var(--soxu-interaction-hover)] min-w-0 max-w-full cursor-pointer text-[12px] transition-colors",
+        className,
+      )}
+    >
+      <AgentIcon agent={cli} className="h-3.5 w-3.5 shrink-0" />
+      <span className="soxu-mono font-medium text-[var(--soxu-text-primary)] truncate">{shortModel}</span>
+      {thinkLabel && <span className="text-[var(--soxu-text-tertiary)] whitespace-nowrap shrink-0">· {thinkLabel}</span>}
+      <ChevronDown className="h-3 w-3 text-[var(--soxu-text-tertiary)] shrink-0" strokeWidth={1.75} />
+    </button>
+  );
+
+  if (onOpenSheet) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{triggerBtn}</TooltipTrigger>
+        <TooltipContent side="top">
+          {profile.displayName} · {model}
+          {thinkLabel ? ` · 思考 ${thinkLabel}` : ""}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>{triggerBtn}</DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {profile.displayName} · {model}
+          {thinkLabel ? ` · 思考 ${thinkLabel}` : ""}
+        </TooltipContent>
+      </Tooltip>
+
+      <DropdownMenuContent side="top" align="end" className="w-[min(336px,calc(100vw-24px))] p-3">
+        <AgentModelConfigPanel
+          cli={cli}
+          model={model}
+          thinking={thinking}
+          onSelectCli={onSelectCli}
+          onSelectModel={onSelectModel}
+          onSelectThinking={onSelectThinking}
           onDone={() => setOpen(false)}
         />
       </DropdownMenuContent>

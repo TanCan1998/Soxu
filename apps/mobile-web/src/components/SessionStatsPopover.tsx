@@ -1,4 +1,4 @@
-import { ChevronRight, Clock } from "lucide-react";
+import { ChevronRight, Gauge } from "lucide-react";
 import { useState } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -12,6 +12,7 @@ interface SessionStatsPopoverProps {
   stats: SessionTelemetryStats;
   onOpenSheet?: () => void;
   compact?: boolean;
+  showCost?: boolean;
   className?: string;
 }
 
@@ -96,11 +97,17 @@ export function SessionStatsPanel({ stats }: { stats: SessionTelemetryStats }) {
 }
 
 /**
- * 紧邻上下文百分比圆环右侧的「会话统计」胶囊与详单浮层：
- * - 胶囊实时显示绿色主题色图标与输出速度（tok/s），悬停展示简要标题；
+ * 紧邻上下文百分比圆环右侧的「会话统计」轻量指示器与详单浮层（参考 Oryn 遥测脚条）：
+ * - 默认无外框、无底色，按需附带参考费用与速度表图标 + 输出速度（tok/s）；
  * - 窄屏下支持点击弹出无溢出的 Bottom Sheet。
  */
-export function SessionStatsPopover({ stats, onOpenSheet, compact = false, className }: SessionStatsPopoverProps) {
+export function SessionStatsPopover({
+  stats,
+  onOpenSheet,
+  compact = false,
+  showCost = false,
+  className,
+}: SessionStatsPopoverProps) {
   const { t } = useI18n();
   const speedText = `${stats.recentSpeed.toFixed(1)} tok/s`;
 
@@ -109,15 +116,22 @@ export function SessionStatsPopover({ stats, onOpenSheet, compact = false, class
       type="button"
       onClick={onOpenSheet}
       className={cn(
-        "soxu-hit-44 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-control)] hover:bg-[var(--soxu-interaction-selected)] transition-colors cursor-pointer text-[11.5px] soxu-tabular",
-        compact && "px-2",
+        "soxu-hit-44 inline-flex items-center gap-2 h-8 px-1.5 rounded-lg border border-transparent bg-transparent hover:bg-[var(--soxu-interaction-hover)] transition-colors cursor-pointer text-[12px] soxu-tabular shrink-0",
+        compact && "gap-1 px-1",
         className,
       )}
-      aria-label={`${t("stats.title")} ${speedText}`}
+      aria-label={`${t("stats.title")} $${stats.apiCostUsd.toFixed(2)} ${speedText}`}
     >
-      <Clock className="h-3.5 w-3.5 text-[var(--soxu-semantic-success)] shrink-0" strokeWidth={1.75} />
-      <span className="soxu-mono font-medium text-[var(--soxu-semantic-success)] whitespace-nowrap">
-        {compact ? stats.recentSpeed.toFixed(0) : speedText}
+      {showCost && (
+        <span className="soxu-mono font-medium text-[var(--soxu-text-secondary)] whitespace-nowrap">
+          ${stats.apiCostUsd.toFixed(2)}
+        </span>
+      )}
+      <span className="inline-flex items-center gap-1.5">
+        <Gauge className="h-3.5 w-3.5 text-[var(--soxu-semantic-success)] shrink-0" strokeWidth={1.75} />
+        <span className="soxu-mono font-medium text-[var(--soxu-semantic-success)] whitespace-nowrap">
+          {compact ? stats.recentSpeed.toFixed(0) : speedText}
+        </span>
       </span>
     </button>
   );

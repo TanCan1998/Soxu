@@ -129,12 +129,12 @@ Soxu 服务于高频并行操控多个本地编码 Agent（`claude`、`codex`、
 
 | 令牌键 | 像素值 | 用途说明 |
 | :--- | :---: | :--- |
-| `sizing.titlebarHeight` | `38px` | 桌面主窗口顶部标题栏与 `Cmd+K` 触发条固定高度 |
-| `sizing.tabbarHeight` | `36px` | 主会话标签条高度（单标签左右内边距 `12px`，关闭键 `18×18px`） |
-| `sizing.subagentBarHeight` | `28px` | 委派子代理横向细轨高度 |
-| `sizing.statusbarHeight` | `26px` | 桌面底栏全局 Daemon / Magpie / Git 状态横梁 |
-| `sizing.sidebarRowHeight` | `32px` | 左侧项目与 Worktree 紧凑树行高度 |
-| `sizing.toolCardHeaderHeight` | `34px` | 对话流中结构化工具调用折叠卡头部高度 |
+| `sizing.titlebarHeight` | `48px` | 桌面主窗口顶部标题栏（兼容触屏笔记本与 iPad 防误触，居中搜索条 `32px`） |
+| `sizing.tabbarHeight` | `40px` | 主会话标签条高度（单标签高 `34px`，关闭/归档键 `20×20px` + 扩展热区） |
+| `sizing.subagentBarHeight` | `32px` | 委派子代理横向细轨高度 |
+| `sizing.statusbarHeight` | `30px` | 桌面底栏全局 Daemon / Magpie / Git 状态横梁 |
+| `sizing.sidebarRowHeight` | `36px` | 左侧项目与 Worktree 树行最低高度（宽松模式 `42px`） |
+| `sizing.toolCardHeaderHeight` | `38px` | 对话流中结构化工具调用折叠卡头部高度 |
 | `sizing.diffGutterWidth` | `52px` | 活动 Diff 与右侧审阅器双列行号槽宽度 |
 | `sizing.activityDiffMaxHeight` | `400px` | 对话流单张展开编辑 Diff 卡最大高度（超出原地滚动） |
 | `sizing.permissionDetailMaxHeight` | `96px` | 权限审批卡片命令详情区最大滚动高度 |
@@ -155,12 +155,12 @@ Soxu 服务于高频并行操控多个本地编码 Agent（`claude`、`codex`、
 
 ## 七、全端通用边界态与跨端交互守则（Boundary & Input Rules）
 
-1. **Empty State（首次空画布 / 无改动工作树）**：居中卡片限宽 `440px`，配 `36px` 线性矢量徽标、一句话明确说明及 **最多 1 个主 CTA + 3 个可点击 Starter Prompt 示例芯片**；严禁堆砌空白说明墙。
+1. **Empty State（未打开任何会话页签 / 零状态引导首页，参考 Oryn）**：铺满微点阵径向渐隐背景（`.soxu-dot-grid`）与居中水平微光分割线，中心排布纯净双几何 Soxu 品牌矢量徽标、`要做点什么？` 主标题、居中即用圆角输入舱（输入即刻创建无项目自由对话）及最多 3 个辅助入口（收件箱分诊台、打开工作树、导入本机历史）；严禁显示双输入舱或空白说明墙。
 2. **Streaming & Skeleton（首次冷启动 / 会话详情回源）**：采用中性灰阶 `#171717` → `#212121` 微弱脉冲占位条（动画遵从 `prefers-reduced-motion`），占位行数严格匹配真实列表行高（`32px` 侧栏、`72px` 消息块），避免加载完成后发生剧烈布局跳变（CLS ≈ 0）。
 3. **Offline / Reconnecting（Daemon 断线与增量游标追平）**：保留桌面与移动端屏幕上**所有已渲染的对话 DOM 与未发送草稿**（绝不整页白屏跳转报错），仅在顶栏显示非阻塞状态微条：`正在重连 Daemon (127.0.0.1:7698)...`，重连后自动携 `afterSeq` 拉取缺口并发出轻提示。
 4. **Actionable Error（可执行错误提示）**：绝不把裸 JSON / `0x80070005` 甩给用户；每个错误框（`dangerSoft` 底 + `dangerBorder` 边）必须包含三要素：**发生了什么（中文） + 影响范围 + 一键修复或拷贝脱敏诊断详情按钮**。
 5. **中文输入法组合护栏（IME Composition Safety）**：所有支持 `Enter` 提交的输入组件（主输入舱、Diff 内联批注、选区旁路追问、命令面板搜索）必须在 `onKeyDown` 首位检查 `isImeComposing(e)`（`nativeEvent.isComposing || keyCode === 229`），杜绝选词上屏误发。
-6. **指针与触屏热区分化（`.soxu-hit-44` 与 `.soxu-reveal-action`）**：小尺寸辅助按键通过 `.soxu-hit-44` 在 `(pointer: coarse)` 下以透明伪元素将触控命中框扩至至少 `44×44px`；行内显隐操作按钮采用 `.soxu-reveal-action`（细指针悬停/聚焦/选中时显现，触屏固定 `opacity: 0.88` 永不形成交互死角）。
+6. **指针与触屏热区分化（`.soxu-hit-44` 与 `.soxu-reveal-action`）**：所有主要控制按钮尺寸升级为 `32px / 36px`，小尺寸辅助按键通过 `.soxu-hit-44` 在 `@media (pointer: coarse), (any-pointer: coarse)`（同时覆盖手机、iPad 与触屏笔记本）下以 `-4px` 外延透明伪元素将触控命中框扩至至少 `44×44px`；行内显隐操作按钮采用 `.soxu-reveal-action`（细指针悬停/聚焦/选中时显现，触屏固定 `opacity: 0.88` 永不形成交互死角）。
 7. **跨平台快捷键呈现（`formatShortcut`）**：依据当前操作系统或外观窗口预览自动映射 `Mod` / `Alt` / `Shift` 提示为 `Cmd` 组合（`⌘` / `⇧` / `⌥`）或 `Ctrl+` 组合；用户 Chat 气泡统一绑定 `--soxu-surface-raised`（严禁引用未定义变量导致透明气泡）。
 
 ---

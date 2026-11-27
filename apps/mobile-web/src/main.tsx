@@ -5,7 +5,6 @@ import {
   ArrowUp,
   Bolt,
   Check,
-  ChevronDown,
   ChevronRight,
   ChevronUp,
   Clock,
@@ -17,7 +16,9 @@ import {
   History,
   Inbox,
   Layers,
+  LayoutGrid,
   MessageSquare,
+  Moon,
   PanelLeft,
   PanelRight,
   Plus,
@@ -30,6 +31,7 @@ import {
   Sparkles,
   Square,
   Star,
+  Sun,
   X,
 } from "lucide-react";
 import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
@@ -37,6 +39,8 @@ import { createRoot } from "react-dom/client";
 import { AgentIcon } from "@/components/AgentIcon";
 import { CodeDiffView, CodeSnippetView } from "@/components/CodeBlockView";
 import {
+  AgentModelConfigPanel,
+  ComposerAgentModelPicker,
   ComposerChipBar,
   ComposerHandoffMenu,
   ComposerPermissionButton,
@@ -58,6 +62,14 @@ import { ToolCallCard } from "@/components/ToolCallCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -194,7 +206,7 @@ function MobileAppInner({
   const [askQuestion, setAskQuestion] = useState<AskQuestionState>(INITIAL_ASK);
   const [turns, setTurns] = useState<TurnMessage[]>(INITIAL_TURNS);
   const [liveSteps, setLiveSteps] = useState<LiveStepItem[]>(INITIAL_LIVE_STEPS);
-  const [stepsOpen, setStepsOpen] = useState(true);
+  const [stepsOpen, setStepsOpen] = useState(false);
   const [activeArtifact, setActiveArtifact] = useState<ArtifactItem>(INITIAL_ARTIFACT);
   const [scripts, setScripts] = useState<ScriptItem[]>(INITIAL_SCRIPTS);
   const [schedules, setSchedules] = useState<ScheduleItem[]>(INITIAL_SCHEDULES);
@@ -367,6 +379,11 @@ function MobileAppInner({
     ...workspaces.filter((w) => w.archived).map((w) => ({ kind: "workspace" as const, id: w.id, title: `${w.project} / ${w.branch}`, sub: w.diffStat })),
   ];
 
+  const totalDiffAdded = useMemo(() => INITIAL_DIFF_FILES.reduce((acc, f) => acc + f.added, 0), []);
+  const totalDiffDeleted = useMemo(() => INITIAL_DIFF_FILES.reduce((acc, f) => acc + f.deleted, 0), []);
+  const doneLiveSteps = liveSteps.filter((s) => s.status === "done").length;
+  const activeLiveStep = liveSteps.find((s) => s.status === "in_progress") ?? liveSteps[0];
+
   const activeProfile = getAgentProfile(cli);
   const availableModels = getAgentModels(cli);
   const currentModelMeta = availableModels.find((m) => m.id === model) ?? availableModels[0];
@@ -387,7 +404,7 @@ function MobileAppInner({
     });
   }
 
-  function handleSelectCli(nextCliId: string, override?: { model?: string; thinking?: string }) {
+  function handleSelectCli(nextCliId: string, override?: { model?: string; thinking?: string }, keepSheetOpen = false) {
     const nextCli = CLI_OPTIONS.find((c) => c.id === nextCliId);
     if (!nextCli || !nextCli.available) return null;
     setCli(nextCli.id);
@@ -403,12 +420,12 @@ function MobileAppInner({
     setThinking(reconciled.thinking);
     setBehavior(reconciled.behavior);
     setLostControlNote(reconciled.notes.length > 0 ? reconciled.notes.join("；") : null);
-    setSheet(null);
+    if (!keepSheetOpen) setSheet(null);
     flashToast(`活跃驱动已切换至 ${nextCli.id} v${nextCli.ver}`);
     return reconciled;
   }
 
-  function handleSelectModel(nextModelId: string) {
+  function handleSelectModel(nextModelId: string, keepSheetOpen = false) {
     setModel(nextModelId);
     const reconciled = reconcileAgentCapabilities({
       agentId: cli,
@@ -419,7 +436,7 @@ function MobileAppInner({
     });
     setThinking(reconciled.thinking);
     setLostControlNote(reconciled.notes.length > 0 ? reconciled.notes.join("；") : null);
-    setSheet(null);
+    if (!keepSheetOpen) setSheet(null);
     flashToast(`模型已切换为 ${nextModelId}`);
   }
 
@@ -1092,7 +1109,7 @@ function MobileAppInner({
             <span>新对话</span>
           </Button>
         </div>
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           {activeQuickChats.map((qc) => {
             const active = targetKind === "quick" && selectedQuickChatId === qc.id && activeTab === "session";
             const meta = bucketMeta(qc.bucket);
@@ -1136,7 +1153,7 @@ function MobileAppInner({
                     e.stopPropagation();
                     archiveItem("quick", qc.id, qc.title);
                   }}
-                  className="soxu-hit-44 soxu-reveal-action p-1 text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] bg-transparent border-0 cursor-pointer shrink-0"
+                  className="soxu-hit-44 soxu-reveal-action h-7 w-7 rounded-lg inline-flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] bg-transparent border-0 cursor-pointer shrink-0"
                 >
                   <Archive className="h-3.5 w-3.5" strokeWidth={1.75} />
                 </button>
@@ -1147,7 +1164,7 @@ function MobileAppInner({
       </div>
 
       {/* 2. 项目文件夹 -> 工作树层级 */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-semibold text-[var(--soxu-text-secondary)]">项目与工作树</span>
           <div className="flex items-center gap-1.5">
@@ -1192,7 +1209,7 @@ function MobileAppInner({
               type="button"
               onClick={() => setBucketFilter(b.id)}
               className={cn(
-                "px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap border cursor-pointer transition-colors",
+                "px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap border cursor-pointer transition-colors",
                 bucketFilter === b.id
                   ? "bg-[var(--soxu-action-inverse)] text-[var(--soxu-action-on-inverse)] border-transparent font-semibold"
                   : "bg-[var(--soxu-surface-card)] text-[var(--soxu-text-secondary)] border-[var(--soxu-border-subtle)]",
@@ -1203,15 +1220,15 @@ function MobileAppInner({
           ))}
         </div>
 
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2.5">
           {projectGroups.map(([projName, group]) => {
             const expanded = openProjects[projName] ?? true;
             return (
-              <div key={projName} className="flex flex-col gap-1">
+              <div key={projName} className="flex flex-col gap-1.5">
                 <button
                   type="button"
                   onClick={() => setOpenProjects((p) => ({ ...p, [projName]: !expanded }))}
-                  className="flex items-center justify-between px-1.5 py-1 text-xs font-semibold text-[var(--soxu-text-primary)] bg-transparent border-0 cursor-pointer"
+                  className="flex items-center justify-between px-1.5 py-1.5 text-xs font-semibold text-[var(--soxu-text-primary)] bg-transparent border-0 cursor-pointer"
                 >
                   <span className="flex items-center gap-1.5 truncate">
                     <ChevronRight
@@ -1227,7 +1244,7 @@ function MobileAppInner({
                 </button>
 
                 {expanded && (
-                  <div className="ml-3 pl-2.5 border-l border-[var(--soxu-border-hairline)] flex flex-col gap-1.5">
+                  <div className="ml-3 pl-2.5 border-l border-[var(--soxu-border-hairline)] flex flex-col gap-2">
                     {group.items.map((w) => {
                       const active = targetKind === "workspace" && w.id === selectedWorkspaceId && activeTab === "session";
                       const meta = bucketMeta(w.bucket);
@@ -1252,7 +1269,7 @@ function MobileAppInner({
                             }
                           }}
                           className={cn(
-                            "group w-full text-left rounded-xl p-2.5 flex flex-col gap-1 border cursor-pointer transition-colors",
+                            "group w-full text-left rounded-xl p-3 flex flex-col gap-1.5 border cursor-pointer transition-colors",
                             active
                               ? "bg-[var(--soxu-interaction-selected)] border-[var(--soxu-border-strong)]"
                               : "bg-[var(--soxu-surface-card)] border-[var(--soxu-border-subtle)]",
@@ -1263,7 +1280,7 @@ function MobileAppInner({
                               <span className={cn("h-2 w-2 rounded-full shrink-0", meta.dotClass)} />
                               <span className="soxu-mono text-xs font-semibold truncate">{w.branch}</span>
                             </span>
-                            <div className="flex items-center gap-0.5 shrink-0">
+                            <div className="flex items-center gap-1 shrink-0">
                               {w.bucket !== "done" && <Badge variant={meta.variant}>{meta.label}</Badge>}
                               <button
                                 type="button"
@@ -1273,11 +1290,11 @@ function MobileAppInner({
                                   handleTogglePinWorkspace(w.id);
                                 }}
                                 className={cn(
-                                  "soxu-hit-44 soxu-reveal-action p-1 bg-transparent border-0 cursor-pointer",
+                                  "soxu-hit-44 soxu-reveal-action h-7 w-7 rounded-lg inline-flex items-center justify-center hover:bg-[var(--soxu-surface-control)] bg-transparent border-0 cursor-pointer",
                                   w.pinned ? "opacity-100 text-[var(--soxu-semantic-warning)]" : "text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)]",
                                 )}
                               >
-                                <Star className={cn("h-3 w-3", w.pinned && "fill-current")} strokeWidth={1.75} />
+                                <Star className={cn("h-3.5 w-3.5", w.pinned && "fill-current")} strokeWidth={1.75} />
                               </button>
                               <button
                                 type="button"
@@ -1286,9 +1303,9 @@ function MobileAppInner({
                                   e.stopPropagation();
                                   archiveItem("workspace", w.id, `${w.project} / ${w.branch}`);
                                 }}
-                                className="soxu-hit-44 soxu-reveal-action p-1 text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] bg-transparent border-0 cursor-pointer"
+                                className="soxu-hit-44 soxu-reveal-action h-7 w-7 rounded-lg inline-flex items-center justify-center text-[var(--soxu-text-tertiary)] hover:text-[var(--soxu-text-primary)] hover:bg-[var(--soxu-surface-control)] bg-transparent border-0 cursor-pointer"
                               >
-                                <Archive className="h-3 w-3" strokeWidth={1.75} />
+                                <Archive className="h-3.5 w-3.5" strokeWidth={1.75} />
                               </button>
                             </div>
                           </div>
@@ -1608,49 +1625,172 @@ function MobileAppInner({
       ? activeQuickChat.title
       : `${activeWorkspace.project} / ${activeWorkspace.branch}`;
 
-  const compactLeftHeader = vp.isUltraNarrow || isFoldDualH;
+  const isFloatingHeader = sizeClass !== "wide";
+  const isWideComposerRow = !isFoldDualH && vp.width >= 680;
 
-  const HeaderBar = (
+  const HeaderBar = isFloatingHeader ? (
     <header
       className={cn(
-        "sticky top-0 shrink-0 soxu-safe-top soxu-safe-x backdrop-blur-md border-b border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-header-glass)] overflow-hidden",
-        vp.isShortViewport ? "py-1.5" : "pb-2",
+        "absolute top-0 inset-x-0 pointer-events-none soxu-safe-top px-3 pb-2 bg-gradient-to-b from-[var(--soxu-surface-canvas)]/90 via-[var(--soxu-surface-canvas)]/45 to-transparent",
+        vp.isShortViewport && "pt-2 pb-1.5",
       )}
       style={{ zIndex: "var(--soxu-z-header)" }}
     >
-      <div
-        className={cn(
-          "max-w-[1280px] mx-auto grid items-center gap-1",
-          compactLeftHeader
-            ? "grid-cols-[auto_minmax(0,1fr)_auto]"
-            : "sm:gap-2.5 grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-[minmax(max-content,1fr)_minmax(140px,320px)_minmax(max-content,1fr)]",
+      <div className="max-w-[1280px] mx-auto flex items-center justify-between gap-2.5">
+        {!showCompactRail ? (
+          <button
+            ref={leftTriggerRef}
+            type="button"
+            onClick={() => setLeftDrawerOpen((v) => !v)}
+            aria-label={t("header.openLeftDrawer")}
+            className="pointer-events-auto h-10 w-10 shrink-0 rounded-full bg-[var(--soxu-surface-floating)]/85 backdrop-blur-xl border border-[var(--soxu-border-subtle)] shadow-md inline-flex items-center justify-center text-[var(--soxu-text-primary)] hover:border-[var(--soxu-border-strong)] cursor-pointer transition-colors"
+          >
+            <PanelLeft className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+        ) : (
+          <span className="w-1 shrink-0" aria-hidden="true" />
         )}
-      >
-        <div className="flex items-center gap-1 sm:gap-2 min-w-0 justify-self-start">
-          {sizeClass !== "wide" && !showCompactRail && (
-            <Button
-              ref={leftTriggerRef}
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setLeftDrawerOpen((v) => !v)}
-              aria-label={t("header.openLeftDrawer")}
-              className="shrink-0"
-            >
-              <PanelLeft className="h-4 w-4" strokeWidth={1.75} />
-            </Button>
-          )}
 
-          <span className="px-1 text-xs sm:text-[13px] font-semibold tracking-tight text-[var(--soxu-text-primary)] shrink-0">
+        {/* 居中悬浮毛玻璃双行药丸：上行当前分支/会话标题，下行驱动+品牌+状态+游标（点击检索切换） */}
+        <button
+          type="button"
+          onClick={() => setSheet("search")}
+          aria-label={t("header.searchCompact")}
+          className="pointer-events-auto flex-1 min-w-0 max-w-[320px] mx-auto h-10 px-3.5 rounded-full bg-[var(--soxu-surface-floating)]/85 backdrop-blur-xl border border-[var(--soxu-border-subtle)] shadow-md flex flex-col items-center justify-center text-center cursor-pointer hover:border-[var(--soxu-border-strong)] transition-colors"
+        >
+          <div className="text-[12px] font-semibold text-[var(--soxu-text-primary)] truncate max-w-full leading-tight">
+            {activeScopeTitle}
+          </div>
+          <div className="text-[10px] text-[var(--soxu-text-tertiary)] flex items-center justify-center gap-1.5 leading-tight mt-0.5 max-w-full">
+            <AgentIcon agent={cli} className="h-3 w-3 shrink-0" />
+            <span className="shrink-0">{t("brand.name")}</span>
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full shrink-0",
+                isRunning ? "bg-[var(--soxu-semantic-running)] soxu-live-dot" : "bg-[var(--soxu-semantic-success)]",
+              )}
+            />
+            <span className="shrink-0">{isRunning ? t("status.running") : "就绪"}</span>
+            <span className="soxu-mono soxu-tabular shrink-0">#{seqCursor}</span>
+          </div>
+        </button>
+
+        {/* 右圆悬浮毛玻璃四格宫格菜单（收敛次级操作，保持零拥挤大热区） */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("header.moreTools")}
+              className="pointer-events-auto relative h-10 w-10 shrink-0 rounded-full bg-[var(--soxu-surface-floating)]/85 backdrop-blur-xl border border-[var(--soxu-border-subtle)] shadow-md inline-flex items-center justify-center text-[var(--soxu-text-primary)] hover:border-[var(--soxu-border-strong)] cursor-pointer transition-colors"
+            >
+              <LayoutGrid className="h-4 w-4" strokeWidth={1.75} />
+              {inboxAttentionCount > 0 && (
+                <span className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] px-1 rounded-full text-[9px] leading-[14px] text-center bg-[var(--soxu-semantic-warning)] text-black font-bold">
+                  {inboxAttentionCount}
+                </span>
+              )}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="bottom" align="end" className="w-56">
+            <DropdownMenuLabel className="flex items-center justify-between">
+              <span>{t("brand.name")} 快捷菜单</span>
+              <span className="soxu-mono text-[10px] text-[var(--soxu-text-tertiary)]">#{seqCursor}</span>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setActiveTab((prev) => (prev === "inbox" ? "session" : "inbox"))}>
+              <span className="inline-flex items-center gap-2">
+                <Inbox className="h-3.5 w-3.5 text-[var(--soxu-semantic-accent)]" strokeWidth={1.75} />
+                <span>{t("mobile.navInbox")}</span>
+              </span>
+              {inboxAttentionCount > 0 && <Badge variant="warning">{inboxAttentionCount}</Badge>}
+            </DropdownMenuItem>
+            {!isFoldDualH && (
+              <DropdownMenuItem onClick={() => setRightDrawerOpen((v) => !v)}>
+                <span className="inline-flex items-center gap-2">
+                  <PanelRight className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  <span>{t("inspector.title")}</span>
+                </span>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={simulateSeqCatchup}>
+              <span className="inline-flex items-center gap-2">
+                <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <span>游标增量追平 (#{seqCursor})</span>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={(e) => handleToggleTheme(e.currentTarget)}>
+              <span className="inline-flex items-center gap-2">
+                {resolvedTheme === "dark" ? (
+                  <Sun className="h-3.5 w-3.5" strokeWidth={1.75} />
+                ) : (
+                  <Moon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                )}
+                <span>{resolvedTheme === "dark" ? "切换至浅色主题" : "切换至纯黑主题"}</span>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setSheet("pair")}>
+              <span className="inline-flex items-center gap-2">
+                <QrCode className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <span>{t("header.pair")}</span>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSheet("history")}>
+              <span className="inline-flex items-center gap-2">
+                <History className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.importHistory")}</span>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSheet("new-worktree")}>
+              <span className="inline-flex items-center gap-2">
+                <GitBranch className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <span>新建隔离工作树</span>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSheet("new-quick-chat")}>
+              <span className="inline-flex items-center gap-2">
+                <MessageSquare className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.newQuickChat")}</span>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => {
+                setSettingsSection("appearance");
+                setSettingsOpen(true);
+              }}
+            >
+              <span className="inline-flex items-center gap-2">
+                <Settings className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <span>{t("header.settings")}</span>
+              </span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {toastMsg && (
+        <div className="pointer-events-auto max-w-[420px] mx-auto mt-2 px-3 py-1.5 rounded-full text-xs flex items-center justify-center gap-1.5 bg-[var(--soxu-surface-floating)]/95 backdrop-blur-md border border-[var(--soxu-border-strong)] text-[var(--soxu-semantic-accent)] shadow-lg">
+          <Bolt className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+          <span className="truncate">{toastMsg}</span>
+        </div>
+      )}
+    </header>
+  ) : (
+    <header
+      className="sticky top-0 shrink-0 min-h-[48px] soxu-safe-top soxu-safe-x pb-2 backdrop-blur-md border-b border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-header-glass)] overflow-hidden"
+      style={{ zIndex: "var(--soxu-z-header)" }}
+    >
+      <div className="max-w-[1280px] mx-auto grid items-center gap-2.5 grid-cols-[minmax(max-content,1fr)_minmax(160px,360px)_minmax(max-content,1fr)]">
+        <div className="flex items-center gap-2 min-w-0 justify-self-start">
+          <span className="px-1 text-[13.5px] font-semibold tracking-tight text-[var(--soxu-text-primary)] shrink-0">
             {t("brand.name")}
           </span>
 
           <button
             type="button"
             onClick={simulateSeqCatchup}
-            className={cn(
-              "flex-col text-left min-w-0 bg-transparent border-0 p-0 cursor-pointer",
-              isFoldDualH ? "hidden" : "hidden md:flex",
-            )}
+            className="hidden md:flex flex-col text-left min-w-0 bg-transparent border-0 p-0 cursor-pointer"
             title="点击模拟断线重连后游标增量追平"
           >
             <div className="text-[11px] soxu-mono soxu-tabular text-[var(--soxu-text-tertiary)] truncate">
@@ -1662,67 +1802,49 @@ function MobileAppInner({
           </button>
         </div>
 
-        {/* 始终水平居中且防重叠的快速检索触发条 */}
         <button
           type="button"
           onClick={() => setSheet("search")}
-          className={cn(
-            "h-8 w-full max-w-[320px] min-w-0 justify-self-center rounded-full border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] px-2.5 flex items-center gap-1.5 text-xs text-[var(--soxu-text-tertiary)] hover:border-[var(--soxu-border-strong)] hover:text-[var(--soxu-text-secondary)] transition-colors cursor-pointer",
-            compactLeftHeader && "px-2",
-          )}
+          className="h-8 w-full max-w-[360px] min-w-0 justify-self-center rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] px-3 flex items-center gap-2 text-xs text-[var(--soxu-text-tertiary)] hover:border-[var(--soxu-border-strong)] hover:text-[var(--soxu-text-secondary)] transition-colors cursor-pointer"
           aria-label={t("header.searchCompact")}
         >
           <Search className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-          <span className="truncate">{compactLeftHeader ? activeScopeTitle : t("header.searchCompact")}</span>
+          <span className="truncate">{t("header.searchCompact")}</span>
         </button>
 
-        <div className="flex items-center gap-0.5 sm:gap-1 shrink-0 justify-self-end">
-          {!compactLeftHeader && (
-            <Button
-              variant={activeTab === "inbox" || activeTab === "approvals" ? "secondary" : "ghost"}
-              size="icon-sm"
-              onClick={() => setActiveTab((prev) => (prev === "inbox" ? "session" : "inbox"))}
-              aria-label={t("mobile.navInbox")}
-              title={t("mobile.navInbox")}
-              className="rounded-full relative"
-            >
-              <Inbox className="h-4 w-4" strokeWidth={1.75} />
-              {inboxAttentionCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full text-[9px] leading-[14px] text-center bg-[var(--soxu-semantic-warning)] text-black font-bold">
-                  {inboxAttentionCount}
-                </span>
-              )}
-            </Button>
-          )}
+        <div className="flex items-center gap-1.5 shrink-0 justify-self-end">
+          <Button
+            variant={activeTab === "inbox" || activeTab === "approvals" ? "secondary" : "ghost"}
+            size="icon-sm"
+            onClick={() => setActiveTab((prev) => (prev === "inbox" ? "session" : "inbox"))}
+            aria-label={t("mobile.navInbox")}
+            title={t("mobile.navInbox")}
+            className="rounded-full relative"
+          >
+            <Inbox className="h-4 w-4" strokeWidth={1.75} />
+            {inboxAttentionCount > 0 && (
+              <span className="absolute top-0 right-0 min-w-[14px] h-[14px] px-1 rounded-full text-[9px] leading-[14px] text-center bg-[var(--soxu-semantic-warning)] text-black font-bold">
+                {inboxAttentionCount}
+              </span>
+            )}
+          </Button>
 
-          {!compactLeftHeader && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setSheet("pair")}
-              aria-label={t("header.pair")}
-              title={t("header.pair")}
-              className="rounded-full"
-            >
-              <QrCode className="h-4 w-4" strokeWidth={1.75} />
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setSheet("pair")}
+            aria-label={t("header.pair")}
+            title={t("header.pair")}
+            className="rounded-full"
+          >
+            <QrCode className="h-4 w-4" strokeWidth={1.75} />
+          </Button>
 
           <HoverExpandDock
             triggerIcon={<SlidersHorizontal className="h-4 w-4" strokeWidth={1.75} />}
             triggerLabel={t("header.moreTools")}
             expandDirection="left"
           >
-            {compactLeftHeader && (
-              <Button variant="ghost" size="icon-sm" onClick={() => setActiveTab("inbox")} title={t("mobile.navInbox")}>
-                <Inbox className="h-3.5 w-3.5" strokeWidth={1.75} />
-              </Button>
-            )}
-            {compactLeftHeader && (
-              <Button variant="ghost" size="icon-sm" onClick={() => setSheet("pair")} title={t("header.pair")}>
-                <QrCode className="h-3.5 w-3.5" strokeWidth={1.75} />
-              </Button>
-            )}
             <Button variant="ghost" size="icon-sm" onClick={() => setSheet("history")} title={t("sidebar.importHistory")}>
               <History className="h-3.5 w-3.5" strokeWidth={1.75} />
             </Button>
@@ -1750,18 +1872,16 @@ function MobileAppInner({
             <Settings className="h-4 w-4" strokeWidth={1.75} />
           </Button>
 
-          {!isFoldDualH && (
-            <Button
-              variant={rightDrawerOpen ? "secondary" : "ghost"}
-              size="icon-sm"
-              onClick={() => setRightDrawerOpen((v) => !v)}
-              aria-label={t("header.openRightDrawer")}
-              title={t("header.openRightDrawer")}
-              className="rounded-full"
-            >
-              <PanelRight className="h-4 w-4" strokeWidth={1.75} />
-            </Button>
-          )}
+          <Button
+            variant={rightDrawerOpen ? "secondary" : "ghost"}
+            size="icon-sm"
+            onClick={() => setRightDrawerOpen((v) => !v)}
+            aria-label={t("header.openRightDrawer")}
+            title={t("header.openRightDrawer")}
+            className="rounded-full"
+          >
+            <PanelRight className="h-4 w-4" strokeWidth={1.75} />
+          </Button>
         </div>
       </div>
 
@@ -1782,7 +1902,10 @@ function MobileAppInner({
     >
       <div
         ref={transcriptContentRef}
-        className="w-full mx-auto px-3.5 sm:px-4 py-3.5 sm:py-4 flex flex-col gap-3.5"
+        className={cn(
+          "w-full mx-auto px-3.5 sm:px-4 flex flex-col gap-3.5",
+          isFloatingHeader ? (vp.isShortViewport ? "pt-[58px] pb-3.5" : "pt-[68px] pb-4") : "py-3.5 sm:py-4",
+        )}
         style={{ maxWidth: "var(--soxu-layout-transcript-max-width)" }}
       >
         {pendingApprovals.length > 0 && activeTab !== "inbox" && activeTab !== "approvals" && (
@@ -1899,16 +2022,38 @@ function MobileAppInner({
                   <Badge variant="neutral">轻量模式</Badge>
                 </div>
                 {activeQuickChat.messages.length === 0 ? (
-                  <div className="py-10 text-center text-xs text-[var(--soxu-text-tertiary)]">
-                    在下方输入内容开始无项目自由对话
+                  <div className="relative py-16 px-4 rounded-2xl overflow-hidden flex flex-col items-center justify-center gap-3 text-center">
+                    <div aria-hidden="true" className="pointer-events-none absolute inset-0 soxu-dot-grid opacity-80" />
+                    <div className="relative h-11 w-11 rounded-2xl bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-subtle)] flex items-center justify-center shadow-md">
+                      <svg
+                        width="22"
+                        height="22"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        className="text-[var(--soxu-text-primary)]"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M9.5 4.5C6.5 6 5 8.8 5 12c0 3.2 1.5 6 4.5 7.5"
+                          stroke="currentColor"
+                          strokeWidth="2.2"
+                          strokeLinecap="round"
+                        />
+                        <rect x="12" y="5" width="6.5" height="14" rx="2.5" fill="currentColor" />
+                      </svg>
+                    </div>
+                    <div className="relative text-base font-semibold text-[var(--soxu-text-primary)]">要做点什么？</div>
+                    <div className="relative text-xs text-[var(--soxu-text-tertiary)]">
+                      在下方输入内容立即开启无项目自由对话
+                    </div>
                   </div>
                 ) : (
                   activeQuickChat.messages.map((m) =>
                     m.role === "user" ? (
                       <div key={m.id} className="flex flex-col items-end gap-1.5">
                         {m.chips && m.chips.length > 0 && <ComposerChipBar chips={m.chips} className="justify-end" />}
-                        <div className="max-w-[85%] rounded-[18px] px-4 py-2.5 text-sm leading-relaxed bg-[var(--soxu-surface-raised)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)]">
-                          {m.text}
+                        <div className="max-w-[85%] rounded-[18px] px-4 py-3 text-sm leading-relaxed break-words bg-[var(--soxu-surface-raised)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)]">
+                          <p className="m-0">{m.text}</p>
                         </div>
                       </div>
                     ) : (
@@ -1944,7 +2089,7 @@ function MobileAppInner({
                   <span className="soxu-mono soxu-tabular shrink-0">{activeWorkspace.diffStat}</span>
                 </div>
 
-                {/* 实时步骤焦点（吸收 AGY Live Steps） */}
+                {/* 实时步骤焦点（默认单行折叠展示当前进行中步骤，点击单列展开） */}
                 <Collapsible
                   open={stepsOpen}
                   onOpenChange={setStepsOpen}
@@ -1953,21 +2098,26 @@ function MobileAppInner({
                   <CollapsibleTrigger asChild>
                     <button
                       type="button"
-                      className="w-full px-3 py-2 flex items-center justify-between gap-2 text-xs bg-transparent border-0 cursor-pointer"
+                      className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs bg-transparent border-0 cursor-pointer"
                     >
                       <span className="inline-flex items-center gap-2 min-w-0 text-[var(--soxu-text-secondary)] font-medium">
                         <span className="h-2 w-2 rounded-full bg-[var(--soxu-semantic-running)] soxu-live-dot shrink-0" />
-                        <span className="truncate">
-                          {t("focus.title")} · {liveSteps.filter((s) => s.status === "done").length}/{liveSteps.length}
+                        <span className="shrink-0">
+                          {t("focus.title")} · {doneLiveSteps}/{liveSteps.length}
                         </span>
+                        {activeLiveStep && (
+                          <span className="truncate text-[var(--soxu-text-primary)] font-normal">
+                            · {activeLiveStep.title}
+                          </span>
+                        )}
                       </span>
                       <ChevronRight
-                        className={cn("h-3.5 w-3.5 text-[var(--soxu-text-tertiary)] transition-transform", stepsOpen && "rotate-90")}
+                        className={cn("h-3.5 w-3.5 text-[var(--soxu-text-tertiary)] transition-transform shrink-0", stepsOpen && "rotate-90")}
                         strokeWidth={1.75}
                       />
                     </button>
                   </CollapsibleTrigger>
-                  <CollapsibleContent className="soxu-collapsible overflow-hidden px-3 pb-2.5 flex flex-col gap-1.5">
+                  <CollapsibleContent className="soxu-collapsible overflow-hidden px-3.5 pb-3 pt-1.5 border-t border-[var(--soxu-border-hairline)] flex flex-col gap-2">
                     {liveSteps.map((st) => (
                       <div key={st.id} className="flex items-center gap-2 text-xs">
                         {st.status === "done" ? (
@@ -2004,8 +2154,8 @@ function MobileAppInner({
                           {turn.chips && turn.chips.length > 0 && (
                             <ComposerChipBar chips={turn.chips} className="justify-end" />
                           )}
-                          <div className="max-w-[85%] rounded-[18px] px-4 py-2.5 text-sm leading-relaxed bg-[var(--soxu-surface-raised)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)]">
-                            {turn.text}
+                          <div className="max-w-[85%] rounded-[18px] px-4 py-3 text-sm leading-relaxed break-words bg-[var(--soxu-surface-raised)] border border-[var(--soxu-border-subtle)] text-[var(--soxu-text-primary)]">
+                            <p className="m-0">{turn.text}</p>
                           </div>
                         </div>
                       );
@@ -2261,40 +2411,49 @@ function MobileAppInner({
         </div>
       ) : (
         <div
-          className={cn(
-            "w-full mx-auto border border-[var(--soxu-border-strong)] bg-[var(--soxu-surface-composer)] flex flex-col",
-            vp.isShortViewport ? "rounded-[18px] p-2 gap-1" : "rounded-[22px] p-2.5 gap-2",
-          )}
           style={{ maxWidth: "var(--soxu-layout-transcript-max-width)" }}
+          className="w-full mx-auto flex flex-col"
         >
-          {/* 顶部轻质滑动折叠手把（点击或下拉收起为 40px DockPill） */}
-          <div
-            className={cn("flex items-center justify-center cursor-pointer select-none", vp.isShortViewport ? "py-0" : "py-0.5")}
-            onPointerDown={(e) => {
-              composerSwipeStartYRef.current = e.clientY;
-            }}
-            onPointerUp={(e) => {
-              const startY = composerSwipeStartYRef.current;
-              composerSwipeStartYRef.current = null;
-              if (startY !== null && e.clientY - startY > 28) {
-                setComposerCollapsed(true);
-              }
-            }}
-            onClick={() => setComposerCollapsed(true)}
-            title="点击或下滑收起输入舱为 40px 悬浮胶囊"
-            aria-label="收起输入舱"
-          >
-            <span className="h-1 w-9 rounded-full bg-[var(--soxu-border-strong)]" />
-          </div>
-
           {lostControlNote && (
-            <div className="px-2.5 py-1 rounded-lg text-[11px] bg-[var(--soxu-semantic-warning-soft)] text-[var(--soxu-semantic-warning)]">
+            <div className="px-2.5 py-1 mb-1.5 rounded-lg text-[11px] bg-[var(--soxu-semantic-warning-soft)] text-[var(--soxu-semantic-warning)]">
               {lostControlNote}
+            </div>
+          )}
+
+          {/* 顶部外置轻量条：工作区变更摘要药丸 + 窄屏常用指令快捷语（释放输入舱内部空间，杜绝拥挤） */}
+          {targetKind === "workspace" && !vp.isShortViewport && (
+            <div className="flex items-center gap-1.5 overflow-x-auto soxu-no-scrollbar mb-1.5 px-0.5">
+              {!isFoldDualH && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRightInspectorTab("diff");
+                    setRightDrawerOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] whitespace-nowrap border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)] hover:border-[var(--soxu-border-strong)] cursor-pointer transition-colors shrink-0"
+                >
+                  <span>{INITIAL_DIFF_FILES.length} 个文件已更改</span>
+                  <span className="soxu-mono soxu-tabular text-[var(--soxu-semantic-success)]">+{totalDiffAdded}</span>
+                  <span className="soxu-mono soxu-tabular text-[var(--soxu-semantic-danger)]">-{totalDiffDeleted}</span>
+                </button>
+              )}
+              {sizeClass !== "wide" &&
+                quickChipsList.map((chip) => (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => handleSubmitPrompt(chip.mode, chip.label)}
+                    className="h-7 px-2.5 rounded-full text-[11px] whitespace-nowrap border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)] hover:border-[var(--soxu-border-strong)] cursor-pointer transition-colors shrink-0"
+                  >
+                    {chip.label}
+                  </button>
+                ))}
             </div>
           )}
 
           {targetKind === "workspace" && (
             <MultiQueueBar
+              docked
               items={queuedPrompts}
               paused={queuePaused}
               supportsLiveSteer={activeProfile.supportsLiveSteer}
@@ -2307,173 +2466,198 @@ function MobileAppInner({
             />
           )}
 
-          {sizeClass !== "wide" && !vp.isShortViewport && targetKind === "workspace" && (
-            <div className="flex items-center gap-1.5 overflow-x-auto soxu-no-scrollbar">
-              {quickChipsList.map((chip) => (
-                <button
-                  key={chip.id}
-                  type="button"
-                  onClick={() => handleSubmitPrompt(chip.mode, chip.label)}
-                  className="px-2.5 py-1 rounded-full text-[11px] whitespace-nowrap border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card)] text-[var(--soxu-text-secondary)] hover:text-[var(--soxu-text-primary)] hover:border-[var(--soxu-border-strong)] cursor-pointer transition-colors"
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <ComposerChipBar chips={composerChips} onRemove={removeComposerChip} />
-
-          <textarea
-            ref={composerInputRef}
-            rows={vp.isShortViewport ? 1 : 2}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (isImeComposing(e)) return;
-              if (e.key === "Escape" && queuedPrompts.length > 0) {
-                e.preventDefault();
-                setQueuedPrompts((prev) => prev.slice(0, -1));
-              } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
-                e.preventDefault();
-                setBehavior("queue");
-                handleSubmitPrompt("queue");
-              } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                const targetMode: TurnBehavior = activeProfile.supportsLiveSteer ? "steer" : "queue";
-                setBehavior(targetMode);
-                handleSubmitPrompt(targetMode);
-              } else if (e.key === "Enter" && e.altKey) {
-                e.preventDefault();
-                setBehavior("interrupt");
-                handleSubmitPrompt("interrupt");
-              } else if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmitPrompt();
-              }
-            }}
-            placeholder={
-              targetKind === "quick"
-                ? "输入问题随时开展无项目对话..."
-                : isRunning
-                  ? `运行中（${behavior === "steer" ? "热纠偏" : behavior === "queue" ? "排队" : "打断重发"}）...`
-                  : "输入指令、@代理 移交上下文，或粘贴任务要求..."
-            }
-            className="w-full resize-none bg-transparent border-0 outline-none px-1.5 py-1 text-base text-[var(--soxu-text-primary)] placeholder:text-[var(--soxu-text-ghost)]"
-          />
-
-          <div className="flex flex-wrap items-center justify-between gap-1.5">
-            <div className="flex flex-wrap items-center gap-1 min-w-0">
-              <ComposerPlusMenu
-                hasWorkspace={targetKind === "workspace"}
-                onAddChip={addComposerChip}
-              />
-
-              <Button variant="ghost" size="sm" onClick={() => setSheet("cli")} className="h-7 px-2 text-[11.5px] soxu-mono">
-                <AgentIcon agent={cli} className="h-3.5 w-3.5 shrink-0" />
-                <span>{cli}</span>
-                <ChevronDown className="h-3 w-3" strokeWidth={1.75} />
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSheet("model")}
-                className={cn(
-                  "h-7 px-2 text-[11.5px] soxu-mono truncate",
-                  vp.isUltraNarrow ? "max-w-[84px]" : "max-w-[116px]",
-                )}
-              >
-                {model.replace("group/", "").replace("auto/", "")}
-              </Button>
-
-              {activeProfile.supportsThinking && !vp.isUltraNarrow && (
-                <Button variant="ghost" size="sm" onClick={() => setSheet("thinking")} className="h-7 px-2 text-[11.5px]">
-                  <span>{THINKING_LABELS[thinking] ?? thinking}</span>
-                </Button>
-              )}
-
-              <ComposerPermissionButton
-                agentId={cli}
-                permLevel={permLevel}
-                isMac={vp.isMac}
-                onSelectPerm={(nextId, label) => {
-                  setPermLevel(nextId);
-                  flashToast(`操作权限已调整为「${label}」`);
+          <div
+            className={cn(
+              "w-full border border-[var(--soxu-border-strong)] bg-[var(--soxu-surface-composer)] flex flex-col overflow-hidden",
+              vp.isShortViewport ? "rounded-[18px]" : "rounded-[22px]",
+            )}
+          >
+            {/* 顶部轻质滑动折叠手把 + 文本输入 + 主操控栏 */}
+            <div className={cn("flex flex-col", vp.isShortViewport ? "px-2.5 pt-1 pb-1.5 gap-1" : "px-3 pt-1.5 pb-2 gap-1.5")}>
+              <div
+                className="flex items-center justify-center cursor-pointer select-none py-0.5"
+                onPointerDown={(e) => {
+                  composerSwipeStartYRef.current = e.clientY;
                 }}
-                onOpenSheet={sizeClass !== "wide" ? () => setSheet("perm") : undefined}
-              />
-
-              <ComposerHandoffMenu
-                currentCli={cli}
-                currentModel={model}
-                currentThinking={thinking}
-                selectedHandoff={selectedHandoff}
-                onSelectHandoff={(chipDraft) => {
-                  addComposerChip(chipDraft);
-                  flashToast(`已配置移交至 ${chipDraft.label}`);
-                }}
-                onClearHandoff={() => {
-                  if (handoffChip) {
-                    removeComposerChip(handoffChip.id);
-                    flashToast("已取消移交配置");
+                onPointerUp={(e) => {
+                  const startY = composerSwipeStartYRef.current;
+                  composerSwipeStartYRef.current = null;
+                  if (startY !== null && e.clientY - startY > 28) {
+                    setComposerCollapsed(true);
                   }
                 }}
-                onOpenSheet={sizeClass !== "wide" ? () => setSheet("handoff") : undefined}
+                onClick={() => setComposerCollapsed(true)}
+                title="点击或下滑收起输入舱为 40px 悬浮胶囊"
+                aria-label="收起输入舱"
+              >
+                <span className="h-1 w-9 rounded-full bg-[var(--soxu-border-strong)]" />
+              </div>
+
+              <ComposerChipBar chips={composerChips} onRemove={removeComposerChip} />
+
+              <textarea
+                ref={composerInputRef}
+                rows={vp.isShortViewport ? 1 : 2}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (isImeComposing(e)) return;
+                  if (e.key === "Escape" && queuedPrompts.length > 0) {
+                    e.preventDefault();
+                    setQueuedPrompts((prev) => prev.slice(0, -1));
+                  } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+                    e.preventDefault();
+                    setBehavior("queue");
+                    handleSubmitPrompt("queue");
+                  } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    const targetMode: TurnBehavior = activeProfile.supportsLiveSteer ? "steer" : "queue";
+                    setBehavior(targetMode);
+                    handleSubmitPrompt(targetMode);
+                  } else if (e.key === "Enter" && e.altKey) {
+                    e.preventDefault();
+                    setBehavior("interrupt");
+                    handleSubmitPrompt("interrupt");
+                  } else if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmitPrompt();
+                  }
+                }}
+                placeholder={
+                  targetKind === "quick"
+                    ? "输入问题随时开展无项目对话..."
+                    : isRunning
+                      ? `运行中（${behavior === "steer" ? "热纠偏" : behavior === "queue" ? "排队" : "打断重发"}）...`
+                      : "输入指令、@代理 移交上下文，或粘贴任务要求..."
+                }
+                className="w-full resize-none bg-transparent border-0 outline-none px-1 py-0.5 text-base text-[var(--soxu-text-primary)] placeholder:text-[var(--soxu-text-ghost)]"
               />
+
+              {/* 主操控行（减框减字不减功能：左 + | 权限 @，右 一体模型·思考 + 投递模式[宽行] + 发送键） */}
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+                  <ComposerPlusMenu
+                    hasWorkspace={targetKind === "workspace"}
+                    onAddChip={addComposerChip}
+                  />
+                  <span className="h-4 w-px bg-[var(--soxu-border-hairline)] shrink-0" />
+                  <ComposerPermissionButton
+                    agentId={cli}
+                    permLevel={permLevel}
+                    isMac={vp.isMac}
+                    showLabel={isWideComposerRow && vp.width >= 820}
+                    onSelectPerm={(nextId, label) => {
+                      setPermLevel(nextId);
+                      flashToast(`操作权限已调整为「${label}」`);
+                    }}
+                    onOpenSheet={sizeClass !== "wide" ? () => setSheet("perm") : undefined}
+                  />
+                  <ComposerHandoffMenu
+                    currentCli={cli}
+                    currentModel={model}
+                    currentThinking={thinking}
+                    selectedHandoff={selectedHandoff}
+                    iconOnly
+                    onSelectHandoff={(chipDraft) => {
+                      addComposerChip(chipDraft);
+                      flashToast(`已配置移交至 ${chipDraft.label}`);
+                    }}
+                    onClearHandoff={() => {
+                      if (handoffChip) {
+                        removeComposerChip(handoffChip.id);
+                        flashToast("已取消移交配置");
+                      }
+                    }}
+                    onOpenSheet={sizeClass !== "wide" ? () => setSheet("handoff") : undefined}
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                  <ComposerAgentModelPicker
+                    cli={cli}
+                    model={model}
+                    thinking={thinking}
+                    onSelectCli={(nextId) => handleSelectCli(nextId)}
+                    onSelectModel={(nextId) => handleSelectModel(nextId)}
+                    onSelectThinking={setThinking}
+                    onOpenSheet={sizeClass !== "wide" ? () => setSheet("model-config") : undefined}
+                  />
+
+                  {isWideComposerRow && targetKind === "workspace" && (
+                    <ComposerTurnBehaviorGroup
+                      mode={behavior}
+                      supportsLiveSteer={activeProfile.supportsLiveSteer}
+                      isMac={vp.isMac}
+                      onChange={setBehavior}
+                    />
+                  )}
+
+                  {isRunning && !draft.trim() && composerChips.length === 0 ? (
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      onClick={() => {
+                        setWorkspaces((prev) =>
+                          prev.map((w) => (w.id === activeWorkspace.id ? { ...w, bucket: "done" } : w)),
+                        );
+                        flashToast("已发送停止信号");
+                      }}
+                      aria-label="停止生成"
+                      className="shrink-0"
+                    >
+                      <Square className="h-3.5 w-3.5 fill-current" strokeWidth={1.75} />
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="default"
+                      size="icon"
+                      disabled={!draft.trim() && composerChips.length === 0}
+                      onClick={() => handleSubmitPrompt()}
+                      aria-label="发送指令"
+                      className="shrink-0"
+                    >
+                      <ArrowUp className="h-4 w-4" strokeWidth={2} />
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0 ml-auto">
-              <ContextUsageRing
-                model={model}
-                usedTokens={contextTokens}
-                compact={vp.isUltraNarrow}
-                onCompact={() => {
-                  setContextTokens((c) => Math.round(c * 0.42));
-                  flashToast("已完成上下文摘要压缩");
-                }}
-                onOpenSheet={sizeClass !== "wide" ? () => setSheet("context") : undefined}
-              />
+            {/* Oryn 底部遥测微脚条：柔和分隔线 + 窄屏投递模式/状态 + 彩色小圆环百分比 + 参考费用 + 无外框速度 */}
+            <div className="border-t border-[var(--soxu-border-hairline)] bg-[var(--soxu-surface-card-muted)]/45 px-3 py-1.5 flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                {!isWideComposerRow && targetKind === "workspace" ? (
+                  <ComposerTurnBehaviorGroup
+                    mode={behavior}
+                    supportsLiveSteer={activeProfile.supportsLiveSteer}
+                    isMac={vp.isMac}
+                    onChange={setBehavior}
+                  />
+                ) : (
+                  <span className="text-[11px] text-[var(--soxu-text-ghost)] truncate">
+                    {targetKind === "workspace" ? (isRunning ? "运行中 · 可随时介入纠偏" : "就绪 · 点击右侧遥测查看明细") : "无项目自由对话"}
+                  </span>
+                )}
+              </div>
 
-              <SessionStatsPopover
-                stats={sessionStats}
-                compact={vp.isUltraNarrow}
-                onOpenSheet={sizeClass !== "wide" ? () => setSheet("stats") : undefined}
-              />
-
-              {targetKind === "workspace" && (
-                <ComposerTurnBehaviorGroup
-                  mode={behavior}
-                  supportsLiveSteer={activeProfile.supportsLiveSteer}
-                  isMac={vp.isMac}
-                  onChange={setBehavior}
-                />
-              )}
-              {isRunning && !draft.trim() && composerChips.length === 0 ? (
-                <Button
-                  variant="destructive"
-                  size="icon"
-                  onClick={() => {
-                    setWorkspaces((prev) =>
-                      prev.map((w) => (w.id === activeWorkspace.id ? { ...w, bucket: "done" } : w)),
-                    );
-                    flashToast("已发送停止信号");
+              <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+                <ContextUsageRing
+                  model={model}
+                  usedTokens={contextTokens}
+                  compact={false}
+                  onCompact={() => {
+                    setContextTokens((c) => Math.round(c * 0.42));
+                    flashToast("已完成上下文摘要压缩");
                   }}
-                  aria-label="停止生成"
-                >
-                  <Square className="h-3.5 w-3.5 fill-current" strokeWidth={1.75} />
-                </Button>
-              ) : (
-                <Button
-                  variant="default"
-                  size="icon"
-                  disabled={!draft.trim() && composerChips.length === 0}
-                  onClick={() => handleSubmitPrompt()}
-                  aria-label="发送指令"
-                >
-                  <ArrowUp className="h-4 w-4" strokeWidth={2} />
-                </Button>
-              )}
+                  onOpenSheet={sizeClass !== "wide" ? () => setSheet("context") : undefined}
+                />
+                <SessionStatsPopover
+                  stats={sessionStats}
+                  showCost={!vp.isUltraNarrow}
+                  compact={vp.isUltraNarrow}
+                  onOpenSheet={sizeClass !== "wide" ? () => setSheet("stats") : undefined}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -2608,7 +2792,7 @@ function MobileAppInner({
           /* 折叠屏展开 / 左右双屏分栏（跨铰链零控件跨缝） */
           <div className="flex-1 min-h-0 flex w-full overflow-hidden">
             <section
-              className="flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--soxu-surface-canvas)]"
+              className="relative flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--soxu-surface-canvas)]"
               style={
                 vp.leftSegmentWidth > 0
                   ? { width: `${vp.leftSegmentWidth}px`, flexShrink: 0 }
@@ -2662,7 +2846,7 @@ function MobileAppInner({
             {CompactSideRail}
             <div className="flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden">
               <div
-                className="flex flex-col min-h-0 overflow-hidden"
+                className="relative flex flex-col min-h-0 overflow-hidden"
                 style={{
                   maxHeight: vp.topSegmentHeight > 0 ? `${vp.topSegmentHeight}px` : "52dvh",
                   flex: "1 1 auto",
@@ -2689,7 +2873,7 @@ function MobileAppInner({
         ) : (
           /* 横屏紧凑左轨 / 平板 regular / 桌面 wide 通用结构 */
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            {HeaderBar}
+            {!isFloatingHeader && HeaderBar}
             <div className="flex-1 min-h-0 flex max-w-[1280px] w-full mx-auto overflow-hidden">
               {showCompactRail && CompactSideRail}
               {sizeClass === "wide" && (
@@ -2697,7 +2881,8 @@ function MobileAppInner({
                   {WorkspaceRail}
                 </div>
               )}
-              <main className="flex-1 min-w-0 min-h-0 flex flex-col justify-between overflow-hidden">
+              <main className="relative flex-1 min-w-0 min-h-0 flex flex-col justify-between overflow-hidden">
+                {isFloatingHeader && HeaderBar}
                 {MainBodyView}
                 {ComposerSection}
               </main>
@@ -2787,6 +2972,20 @@ function MobileAppInner({
               </div>
             </SheetContent>
           )}
+          {sheet === "model-config" && (
+            <SheetContent title="代理、模型与思考强度" subtitle="一站式切换底层原生驱动、模型版本与思考深度" tall>
+              <AgentModelConfigPanel
+                cli={cli}
+                model={model}
+                thinking={thinking}
+                onSelectCli={(nextId) => handleSelectCli(nextId, undefined, true)}
+                onSelectModel={(nextId) => handleSelectModel(nextId, true)}
+                onSelectThinking={setThinking}
+                onDone={() => setSheet(null)}
+              />
+            </SheetContent>
+          )}
+
           {sheet === "cli" && (
             <SheetContent title="切换原生代理驱动" subtitle="复用本机已登录认证与本地会话">
               {CLI_OPTIONS.map((c) => (

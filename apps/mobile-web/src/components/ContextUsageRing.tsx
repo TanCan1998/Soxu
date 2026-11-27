@@ -22,6 +22,22 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+/**
+ * 以 12 点钟为起点顺时针计算 SVG 圆弧路径，避免依赖 stroke-dasharray 与 CSS 旋转，
+ * 确保在 Chrome、Safari、GPUI 与 Moli 等各渲染引擎中始终稳定可见。
+ */
+function describeProgressArc(cx: number, cy: number, r: number, pct: number): string {
+  const clamped = Math.max(2, Math.min(99.5, pct));
+  const startAngle = -Math.PI / 2;
+  const endAngle = startAngle + (clamped / 100) * Math.PI * 2;
+  const x1 = cx + r * Math.cos(startAngle);
+  const y1 = cy + r * Math.sin(startAngle);
+  const x2 = cx + r * Math.cos(endAngle);
+  const y2 = cy + r * Math.sin(endAngle);
+  const largeArcFlag = clamped > 50 ? 1 : 0;
+  return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${largeArcFlag} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+}
+
 export function ContextUsagePanel({
   model,
   usedTokens,
@@ -134,10 +150,7 @@ export function ContextUsageRing({
   const rawPct = Math.min(100, Math.max(0.1, (usedTokens / limit) * 100));
   const pctLabel = rawPct >= 99.95 ? "100%" : `${rawPct.toFixed(1)}%`;
 
-  const r = 7;
-  const circumference = 2 * Math.PI * r;
-  const offset = circumference * (1 - rawPct / 100);
-
+  const r = 6.5;
   const ringColor =
     rawPct >= 88
       ? "var(--soxu-semantic-danger)"
@@ -150,28 +163,29 @@ export function ContextUsageRing({
       type="button"
       onClick={onOpenSheet}
       className={cn(
-        "soxu-hit-44 inline-flex items-center gap-1.5 h-7 px-2 rounded-full border border-transparent hover:border-[var(--soxu-border-subtle)] hover:bg-[var(--soxu-interaction-hover)] transition-colors cursor-pointer text-[11.5px] soxu-tabular",
+        "soxu-hit-44 inline-flex items-center gap-1.5 h-8 px-1.5 rounded-lg border border-transparent hover:bg-[var(--soxu-interaction-hover)] transition-colors cursor-pointer text-[12px] soxu-tabular shrink-0",
         className,
       )}
       aria-label={`上下文窗口用量 ${pctLabel}`}
     >
-      <svg width="16" height="16" viewBox="0 0 18 18" className="-rotate-90 shrink-0" aria-hidden="true">
-        <circle cx="9" cy="9" r={r} fill="none" stroke="var(--soxu-border-strong)" strokeWidth="2.2" />
-        <circle
-          cx="9"
-          cy="9"
-          r={r}
-          fill="none"
-          stroke={ringColor}
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          className="transition-all duration-200 ease-[var(--soxu-ease-out)]"
-        />
-      </svg>
+      <span className="inline-flex items-center justify-center shrink-0" style={{ color: ringColor }}>
+        <svg width="16" height="16" viewBox="0 0 18 18" className="shrink-0" aria-hidden="true">
+          <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeWidth="2.2" strokeOpacity="0.24" />
+          {rawPct >= 99.5 ? (
+            <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeWidth="2.2" />
+          ) : (
+            <path
+              d={describeProgressArc(9, 9, r, rawPct)}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            />
+          )}
+        </svg>
+      </span>
       {!compact && (
-        <span className="soxu-mono font-medium" style={{ color: ringColor }}>
+        <span className="soxu-mono font-medium whitespace-nowrap" style={{ color: ringColor }}>
           {pctLabel}
         </span>
       )}

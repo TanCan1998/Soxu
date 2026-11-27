@@ -77,6 +77,7 @@ export type SheetKind =
   | "cli"
   | "model"
   | "thinking"
+  | "model-config"
   | "perm"
   | "handoff"
   | "context"

@@ -112,7 +112,7 @@ export function HoverExpandDock({
             aria-expanded={isExpanded}
             aria-label={triggerLabel}
             className={cn(
-              "soxu-hit-44 relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)] transition-colors cursor-pointer",
+              "soxu-hit-44 relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--soxu-text-secondary)] hover:bg-[var(--soxu-interaction-hover)] hover:text-[var(--soxu-text-primary)] transition-colors cursor-pointer",
               pinned && "bg-[var(--soxu-interaction-selected)] text-[var(--soxu-text-primary)]",
             )}
           >
@@ -124,7 +124,7 @@ export function HoverExpandDock({
 
       <div
         className={cn(
-          "inline-flex items-center gap-0.5 overflow-hidden transition-all duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)]",
+          "inline-flex items-center gap-1 overflow-hidden transition-all duration-[var(--soxu-motion-panel)] ease-[var(--soxu-ease-out)]",
           "max-lg:absolute max-lg:top-[calc(100%+6px)] max-lg:z-[var(--soxu-z-popover)] max-lg:rounded-full max-lg:border max-lg:border-[var(--soxu-border-strong)] max-lg:bg-[var(--soxu-surface-floating)] max-lg:px-1.5 max-lg:py-1",
           expandDirection === "right" ? "max-lg:left-0" : "max-lg:right-0",
           isExpanded

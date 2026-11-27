@@ -145,12 +145,12 @@
   --soxu-layout-macos-traffic-lights-inset: 78px;
 
   /* Component Sizing */
-  --soxu-size-titlebar-height: 38px;
-  --soxu-size-tabbar-height: 36px;
-  --soxu-size-subagent-bar-height: 28px;
-  --soxu-size-statusbar-height: 26px;
-  --soxu-size-sidebar-row-height: 32px;
-  --soxu-size-tool-card-header-height: 34px;
+  --soxu-size-titlebar-height: 48px;
+  --soxu-size-tabbar-height: 40px;
+  --soxu-size-subagent-bar-height: 32px;
+  --soxu-size-statusbar-height: 30px;
+  --soxu-size-sidebar-row-height: 36px;
+  --soxu-size-tool-card-header-height: 38px;
   --soxu-size-diff-gutter-width: 52px;
   --soxu-size-activity-diff-max-height: 400px;
   --soxu-size-permission-detail-max-height: 96px;
