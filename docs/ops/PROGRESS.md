@@ -42,8 +42,8 @@
 | **M1** | Protocol v1, Domain Core & Daemon Spine | ✅ 已完成 | `soxu-protocol` 全量 RPC/WS `seq` 契约、`soxu-core` 状态桶/能力协商/安全红线/队列草稿、`soxu-daemon` SQLite WAL 持久化 + WS 增量追平 + `#offer=`/6 位码鉴权、`soxu-cli` 闭环（`#5` / `#6` / `#7`） |
 | **M2** | Magpie Discovery & 7 Native CLI Drivers | M2h、M2j 已完成，M2i 隔离只读快聊已合入 | 六种原生只读 CLI 已合入，Pi 原生 `Queue` / `Steer` / `Stop` 已验证。Antigravity 的 Daemon 托管快聊已由 PR `#55` 合入，项目目录入口及七代理全验收仍待完成。 |
 | **M3** | Git Worktree Pool, Checkpoints & Commit Engine | M3a–M3d、M3e 注册和检出、宿主接入与两份设计已合入 | `#49` 受控注册与只读诊断、`#51` 固定提交检出与失败禁用已合入。`#56` 交付宿主登记、会话就绪门禁与 `direct` MCP 上下文准备。`#57`、`#58` 已完成设计审定。`#63`–`#65`（PR `#66`–`#68`）补齐流程治理、M3 Git 公共契约与 Checkpoint 底座。`#69` / PR `#73` 已合入 Worktree 只读原生会话联调；`#71` / PR `#84` 已合入显式受控 Init/Clone；恢复预览、Checkpoint、Rewind、结构化提交执行与 `direct` MCP 运行时挂载仍待实现。Linux 真机端到端链路待实测。 |
-| **M4** | Live Mobile PWA & GPUI Workbench Foundation | ⏳ 待启动 | **双轨 100% 正交并行**：`apps/mobile-web` 去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对与 13 组视口验收；`soxu-desktop` GPUI 令牌编译器、双开源字体联动、可扩展 `i18n`、7 层焦点栈与四栏自适应壳层 |
-| **M5** | GPUI Core Views: Transcript, Composer & Inspector | ⏳ 待启动 | `soxu-desktop` 三路并行落地：`<=8.3Hz` 虚拟对话流 + 5 类工具卡/审批卡/提问卡 + 20px 轮次导航轨、760px 同步宽输入舱 + `@agent` 移交 + 三色圆环统计、右栏 Diff/Files、7 分区设置与核心业务模态框 |
+| **M4** | Live Mobile PWA & GPUI Workbench Foundation | ⏳ 待启动 | **双轨 100% 正交并行**：`apps/mobile-web` 去 Mock 接通真实 Daemon WS/`rust-embed`/扫码配对与 13 组视口验收；`soxu-desktop` GPUI 令牌编译器、双开源字体联动、可扩展 `i18n`、7 层焦点栈与四栏自适应壳层。**设计基准（PR `#101` 已合入）**：多形态全自适应布局（`useAdaptiveViewport`/`VisualViewport`、`320px` 零溢出）、三段悬浮毛玻璃胶囊顶栏、`SinkLayout` 下沉侧栏与 44px 热区纪律 |
+| **M5** | GPUI Core Views: Transcript, Composer & Inspector | ⏳ 待启动 | `soxu-desktop` 三路并行落地：`<=8.3Hz` 虚拟对话流 + 5 类工具卡/审批卡/提问卡 + 20px 轮次导航轨、760px 同步宽输入舱 + `@agent` 移交 + 三色圆环统计、右栏 Diff/Files、7 分区设置与核心业务模态框。**设计基准（PR `#101` 已合入）**：收件箱一触分诊台、`ToolCallCard` 意图卡、`Artifact` 审批卡、`LiveSteps` 默认折叠单行焦点、底部 `border-t` 遥测微脚条与零页签居中微点阵引导页 |
 | **M6** | Scripts, PTY Terminal, Search & Automation | ⏳ 待启动 | `paseo.json` 受管脚本遥控、`#050505` 多窗格受控 PTY 终端、`Cmd+K` 五分区检索 + CodeGraph 符号补全 + 按需三步 Onboarding、Schedules & Heartbeats 定时调度中心、50,000 行 Diff 压测与跨平台打包 |
 
 ### 2.1 分阶段串并行开发顺序（Paseo Worktree 编排主线）
@@ -281,9 +281,9 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 ## 4. 下一步紧接行动队列（Next Actions）
 
-1. `#90`、`#94`、`#96`、`#98`、`#100`、`#103` 与 `#105` / PR `#106`（`96b127ae` → main `061c4f25`，run `45983857661` success）均已合入 `main`。主控独立验收并锁 SHA 合入 `#88`（CI-C）在 `061c4f25` 上的固定候选；**本 PR 合入且主线绿灯是后续两个波次的共同前置**。
-2. 后续正式任务已建立：`#92`（CI-D）与 `#93`（CI-E/F）。两者**写入面正交、可并行排期**，只共同依赖上述主线绿灯；**CI-D 与 CI-E/F 之间没有先后依赖**，不必等其一完成再开另一个；并行时不得共用同一工作树，各自严守 Issue 声明的 Owned Paths，涉及公共契约的变更仍先走独立契约 PR。
-3. CI-C 已在册交付（合流候选待主控验收）：把 CI-B 的结构化计划（`platforms` / `platformMatrix` / `requiredPlatforms` / `requiredJobs` / `testProfiles` 与 `baseSha` / `headSha` / `checkoutSha`）接到真实三平台动态矩阵执行与逐平台证据聚合：每个平台一个 Rust 矩阵实例、依赖/Clippy/测试共用一个构建目录，纯 Rust 格式检查在 Ubuntu 上跑一次；`CI Gate` 检查名、必跑只认 `success` 的严格证据与失败闭合保持不变，不为接入矩阵而削弱对账。
+1. **CI-C（`#88` / PR `#89`）已合入 `main` `50fb201`（run `46001187539`，三平台 success）。** 合流前先由 `#107` / PR `#108`（`4173853`）热修复 Darwin 夹具误期望，再合流重跑 `Rust (windows)` / `Rust (linux)` / `Rust (macos-arm64)` 全绿并锁 SHA 合入。CI-C 已把 CI-B 的结构化计划（`platforms` / `platformMatrix` / `requiredPlatforms` / `requiredJobs` / `testProfiles` 与 `baseSha` / `headSha` / `checkoutSha`）接到真实三平台动态矩阵执行与逐平台证据聚合；`CI Gate` 检查名、必跑只认 `success` 的严格证据与失败闭合保持不变。**本 PR 合入且主线绿灯是后续两个波次的共同前置。**
+2. 后续正式任务已建立：`#92`（CI-D）与 `#93`（CI-E/F）。两者**写入面正交、可并行排期**，只共同依赖 CI-C 合入后的主线绿灯；**CI-D 与 CI-E/F 之间没有先后依赖**，不必等其一完成再开另一个；并行时不得共用同一工作树，各自严守 Issue 声明的 Owned Paths，涉及公共契约的变更仍先走独立契约 PR。
+3. UI 精修 PR `#101`（`089a3e8`）已合入 `main`。M4/M5 的 GitHub 里程碑描述与本看板设计基准已同步 PR `#101` 交付的多形态全自适应布局、`SinkLayout`、`ToolCallCard`、`Artifact` 审批卡、`LiveSteps` 折叠焦点与零页签引导页。
 4. Git 后续候选继续按契约与共享写入范围排序：`#57-2` 只读恢复预览（恢复执行须另经二次授权）、`#58-D` 先建 Safety Snapshot 再执行 Rewind、`#58-E` 文件级结构化提交的预检与执行；`direct` MCP 运行时挂载与 Worktree 内写权限另排期，涉及 `soxu-protocol` 的变更先走独立契约 PR。
 5. 未经核验的跨平台原生测试与正式发版仍列为待办。Intel 只保留两条入口：显式 `full-with-intel` 手动入口与正式发版（tag）入口；普通 `-Full` 不含 Intel，也不从文件路径或 `release.yml` 修改推导。`repository_create` 的 `/proc/self/fd`、Windows reparse 加固与 Darwin 写入拒绝属 OS 契约，由常规 Windows/Linux/macOS ARM64 三平台覆盖。
 6. 首轮 `run 45914578287`（attempt 1）暴露的两处冻结源码缺陷均属 `#90` / PR `#91`，已修复并合入 `354fbd7b`：Linux `crates/soxu-git/tests/diff.rs:483` 的整树快照与夹具后台 `git maintenance` 竞态（夹具提交改为与生产只读入口同源的 `-c maintenance.auto=false -c gc.auto=0` 守卫，并加 trace2 `child_start`/`child_exit` 回归）；Darwin `crates/soxu-git/src/repository_create/platform.rs:336` 未使用参数与 `:353` `needless_return`。两者均未以删除断言、放宽元数据比对或 `allow` 压告警处理。另，`run 45934505956` 在 `macos-15` 报的 `soxu-magpie` 两项导入是一条**独立诊断**，由 `#96` / PR `#97` 处理并合入 `e6ea5ba8`，不属首轮同一缺陷链。首轮 `run 45914578287`（attempt 1）失败仍作为真实证据保留，不以刷新覆盖。
