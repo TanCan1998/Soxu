@@ -1128,9 +1128,9 @@ async fn fifty_thousand_lines_return_metadata_but_oversized_review_fails_closed(
     assert_eq!(snapshot(&fixture.temp), before);
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
-async fn unix_preserves_raw_linebreak_name_and_refuses_a_replaced_symlink() {
+async fn linux_preserves_raw_linebreak_name_and_refuses_a_replaced_symlink() {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::symlink;
 

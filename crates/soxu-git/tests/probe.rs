@@ -380,9 +380,9 @@ async fn marker_scripts_prove_local_include_and_worktree_sources_are_safe() {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
-async fn preserves_non_utf8_and_newline_repository_paths() {
+async fn linux_preserves_non_utf8_and_newline_repository_paths() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
     let fixture = Fixture::new();
