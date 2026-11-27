@@ -10,10 +10,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
-use soxu_git::{
-    GitProbe, InitMode, RepositoryCreateCoordinator, RepositoryCreateError,
-    RepositoryCreateRequest, RepositorySource,
-};
+use soxu_git::{RepositoryCreateCoordinator, RepositoryCreateError};
+// 仅由各平台写入/只读探测用例使用的入口；Darwin 等平台只验证协调域本身 fail-closed。
+#[cfg(any(target_os = "linux", windows))]
+use soxu_git::{GitProbe, InitMode, RepositoryCreateRequest, RepositorySource};
 #[cfg(target_os = "linux")]
 use soxu_git::{
     RepositoryCreateOutcome, RepositoryCreateResult, RepositoryCreateStage, RepositoryOperation,
@@ -74,6 +74,7 @@ fn private_directory(path: &Path) {
 #[cfg(not(unix))]
 fn private_directory(_path: &Path) {}
 
+#[cfg(any(target_os = "linux", windows))]
 fn probe() -> GitProbe {
     GitProbe::discover().expect("需要本机 Git 原生入口")
 }
@@ -415,6 +416,7 @@ fn create_directory_link(target: &Path, link: &Path) -> bool {
     }
 }
 
+#[cfg(any(target_os = "linux", windows))]
 fn init_request<'a>(id: &'a str, root: &'a Path, name: &'a str) -> RepositoryCreateRequest<'a> {
     RepositoryCreateRequest {
         request_id: id,
@@ -1523,14 +1525,11 @@ async fn clone_snapshot_isolates_later_source_changes() {
 #[tokio::test]
 async fn unsupported_platform_refuses_write_before_touching_state() {
     let fixture = Fixture::new("other-platform");
-    let coordinator = RepositoryCreateCoordinator::open(fixture.state()).expect("协调域");
-    let error = probe()
-        .create_repository(
-            &coordinator,
-            init_request("rc-other-1", &fixture.parent(), "blocked"),
-        )
-        .await
-        .expect_err("缺少目录句柄原语的平台必须 fail-closed");
+    // 缺少受控目录句柄原语的平台（如 Darwin）在打开协调域时即 fail-closed：
+    // `open_chain -> open_handle` 没有不退化到普通 open 的等价原语，打不开就是第一道拒绝。
+    // 此处不能断言 open 成功，否则等于要求生产代码放宽零写入契约。
+    let error = RepositoryCreateCoordinator::open(fixture.state())
+        .expect_err("缺少目录句柄原语的平台必须在打开协调域时就 fail-closed");
     assert!(matches!(
         error,
         RepositoryCreateError::UnsupportedPlatform(_)
