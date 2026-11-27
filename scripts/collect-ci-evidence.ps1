@@ -150,22 +150,33 @@ function Get-LogObservation([string]$Path) {
   # 每个执行单元（顶层二进制或其派生进程）都会先打印一行 running N tests。
   # 段内 running 行数与 test result 行数不一致，就说明有执行单元未结束或日志被截断。
   $startPattern = '^\s*running \d+ tests?\s*$'
-  $resultPattern = 'test result:\s*(?<verdict>[A-Za-z]+)\.\s*(?<p>\d+)\s+passed;\s*(?<f>\d+)\s+failed;\s*(?<i>\d+)\s+ignored;\s*(?<m>\d+)\s+measured;\s*(?<x>\d+)\s+filtered out'
+  $startCountPattern = 'running\s+(\d+)\s+tests?'
+  # 汇总行必须独立成行且行首就是 test result：
+  # 普通日志文字里嵌入的 “... printed: test result: ...” 不是 libtest 正式汇总。
+  $resultPattern = '^test result:\s*(?<verdict>[A-Za-z]+)\.\s*(?<p>\d+)\s+passed;\s*(?<f>\d+)\s+failed;\s*(?<i>\d+)\s+ignored;\s*(?<m>\d+)\s+measured;\s*(?<x>\d+)\s+filtered out'
 
   $segments = [System.Collections.Generic.List[object]]::new()
   $outsideResults = [System.Collections.Generic.List[object]]::new()
   $outsideStarts = 0
+  $outsideStartTotal = -1
   $outsideResultsBeforeStart = 0
   $current = $null
   $totalResultLines = 0
   foreach ($line in ($text -split "`r?`n")) {
     if ($line -match $suitePattern) {
-      $current = [pscustomobject]@{ Results = [System.Collections.Generic.List[object]]::new(); Starts = 0; ResultsBeforeStart = 0 }
+      $current = [pscustomobject]@{ Results = [System.Collections.Generic.List[object]]::new(); Starts = 0; StartTotal = -1; ResultsBeforeStart = 0 }
       $segments.Add($current)
       continue
     }
     if ($line -match $startPattern) {
-      if ($null -eq $current) { $outsideStarts++ } else { $current.Starts++ }
+      $declared = if ($line -match $startCountPattern) { [int]$Matches[1] } else { -1 }
+      if ($null -eq $current) {
+        $outsideStarts++
+        if ($outsideStarts -eq 1) { $outsideStartTotal = $declared }
+      } else {
+        $current.Starts++
+        if ($current.Starts -eq 1) { $current.StartTotal = $declared }
+      }
       continue
     }
     $match = [regex]::Match($line, $resultPattern)
@@ -194,15 +205,23 @@ function Get-LogObservation([string]$Path) {
   $rows = [System.Collections.Generic.List[object]]::new()
   $reason = ""
   $incomplete = $false
+  $mismatch = $false
   if ($segments.Count -eq 0) {
     # 无套件边界：必须“一个开始行 + 一条汇总 + 顺序正确”才能当作单测试套件。
     if ($outsideResults.Count -gt 1) {
       $reason = "unattributed_test_result_lines"
     } elseif ($outsideResults.Count -eq 1) {
-      if ($outsideStarts -eq 1 -and $outsideResultsBeforeStart -eq 0) {
-        $rows.Add($outsideResults[0])
-      } else {
+      if ($outsideStarts -ne 1 -or $outsideResultsBeforeStart -ne 0) {
         $reason = "incomplete_suite_summary"
+      } else {
+        # 开始行声明的测试数必须等于 passed+failed+ignored；filtered/measured 不参与。
+        $row = $outsideResults[0]
+        $observed = $row.Passed + $row.Failed + $row.Ignored
+        if ($outsideStartTotal -ne $observed) {
+          $reason = "result_count_mismatch"
+        } else {
+          $rows.Add($row)
+        }
       }
     } elseif ($outsideStarts -gt 0) {
       $reason = "incomplete_suite_summary"
@@ -228,11 +247,20 @@ function Get-LogObservation([string]$Path) {
       }
       # 恰好一条汇总：只有开、始、汇总顺序正确且数量一致时才能归属到该套件。
       if ($segment.Starts -ne 1 -or $segment.ResultsBeforeStart -ne 0) { $incomplete = $true; continue }
-      $rows.Add($segment.Results[0])
+      $row = $segment.Results[0]
+      $observed = $row.Passed + $row.Failed + $row.Ignored
+      if ($segment.StartTotal -ne $observed) {
+        # 形式合法但数字不一致（如 running 3 tests 却只报 1 passed）也不采信。
+        $mismatch = $true
+        continue
+      }
+      $rows.Add($row)
     }
     $observation.NestedResultLines = $nested
     if ($ambiguous) {
       $reason = "nested_test_result_lines"
+    } elseif ($mismatch) {
+      $reason = "result_count_mismatch"
     } elseif ($incomplete) {
       $reason = "incomplete_suite_summary"
     } elseif ($rows.Count -eq 0) {

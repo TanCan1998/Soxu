@@ -1364,11 +1364,12 @@ try {
   $testLog = Join-Path $collectDir "test.log"
   Set-Content -LiteralPath $fetchLog -Value "Updating crates.io index" -NoNewline -Encoding utf8
   Set-Content -LiteralPath $clippyLog -Value "Finished dev profile target(s)" -NoNewline -Encoding utf8
-  # 顶层多套件形状：每个 Cargo 套件边界内恰好一条 test result，才能可靠累加。
+  # 顶层多套件形状：每个 Cargo 套件边界内恰好一条 test result，且 running N 与
+  # passed+failed+ignored 一致（libtest 的 N 是筛选后数量，filtered 不参与总数）。
   $testLogBody = @(
     '   Running unittests src\lib.rs (target\debug\deps\soxu-fixture.exe)'
     ''
-    'running 156 tests'
+    'running 161 tests'
     'test result: ok. 156 passed; 0 failed; 5 ignored; 0 measured; 2 filtered out; finished in 1.20s'
     '   Running tests\extra.rs (target\debug\deps\extra-fixture.exe)'
     ''
@@ -1605,9 +1606,9 @@ function Get-LogObservation([string]$Path) {
     }
   }
 
-  # 合法顶层筛选：单套件只有一条 result 时 filtered>0 仍必须正确计数。
+  # 合法顶层筛选：单套件只有一条 result 时 filtered>0 仍必须正确计数（N 含 ignored）。
   $shapeFiltered = Invoke-LogShapeStage 'single-filtered' @'
-running 8 tests
+running 5 tests
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.10s
 '@
   if ($null -ne $shapeFiltered.Record) {
@@ -1775,6 +1776,82 @@ error: could not compile soxu-git (lib) due to 2 previous errors
       Assert-Pass "证据通过：嵌套日志产生的未知计数阶段被 Evidence 接受" `
         (Invoke-GateEvidence -PlanJson $evPlan -Documents @($nestedDoc, $goodDocs[1], $goodDocs[2]) -JobsJson $goodJobs)
     }
+  }
+
+  # 形式合法但数字不一致：running 3 tests 却只报 1 passed，必须未知（不采信）。
+  $shapeCountMismatch = Invoke-LogShapeStage 'count-mismatch' @'
+   Running tests/top.rs (target/debug/deps/top-c)
+
+running 3 tests
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.02s
+'@
+  if ($null -ne $shapeCountMismatch.Record) {
+    Assert-Check ($shapeCountMismatch.Record.countsKnown -eq $false) "开始行数字与汇总不一致时不得计数"
+    Assert-Check ($null -eq $shapeCountMismatch.Record.counts) "数字不一致时 counts 必须为 null"
+    Assert-Check ($shapeCountMismatch.Record.countsReason -eq 'result_count_mismatch') "数字不一致原因必须稳定（实际 $($shapeCountMismatch.Record.countsReason)）"
+  }
+
+  # 无边界但只有一个开始与一个汇总时，同样校验开始行数字。
+  $shapeCountMismatchNoBoundary = Invoke-LogShapeStage 'count-mismatch-noboundary' @'
+running 3 tests
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.02s
+'@
+  if ($null -ne $shapeCountMismatchNoBoundary.Record) {
+    Assert-Check ($shapeCountMismatchNoBoundary.Record.countsKnown -eq $false) "无边界时数字不一致也不得计数"
+    Assert-Check ($shapeCountMismatchNoBoundary.Record.countsReason -eq 'result_count_mismatch') "无边界数字不一致原因必须稳定（实际 $($shapeCountMismatchNoBoundary.Record.countsReason)）"
+  }
+
+  # 普通文字中嵌入的 test result 不是正式汇总（汇总行必须行首独立）。
+  $shapeEmbedded = Invoke-LogShapeStage 'embedded-summary' @'
+   Running tests/top.rs (target/debug/deps/top-c)
+
+running 1 test
+thread printed: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.02s
+'@
+  if ($null -ne $shapeEmbedded.Record) {
+    Assert-Check ($shapeEmbedded.Record.countsKnown -eq $false) "行内嵌入的 test result 不得当作汇总"
+    Assert-Check ($shapeEmbedded.Record.testResultLines -eq 0) "行内嵌入不得计入 test result 行数（实际 $($shapeEmbedded.Record.testResultLines)）"
+    Assert-Check ($shapeEmbedded.Record.countsReason -eq 'incomplete_suite_summary') "嵌入后等价于无汇总，原因必须稳定（实际 $($shapeEmbedded.Record.countsReason)）"
+  }
+
+  # 合法正例：running 2 tests + 1 passed + 1 ignored（16 filtered 不参与总数）。
+  $shapeFilteredIgnored = Invoke-LogShapeStage 'filtered-ignored' @'
+   Running tests/top.rs (target/debug/deps/top-c)
+
+running 2 tests
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 16 filtered out; finished in 0.02s
+'@
+  if ($null -ne $shapeFilteredIgnored.Record) {
+    Assert-Check ($shapeFilteredIgnored.Record.countsKnown -eq $true) "合法 filtered+ignored 形状必须可计数"
+    Assert-Check (
+      $shapeFilteredIgnored.Record.counts.passed -eq 1 -and
+      $shapeFilteredIgnored.Record.counts.ignored -eq 1 -and
+      $shapeFilteredIgnored.Record.counts.filtered -eq 16 -and
+      $shapeFilteredIgnored.Record.counts.failed -eq 0
+    ) "合法形状计数必须原样保留（实际 $($shapeFilteredIgnored.Record.counts | ConvertTo-Json -Compress)）"
+  }
+
+  # 完整失败 + N 一致：已知计数 + test_failed 分型。
+  $shapeCompleteFailed = Invoke-LogShapeStage 'complete-failed' @'
+   Running tests/a.rs (target/debug/deps/a)
+
+running 2 tests
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s
+'@ 101
+  if ($null -ne $shapeCompleteFailed.Record) {
+    Assert-Check ($shapeCompleteFailed.Record.countsKnown -eq $true -and $shapeCompleteFailed.Record.counts.failed -eq 1) "完整失败形状必须可计数"
+    Assert-Check ($shapeCompleteFailed.Record.status -eq 'test_failed') "完整失败仍须判 test_failed"
+  }
+
+  # 零测试套件（Doc-tests 空）必须可计数为 0。
+  $shapeZero = Invoke-LogShapeStage 'zero-tests' @'
+   Running unittests src/lib.rs (target/debug/deps/a)
+
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+'@
+  if ($null -ne $shapeZero.Record) {
+    Assert-Check ($shapeZero.Record.countsKnown -eq $true -and $shapeZero.Record.counts.passed -eq 0) "零测试套件必须可计数为 0"
   }
 
   # ============ 三·四、矩阵作业的 Verify 逐实例来源 ============
