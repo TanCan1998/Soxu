@@ -17,12 +17,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
-use tokio::sync::mpsc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
+use tokio::task::JoinHandle;
 
 /// 单次运行累计输出预算（stdout + stderr 合计），超出后丢弃并置截断标记。
 pub const SCRIPT_OUTPUT_LIMIT_BYTES: usize = 256 * 1024;
@@ -34,6 +35,21 @@ pub const SCRIPT_MAX_RETAINED_RUNS: usize = 64;
 pub const SCRIPT_REAP_WINDOW: Duration = Duration::from_secs(5);
 /// 子进程状态轮询间隔（有界等待的最小粒度）。
 const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// 关停时等待在飞运行收敛的默认窗口。
+pub const SCRIPT_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+/// 关停等待的轮询粒度。
+const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// 关停结论：绝不把「没法确认」当成「已经回收干净」。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScriptShutdownReport {
+    /// 关停时仍在飞（非终态）的运行数。
+    pub requested: usize,
+    /// 在窗口内收敛并确认终态的运行数。
+    pub confirmed: usize,
+    /// 窗口内未收敛、已取消但仍需标为「回收未确认」的运行标识。
+    pub unconfirmed: Vec<String>,
+}
 
 /// 运行生命周期事件出口。
 ///
@@ -148,6 +164,12 @@ pub struct ScriptRun {
     output: Arc<OutputBudget>,
     stop: mpsc::Sender<bool>,
     reap: Mutex<Option<ReapOutcome>>,
+    /// 并发许可：运行进入终态即归还，`Drop` 再兜底一次。
+    lease: Mutex<Option<OwnedSemaphorePermit>>,
+    /// 执行任务的句柄（关停时用于取消与有界等待）。
+    task: Mutex<Option<JoinHandle<()>>>,
+    /// 直接子进程标识（关停兜底收敛进程树用；0 表示尚未派生）。
+    pid: AtomicU32,
 }
 
 impl ScriptRun {
@@ -167,6 +189,21 @@ impl ScriptRun {
     #[must_use]
     pub fn reap_outcome(&self) -> Option<ReapOutcome> {
         *lock(&self.reap)
+    }
+
+    /// 直接子进程标识（尚未派生时为 `None`）。
+    #[must_use]
+    pub fn pid(&self) -> Option<u32> {
+        match self.pid.load(Ordering::Acquire) {
+            0 => None,
+            pid => Some(pid),
+        }
+    }
+
+    /// 归还并发许可；重复调用无副作用。
+    pub fn release_lease(&self) {
+        let permit = lock(&self.lease).take();
+        drop(permit);
     }
 
     fn transition(&self, state: ScriptRunState) -> ScriptRunSnapshot {
@@ -203,8 +240,7 @@ const fn is_terminal_state(state: ScriptRunState) -> bool {
     )
 }
 
-/// 启动一次脚本运行的入参。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// 启动一次脚本运行的入参。#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RunScriptOptions {
     /// 客户端透传参数（受条目策略约束）。
     pub user_arguments: ScriptUserArguments,
@@ -226,14 +262,15 @@ pub struct ScriptRunner {
     gate: FeatureGate,
     sink: Arc<dyn ScriptEventSink>,
     state: Arc<Mutex<RunnerState>>,
-    active: Arc<AtomicUsize>,
+    /// 并发许可：派生之前原子预留，运行进入终态即归还。
+    permits: Arc<Semaphore>,
 }
 
 impl std::fmt::Debug for ScriptRunner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ScriptRunner")
             .field("gate", &self.gate)
-            .field("active", &self.active.load(Ordering::Relaxed))
+            .field("available_permits", &self.permits.available_permits())
             .finish_non_exhaustive()
     }
 }
@@ -246,7 +283,7 @@ impl ScriptRunner {
             gate,
             sink,
             state: Arc::new(Mutex::new(RunnerState::default())),
-            active: Arc::new(AtomicUsize::new(0)),
+            permits: Arc::new(Semaphore::new(SCRIPT_MAX_CONCURRENT_RUNS)),
         }
     }
 
@@ -295,14 +332,11 @@ impl ScriptRunner {
             }
         }
 
-        if self.active.load(Ordering::Acquire) >= SCRIPT_MAX_CONCURRENT_RUNS {
-            return Err(ActionableError::new(
-                ErrorCode::Conflict,
-                "并行的受管脚本已达上限",
-                "该脚本未执行，已有运行不受影响",
-                "请等待其他脚本结束或停止不需要的运行后重试",
-            ));
-        }
+        // 容量在派生之前原子预留：检查与占用是同一个操作，并发请求不可能越过上限，
+        // 超限请求绝不派生子进程。
+        let Some(permit) = Arc::clone(&self.permits).try_acquire_owned().ok() else {
+            return Err(capacity_error());
+        };
 
         let run_id = format!("run_{}", uuid::Uuid::now_v7().simple());
         let snapshot = ScriptRunSnapshot {
@@ -321,6 +355,9 @@ impl ScriptRunner {
             output: Arc::new(OutputBudget::new(SCRIPT_OUTPUT_LIMIT_BYTES)),
             stop,
             reap: Mutex::new(None),
+            lease: Mutex::new(Some(permit)),
+            task: Mutex::new(None),
+            pid: AtomicU32::new(0),
         });
 
         {
@@ -333,7 +370,6 @@ impl ScriptRunner {
                     .insert(key.as_str().to_owned(), run_id.clone());
             }
         }
-        self.active.fetch_add(1, Ordering::AcqRel);
         emit_lifecycle(
             &self.sink,
             ScriptLifecyclePhase::Queued,
@@ -353,20 +389,13 @@ impl ScriptRunner {
         let task_run = Arc::clone(&run);
         let task_sink = Arc::clone(&self.sink);
         let task_state = Arc::clone(&self.state);
-        let task_active = Arc::clone(&self.active);
         let task_entry = entry.clone();
-        tokio::spawn(async move {
-            execute(
-                task_state,
-                task_active,
-                task_run,
-                task_sink,
-                task_entry,
-                spec,
-                stop_rx,
-            )
-            .await;
+        // 句柄必须保存：关停时要能取消并有界等待，不留无法核对的游离任务。
+        let handle = tokio::spawn(async move {
+            execute(task_state, task_run, task_sink, task_entry, spec, stop_rx).await;
         });
+        let previous = lock(&run.task).replace(handle);
+        drop(previous);
 
         Ok(snapshot)
     }
@@ -417,10 +446,90 @@ impl ScriptRunner {
         Ok(stopping)
     }
 
+    /// 关停执行器：强制取消全部在飞运行，并在有界窗口内等待它们收敛。
+    ///
+    /// 顺序是「先请求强制终止进程树、再等运行登记终态、最后取消任务并兜底终止
+    /// 进程树」：窗口内没收敛的运行会被登记进 [`ScriptShutdownReport::unconfirmed`]
+    /// 并写警告日志，绝不以「已关停」措辞覆盖未确认状态。
+    ///
+    /// 本方法故意是同步的：它既要在 daemon 退出时（`Drop`）可用，也要能被
+    /// 测试直接调用；等待期间只占当前线程，靠其它 worker 线程推进任务。
+    pub fn shutdown(&self, grace: Duration) -> ScriptShutdownReport {
+        let pending: Vec<(String, Arc<ScriptRun>)> = {
+            let guard = lock(&self.state);
+            guard
+                .runs
+                .iter()
+                .filter(|(_, run)| !run.is_terminal())
+                .map(|(run_id, run)| (run_id.clone(), Arc::clone(run)))
+                .collect()
+        };
+        let requested = pending.len();
+        for (_, run) in &pending {
+            run.transition(ScriptRunState::Stopping);
+            // 关停不是普通 Stop：一律请求强制终止进程树。
+            let _ = run.stop.try_send(true);
+        }
+        let deadline = Instant::now() + grace;
+        while Instant::now() < deadline && pending.iter().any(|(_, run)| !run.is_terminal()) {
+            std::thread::sleep(SHUTDOWN_POLL_INTERVAL);
+        }
+        let mut confirmed = 0;
+        let mut unconfirmed = Vec::new();
+        for (run_id, run) in pending {
+            if run.is_terminal() {
+                run.release_lease();
+                confirmed += 1;
+                continue;
+            }
+            // 超出窗口：取消任务并兜底终止进程树，但不得声称已经回收干净。
+            if let Some(handle) = lock(&run.task).take() {
+                handle.abort();
+            }
+            let tree_reaped = run
+                .pid()
+                .is_some_and(|pid| crate::pty::backend::terminate_process_tree(pid, true));
+            *lock(&run.reap) = Some(ReapOutcome::ReapUnconfirmed);
+            let snapshot = run.finish(ScriptRunState::Cancelled, None);
+            run.release_lease();
+            emit_lifecycle(&self.sink, ScriptLifecyclePhase::Stopped, &snapshot);
+            release_terminal(&self.state);
+            tracing::warn!(
+                run_id = run_id.as_str(),
+                script_id = snapshot.script_id.as_str(),
+                tree_reaped,
+                "daemon 关停后脚本运行回收未确认"
+            );
+            unconfirmed.push(run_id);
+        }
+        let report = ScriptShutdownReport {
+            requested,
+            confirmed,
+            unconfirmed,
+        };
+        if report.requested > 0 {
+            tracing::info!(
+                requested = report.requested,
+                confirmed = report.confirmed,
+                unconfirmed = report.unconfirmed.len(),
+                "脚本执行器关停完成"
+            );
+        }
+        report
+    }
+
     /// 已登记运行条数（含已结束但仍在保留窗口内的运行）。
     #[must_use]
     pub fn retained_runs(&self) -> usize {
         lock(&self.state).runs.len()
+    }
+}
+
+impl Drop for ScriptRunner {
+    /// 兜底：执行器释放（daemon 退出）时取消在飞运行并有界等待收敛，
+    /// 未能在窗口内确认的运行会写「回收未确认」警告。
+    fn drop(&mut self) {
+        self.shutdown(SCRIPT_SHUTDOWN_GRACE);
     }
 }
 
@@ -440,7 +549,6 @@ enum Trigger {
 
 async fn execute(
     state: Arc<Mutex<RunnerState>>,
-    active: Arc<AtomicUsize>,
     run: Arc<ScriptRun>,
     sink: Arc<dyn ScriptEventSink>,
     entry: ManagedScriptEntry,
@@ -472,7 +580,7 @@ async fn execute(
             *lock(&run.reap) = Some(ReapOutcome::SpawnFailed);
             let snapshot = run.finish(ScriptRunState::Failed, None);
             emit_lifecycle(&sink, ScriptLifecyclePhase::Failed, &snapshot);
-            active.fetch_sub(1, Ordering::AcqRel);
+            run.release_lease();
             release_terminal(&state);
             tracing::warn!(
                 script_id = entry.script_id.as_str(),
@@ -484,6 +592,8 @@ async fn execute(
     };
 
     let pid = child.id();
+    // 进程标识必须落库：关停超时取消任务后，只能靠它兜底收敛残留进程树。
+    run.pid.store(pid.unwrap_or(0), Ordering::Release);
     let started = run.transition(ScriptRunState::Running);
     emit_lifecycle(&sink, ScriptLifecyclePhase::Started, &started);
 
@@ -569,7 +679,7 @@ async fn execute(
         _ => ScriptLifecyclePhase::Failed,
     };
     emit_lifecycle(&sink, phase, &snapshot);
-    active.fetch_sub(1, Ordering::AcqRel);
+    run.release_lease();
     release_terminal(&state);
 }
 
@@ -830,6 +940,24 @@ fn program_missing(raw: &str) -> ActionableError {
         format!("未在 PATH 中找到脚本程序：{raw}"),
         "该脚本未执行",
         "请安装该程序或改用绝对路径声明，并确认 PATH 对守护进程可见",
+    )
+}
+
+impl Drop for ScriptRun {
+    /// 兜底：即便任务被异常丢弃、没走到终态，也不把并发容量永久占住。
+    fn drop(&mut self) {
+        let permit = self.lease.get_mut().ok().and_then(Option::take);
+        drop(permit);
+    }
+}
+
+/// 并发已达上限的可执行错误（未派生子进程）。
+fn capacity_error() -> ActionableError {
+    ActionableError::new(
+        ErrorCode::Conflict,
+        format!("并行的受管脚本已达上限（{SCRIPT_MAX_CONCURRENT_RUNS} 个）"),
+        "该脚本未执行，未派生子进程，已有运行不受影响",
+        "请等待其他脚本结束或停止不需要的运行后重试",
     )
 }
 

@@ -13,13 +13,16 @@ pub mod web_assets;
 
 pub use native_assets::{NativeAssetError, NativeAssetGuard};
 pub use pty::{
-    NullPtyEventSink, PortablePtyBackend, PtyBackend, PtyChild, PtyControl, PtyEventSink, PtyHost,
-    PtySpawnSpec, UnavailablePtyBackend, discover_or_unavailable,
+    CapacityLease, NullPtyEventSink, PortablePtyBackend, PtyBackend, PtyChild, PtyControl,
+    PtyEventSink, PtyHost, PtyMaintenanceReport, PtySession, PtyShutdownReport, PtySpawnSpec,
+    PtyTableStats, TerminalHook, UnavailablePtyBackend, discover_or_unavailable,
+    terminate_process_tree,
 };
 pub use schedules::{
     Clock as ScheduleClock, FinishOutcome, ManualClock, NullScheduleEventSink, ScheduleEventSink,
     ScheduleService, ScheduleStore, StoredSchedule, SystemClock, TickReport,
 };
+pub use scripts::runner::{SCRIPT_SHUTDOWN_GRACE, ScriptShutdownReport};
 pub use scripts::{
     FeatureGate, NullScriptEventSink, ReapOutcome, RunOutput, RunScriptOptions, ScriptEventSink,
     ScriptManifest, ScriptRun, ScriptRunner, ScriptService,

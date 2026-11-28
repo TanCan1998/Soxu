@@ -15,7 +15,14 @@ use portable_pty::{
 };
 use soxu_protocol::{ActionableError, ErrorCode, PtyExitStatus, PtySize};
 use std::path::{Path, PathBuf};
+use std::process::{Command as StdCommand, Stdio as StdStdio};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
+
+/// 进程树终止的有界等待窗口（`taskkill` / `kill` 本身是短命令，绝不无限期阻塞）。
+pub const TREE_TERMINATE_GRACE: Duration = Duration::from_secs(5);
+/// 有界等待的轮询粒度。
+const TREE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// 受控 shell 无法发现时的降级后端。
 ///
@@ -144,10 +151,18 @@ impl PtyControl for PortablePtyControl {
     }
 
     fn terminate(&self) -> Result<(), ActionableError> {
+        // 先按进程树收敛：ConPTY/openpty 下 shell 会再派生子孙进程，只终止直接子进程
+        // 会把子孙进程留到宿主退出之后。树终止带超时窗口，失败才退回直接终止。
+        let tree_terminated = self
+            .pid()
+            .is_some_and(|pid| terminate_process_tree(pid, true));
         let mut child = lock(&self.child);
         if let Err(err) = child.kill() {
             // 已经自然退出的会话视为终止成功，避免把幂等关闭变成错误。
             if child.try_wait().is_ok_and(|status| status.is_some()) {
+                return Ok(());
+            }
+            if tree_terminated {
                 return Ok(());
             }
             return Err(ActionableError::new(
@@ -175,6 +190,80 @@ impl PtyControl for PortablePtyControl {
                 )
                 .with_diagnostic(err.to_string())
             })
+    }
+
+    fn pid(&self) -> Option<u32> {
+        lock(&self.child).process_id()
+    }
+}
+
+/// 有界终止一个进程树（PTY 关闭与脚本关停共用，不引入新依赖）。
+///
+/// 证据边界：Windows 用 `taskkill /T`（系统枚举子孙进程）；Unix 先尝试向以该 pid
+/// 为组长的进程组发信号，仅当该子进程确实是组长时才能连带回收子孙，否则只能证明
+/// 直接子进程已终止。两条路径都带超时窗口，返回值为「命令报告成功」，不代表已经
+/// 逐个核对过进程树成员。
+pub fn terminate_process_tree(pid: u32, force: bool) -> bool {
+    let mut command = command_for_tree(pid, force);
+    let Ok(mut child) = command.spawn() else {
+        return false;
+    };
+    let deadline = Instant::now() + TREE_TERMINATE_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) => {}
+            Err(_) => return false,
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            return false;
+        }
+        std::thread::sleep(TREE_POLL_INTERVAL);
+    }
+}
+
+fn command_for_tree(pid: u32, force: bool) -> StdCommand {
+    #[cfg(windows)]
+    {
+        let program = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .map(|path| path.join("System32").join("taskkill.exe"))
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| PathBuf::from("taskkill.exe"));
+        let mut command = StdCommand::new(program);
+        command.args(["/PID", &pid.to_string(), "/T"]);
+        if force {
+            command.arg("/F");
+        }
+        command
+            .stdin(StdStdio::null())
+            .stdout(StdStdio::null())
+            .stderr(StdStdio::null());
+        command
+    }
+    #[cfg(unix)]
+    {
+        let program = ["/bin/kill", "/usr/bin/kill"]
+            .into_iter()
+            .map(PathBuf::from)
+            .find(|path| path.is_file())
+            .unwrap_or_else(|| PathBuf::from("kill"));
+        let mut command = StdCommand::new(program);
+        let signal = if force { "KILL" } else { "TERM" };
+        // 先按进程组（负 pid）终止；子进程不是组长时退化为直接子进程终止。
+        command.args(["-s", signal, "--", &format!("-{pid}")]);
+        command
+            .stdin(StdStdio::null())
+            .stdout(StdStdio::null())
+            .stderr(StdStdio::null());
+        command
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (pid, force);
+        StdCommand::new("false")
     }
 }
 

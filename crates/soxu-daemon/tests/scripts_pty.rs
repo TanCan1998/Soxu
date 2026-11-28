@@ -11,7 +11,8 @@ use soxu_daemon::pty::{
     PtySpawnSpec,
 };
 use soxu_daemon::scripts::{
-    FeatureGate, ReapOutcome, SCRIPT_OUTPUT_LIMIT_BYTES, ScriptEventSink, ScriptService,
+    FeatureGate, ReapOutcome, RunScriptOptions, SCRIPT_MAX_CONCURRENT_RUNS,
+    SCRIPT_OUTPUT_LIMIT_BYTES, ScriptEventSink, ScriptService,
 };
 use soxu_protocol::{
     ActionableError, DaemonFeature, ErrorCode, ManagedScriptEntry, OpenPtyRequest, PtyCloseReason,
@@ -690,9 +691,11 @@ fn duplicate_close_is_idempotent_and_emits_each_terminal_event_once() {
 
 #[test]
 fn session_cap_and_size_bounds_are_enforced() {
-    let backend = Arc::new(FixedOutputBackend::new(Vec::new()));
+    // 用「会话保持运行」的后端：派生后立即 EOF 的会话会立即归还容量，
+    // 那样就测不到并发上限，只能测到一个时序凑巧。
+    let backend = Arc::new(PipeHoldBackend::default());
     let sink = Arc::new(RecordingPtySink::default());
-    let host = enabled_pty(backend, sink);
+    let host = enabled_pty(backend.clone(), sink);
     let root = tempfile::tempdir().expect("临时工作区");
 
     let mut opened = Vec::new();
@@ -704,6 +707,11 @@ fn session_cap_and_size_bounds_are_enforced() {
         .expect_err("超过会话上限必须拒绝");
     assert_eq!(error.code, ErrorCode::Conflict);
     assert_eq!(host.live_sessions(), PTY_MAX_SESSIONS);
+    assert_eq!(
+        backend.spawned(),
+        PTY_MAX_SESSIONS,
+        "被拒绝的请求不得派生 shell 进程"
+    );
 
     // 尺寸边界由协议在反序列化阶段拦截，这里复核构造侧同样拒绝越界值。
     assert!(PtySize::new(0, 30).is_err());
@@ -881,6 +889,58 @@ impl PtyControl for FixedControl {
     }
 }
 
+/// 保持会话运行的后端：读端是真实管道，写端由会话持有；关闭会话释放写端后读到 EOF。
+#[derive(Default)]
+struct PipeHoldBackend {
+    spawned: AtomicU32,
+}
+
+impl PipeHoldBackend {
+    fn spawned(&self) -> usize {
+        usize::try_from(self.spawned.load(Ordering::Acquire)).unwrap_or(0)
+    }
+}
+
+impl PtyBackend for PipeHoldBackend {
+    fn spawn(&self, _spec: &PtySpawnSpec) -> Result<PtyChild, ActionableError> {
+        self.spawned.fetch_add(1, Ordering::AcqRel);
+        let (reader, writer) = std::io::pipe().map_err(|err| {
+            ActionableError::new(
+                ErrorCode::InternalError,
+                "无法创建测试管道",
+                "该请求未打开会话",
+                "请重试",
+            )
+            .with_diagnostic(err.to_string())
+        })?;
+        Ok(PtyChild {
+            reader: Box::new(reader),
+            writer: Box::new(writer),
+            control: Arc::new(AlwaysExitedControl),
+        })
+    }
+}
+
+/// 立即报告「已退出 0」的控制面：让关闭路径无需等待退出窗口。
+struct AlwaysExitedControl;
+
+impl PtyControl for AlwaysExitedControl {
+    fn resize(&self, _size: PtySize) -> Result<(), ActionableError> {
+        Ok(())
+    }
+
+    fn terminate(&self) -> Result<(), ActionableError> {
+        Ok(())
+    }
+
+    fn try_wait(&self) -> Result<Option<PtyExitStatus>, ActionableError> {
+        Ok(Some(PtyExitStatus {
+            exit_code: Some(0),
+            exit_signal: None,
+        }))
+    }
+}
+
 fn wait_for_events(sink: &Arc<RecordingPtySink>, done: impl Fn(&RecordingPtySink) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !done(sink) {
@@ -890,9 +950,160 @@ fn wait_for_events(sink: &Arc<RecordingPtySink>, done: impl Fn(&RecordingPtySink
 }
 
 // ---------------------------------------------------------------------------
-// 受控子进程桩（由父测试经 current_exe 重新执行，不依赖宿主任何第三方工具）
+// 脚本域：并发上限与关停收敛（资源治理阶段 2）
 // ---------------------------------------------------------------------------
 
+/// 并发 `run` ×16 不得越过上限，且被拒绝的请求不派生子进程。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_runs_never_exceed_capacity() {
+    let root = tempfile::tempdir().expect("临时工作区");
+    let entry = script_entry("idler", "stub_child_idles");
+    write_manifest(root.path(), &[&entry]);
+    let sink = Arc::new(RecordingScriptSink::default());
+    let service = Arc::new(ScriptService::new(enabled_scripts(), sink));
+    let barrier = Arc::new(std::sync::Barrier::new(16));
+
+    let mut tasks = Vec::new();
+    for _ in 0..16 {
+        let service = Arc::clone(&service);
+        let entry = entry.clone();
+        let root = root.path().to_path_buf();
+        let barrier = Arc::clone(&barrier);
+        tasks.push(tokio::task::spawn_blocking(move || {
+            barrier.wait();
+            service.runner().run(
+                "wks_test",
+                &root,
+                &entry,
+                RunScriptOptions {
+                    user_arguments: ScriptUserArguments::default(),
+                    idempotency_key: None,
+                    approval_id: Some("approval_test".to_owned()),
+                },
+            )
+        }));
+    }
+
+    let mut accepted = Vec::new();
+    let mut rejected = 0;
+    for task in tasks {
+        match task.await.expect("并发任务不得 panic") {
+            Ok(snapshot) => accepted.push(snapshot.run_id),
+            Err(error) => {
+                assert_eq!(
+                    error.code,
+                    ErrorCode::Conflict,
+                    "超限必须返回可诊断上限错误"
+                );
+                rejected += 1;
+            }
+        }
+    }
+    assert_eq!(accepted.len(), SCRIPT_MAX_CONCURRENT_RUNS);
+    assert_eq!(rejected, 16 - SCRIPT_MAX_CONCURRENT_RUNS);
+
+    // 长驻运行必须能被关停有界收敛，否则测试进程退出时会遗留子进程。
+    let report = service.runner().shutdown(Duration::from_secs(10));
+    assert_eq!(report.requested, SCRIPT_MAX_CONCURRENT_RUNS);
+    assert!(
+        report.unconfirmed.is_empty(),
+        "受控子进程桩必须在窗口内收敛：{:?}",
+        report.unconfirmed
+    );
+    for run_id in &accepted {
+        let snapshot = service.runner().inspect(run_id).expect("查询运行");
+        assert_eq!(snapshot.state, ScriptRunState::Cancelled);
+    }
+}
+
+/// daemon 关停时，运行中的脚本必须被取消并在有界窗口内确认回收。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_cancels_running_scripts_and_reports_convergence() {
+    let root = tempfile::tempdir().expect("临时工作区");
+    let entry = script_entry("idler", "stub_child_idles");
+    write_manifest(root.path(), &[&entry]);
+    let sink = Arc::new(RecordingScriptSink::default());
+    let service = Arc::new(ScriptService::new(enabled_scripts(), sink.clone()));
+
+    let accepted = accepted_snapshot(
+        service
+            .handle(Some(root.path()), run_request("idler"))
+            .expect("脚本应可执行"),
+    );
+    wait_state(&service, &accepted.run_id, ScriptRunState::Running).await;
+
+    let report = service.runner().shutdown(Duration::from_secs(10));
+    assert_eq!(report.requested, 1);
+    assert_eq!(report.confirmed, 1);
+    assert!(report.unconfirmed.is_empty(), "脚本必须被有界取消");
+
+    let snapshot = service
+        .runner()
+        .inspect(&accepted.run_id)
+        .expect("查询运行");
+    assert_eq!(snapshot.state, ScriptRunState::Cancelled);
+    assert_eq!(
+        service
+            .runner()
+            .reap_outcome(&accepted.run_id)
+            .expect("回收结论"),
+        Some(ReapOutcome::ExitedAfterStop),
+        "关停后必须确认进程树已终止"
+    );
+    assert_eq!(
+        sink.phases().last().copied(),
+        Some(soxu_protocol::ScriptLifecyclePhase::Stopped)
+    );
+}
+
+/// 执行器释放（daemon 退出）时必须取消在飞运行并有界回收。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dropping_runner_cancels_running_runs() {
+    let root = tempfile::tempdir().expect("临时工作区");
+    let entry = script_entry("idler", "stub_child_idles");
+    write_manifest(root.path(), &[&entry]);
+    let sink = Arc::new(RecordingScriptSink::default());
+    let service = Arc::new(ScriptService::new(enabled_scripts(), sink.clone()));
+    let accepted = accepted_snapshot(
+        service
+            .handle(Some(root.path()), run_request("idler"))
+            .expect("脚本应可执行"),
+    );
+    wait_state(&service, &accepted.run_id, ScriptRunState::Running).await;
+
+    // 执行器 Drop 会在有界窗口内取消运行并写入停止终态（事件出口在释放前必须可观察）。
+    drop(service);
+    assert_eq!(
+        sink.phases().last().copied(),
+        Some(soxu_protocol::ScriptLifecyclePhase::Stopped),
+        "执行器释放必须为在飞运行写入 Stopped 终态"
+    );
+}
+
+/// 有界等待运行进入指定状态（禁止在运行时线程上阻塞睡眠）。
+async fn wait_state(
+    service: &ScriptService,
+    run_id: &str,
+    expected: ScriptRunState,
+) -> soxu_protocol::ScriptRunSnapshot {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let snapshot = service.runner().inspect(run_id).expect("查询运行");
+        if snapshot.state == expected {
+            return snapshot;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "运行 {run_id} 未在 30s 内进入 {expected:?}（当前 {:?}）",
+            snapshot.state
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 受控子进程桩（由父测试经 current_exe 重新执行，不依赖宿主任何第三方工具）
+// ---------------------------------------------------------------------------
 /// 受控子进程桩：正常退出。
 #[test]
 #[ignore = "受控子进程桩：仅由父测试经当前二进制重新执行"]
