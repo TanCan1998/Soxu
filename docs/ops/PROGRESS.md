@@ -22,12 +22,13 @@
 
 ## 2. 当前阶段（2026-11-28）
 
-- **主线基线**：`main` = `285a4c9`（`#154` 收口 M6 功能并登记 M3）。
-- **最近合入**：M6 接线 `#152`（`7084de7`，14 变体全部进域服务、能力门控先于工作区解析、事件同管线、真实 daemon 冒烟 26 项）、M6 传输契约 `#149`（`08bd29f`）、M6-C `#146`（`0ddd041`）、看板重构 `#145`（`f360bec`）、M6-A/B、M6 契约、M5、M4-W2。
-- **进行中**：`#153` M3 Worktree 恢复执行与重启复核（PR `#156`，暂停合入）已复核审批预览与原生身份绑定、受控解锁、超时/取消及重启留痕。整仓 `prune`、`repair` 和移除注册保留只读候选，写入口等待范围与数据保全证据。
+- **主线基线**：`main` = `5e36a49`（`#157` 资源治理方案）。
+- **最近合入**：资源治理方案 `#157`（`5e36a49`，P0/P1 分级 + t3code/Paseo/Padu 对照 + 阶段 0–4 计划）、M3 恢复执行 `#156`（`d6b2aad`，原生身份绑定、受控解锁、journal 与未知结局留痕；整仓 `prune`/`repair`/在线移除仍只读）、M6 接线 `#152`（`7084de7`）、M6 传输契约 `#149`、M6-C `#146`、看板重构 `#145`。
+- **进行中**：`#158` 运行时资源采集脚本（资源治理阶段 0，分支 `feat/158-runtime-metrics`，工作树 `wks_3d7e4e5cb88ee379`）；只新增 `scripts/collect-runtime-metrics.ps1`，用于后续阶段统一的进程/库/WAL 口径。
 - **已知缺口（真实）**：`ClientHello` 无能力字段，M6 门控是守护进程级（`SOXU_DAEMON_FEATURES`，缺省全关）而非按连接级；调度节拍需宿主驱动，独立入口尚未起定时器。
+- **资源治理缺口（据 `docs/dev/resource-lifecycle-and-retention.md`）**：P0 追平分页 1000 条后仍报完成、PTY 生命周期未闭环、容量 check-then-act；P1 `event_log` 只增、UI 模型无上限、调度无 tick、关停未证明。均未修复，按阶段 1–4 推进。
 - **门禁**：三平台 Rust（windows/linux/macos-arm64）+ PWA + 格式 + 隐私 + `CI Gate`；合入统一 `--match-head-commit`，合并后归档工作树与分支。
-- **尚未交付**：Git 恢复执行/回退/结构化提交、`direct` MCP 运行时挂载、非 Windows 宿主真机补测、Antigravity 项目入口与全代理验收、正式发布（未核验原生测试）。
+- **尚未交付**：Rewind/结构性提交、资源治理阶段 1–4、`direct` MCP 运行时挂载、非 Windows 宿主真机补测、Antigravity 项目入口与全代理验收、正式发布（未核验原生测试）。
 
 ---
 
@@ -42,14 +43,14 @@
 
 ## 4. 下一步行动队列（Next Actions）
 
-1. **M3 恢复执行收口**：复审 PR `#156` 的原生身份绑定、拒绝路径和未知进程结局留痕，再由主控决定合入范围；随后排 Rewind 与结构化提交。
-2. **M6-D 打包与发布核验**：`soxu-releases` 四平台构建已在 `cargo build` 前执行 `pnpm build`（Linux/Windows/macOS 均确认），并含活二进制校验与 `soxu`+`soxu-daemon` 双产物；正式发版前补一次 tag 级 dry-run。
-3. **调度节拍宿主驱动**：把 `DaemonState::tick_schedules` / `finish_schedule_run` 接入可执行入口的定时器与触发执行器（需改 `main.rs`，须独立派发）。
-4. **M3 剩余**：恢复执行与 journal（`execute.rs`/`journal.rs`）、Safety Snapshot 先行 Rewind、文件级结构化提交预检；按设计文档顺序，涉及协议变更先走独立契约 PR。
-5. **`direct` MCP 运行时挂载**与 Worktree 内写权限：需先冻结协议面，再接入 daemon。
-6. **非 Windows 宿主补测**：`#49`/`#51`/`#56`/`#69` 的真实注册、固定提交检出、宿主接入、路由重试与 Worktree 原生会话。
-7. **M2 收尾**：Antigravity 项目目录入口、七代理全验收；Copilot 钩子安全、历史导入、附件/移交/更高权限与移动端投递。
-8. **发布**：未核验的跨平台原生测试与正式发版仍为待办；Intel 仅保留 `full-with-intel` 手动入口与 tag 入口。
+1. **阶段 0 收口**：审核 `#158` 采集脚本的只读性、缺表/忙库降级与自检；合并后由主控跑空载/1 PTY/8 PTY/2 脚本/1k/10k 事件六组基线并记入本看板。
+2. **阶段 1 追平与快照交接（P0）**：`server.rs`/`state.rs`/协议诊断字段/`daemon-client.ts`/`daemon-store.ts`；离线 1001 条与广播溢出为必须用例。
+3. **阶段 2 PTY/脚本生命周期（P0）**：容量预留、自然退出置 `closed`、终态摘除、`reap_idle` 周期任务、graceful shutdown；同时把 `tick_schedules` 接入宿主定时器。
+4. **阶段 3 事件留存（P1）**：`H/P` 双序号、分批删行、checkpoint 维护窗口与备份策略。
+5. **阶段 4 UI 模型上限（P1）**：桌面时间线与 PWA `turns` 的保留上限与分页回填。
+6. **M3 剩余**：Safety Snapshot 先行 Rewind、文件级结构化提交预检；整仓 `prune`/`repair` 写入口待范围与数据保全证据。
+7. **M6-D 打包与发布核验**：四平台构建已含 `pnpm build` 前置；正式发版前补一次 tag 级 dry-run（需用户给版本号）。
+8. **`direct` MCP 挂载 / 非 Windows 补测 / M2 收尾**：协议冻结后接入；`#49`/`#51`/`#56`/`#69` 真机补测；Antigravity 入口与七代理全验收。
 
 ---
 

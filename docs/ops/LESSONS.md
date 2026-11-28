@@ -43,6 +43,7 @@
 | `L-022` | 工具链版本源 | CI 与发布链路不得写死 `toolchain:` / `node-version` / `pnpm` 版本：只在检测作业从 `mise.toml` 读一次并写成 outputs，其余作业消费输出，且装完必须实测比对（`-AssertInstalled`）。解析器对缺项/浮动/复合/重复/畸形一律非零退出，**不得回退内置默认值** | `L3 · Seen 1×` | `read-mise-versions.ps1` / `ci.yml` / 本文 |
 | `L-023` | CI 触发丢失兜底 | PR push（synchronize）/ reopen 后若远端长时间无对应 run（用 `actions/runs?head_sha=<sha>` 查 API 计数为 0 即确认事件丢失，不要反复盲推或重开 PR 空转），先等一个队列周期，再用 `gh workflow run ci.yml --ref <分支> -f mode=scope` 对同一棵树做 dispatch 复验并在 PR 说明单列该 run 证据；事件恢复后以正式 pull_request run 作为最终合并门禁 | `L2 · Seen 1×` | 本文 / 波次验收 |
 | `L-024` | 前端预览生成物越界 | `pnpm run build:preview` / 设计门禁脚本会重写 `design-system/soxu/preview.html`（不在移动端或桌面端任务的 Owned Paths 内）。跑完前端构建后必须 `git restore -- design-system/soxu/preview.html`，PR 不得携带该生成物；需要变更预览页时另开设计系统任务 | `L2 · Seen 2×` | 本文 / 波次验收 |
+| `L-025` | 工作树回收与合入判定 | `gh pr merge --squash --delete-branch` 报 `failed to delete ... Permission denied` 时合并已生效：以 PR `state=MERGED` 与 `main` HEAD 为准，不要重跑合并。回收顺序为 `paseo workspace archive <wks>` → 确认 `git worktree list` 已无该树 → `git diff --stat main <branch>` 为空 → `git branch -D <branch>`；目录可能已被 Paseo 回收，禁止先 `git worktree remove --force` | `L2 · Seen 1×` | 本文 / 波次验收 |
 
 ---
 
@@ -165,8 +166,13 @@
 - **预防动作**：前端/移动端任务在构建验证后统一 `git restore -- design-system/soxu/preview.html`（或按任务书指定路径恢复），并在 PR 的「已知边界」注明该生成物未纳入本 PR；确需更新预览页时交由设计系统专门任务。
 - **验证方式**：`#123` 最终 PR 文件清单不含该文件、`git status` 干净；**状态**：活跃。
 
+### `L-025` 工作树删除失败不代表合入失败，回收须按固定顺序取证
+- **场景与根因**（`Seen 1× (2026-11-28)`）：`#156` 以 `--squash --delete-branch` 合入后，`gh` 报 `Could not remove worktree ... error: failed to delete ... Permission denied`，本地分支保留。此时子代理刚结束、工作树目录被进程或 Paseo 工作树池占用，属删除阶段的权限/句柄问题，与补丁合并无关；若把它当作合并失败重跑，会得到「已合并」错误或重复尝试删除。
+- **预防动作**：先只读确认 `gh pr view <n> --json state,mergedAt` 为 `MERGED` 且 `git log -1 main` 已含该提交；再 `paseo workspace archive <wks> --json`；随后 `git worktree list` 确认目标树已不在列表（Paseo 归档可能已删目录，此时不要 `git worktree remove --force`）；最后 `git diff --stat main <branch>` 为空才 `git branch -D <branch>`。squash 合并后 `git branch -d` 会因「未合并」拒绝，属预期。
+- **验证方式**：`#156` 回收后 `git worktree list` 仅剩主检出、`git status -sb` 干净、`main` 为 `d6b2aad`；**状态**：活跃。
+
 ## 四、已自动化防呆归档区
 
 > 当「活跃规则速查表」中的经验已被仓库脚本或自动化测试完全机器防呆且连续两个波次零复发后，将其迁入本区归档，以保持主控日常上下文精干。
 
-- *暂无已迁出归档项（当前 `L-001` ~ `L-016`、`L-018` ~ `L-020` 处于活跃巡检期；`L-017` 由 `#88` 冻结候选占用，合流后补齐）。*
+- *暂无已迁出归档项（当前 `L-001` ~ `L-016`、`L-018` ~ `L-025` 处于活跃巡检期；`L-017` 由 `#88` 冻结候选占用，合流后补齐）。*
