@@ -10,7 +10,10 @@
 //! - [`timeline`]：M5-A 虚拟对话流、工具/审批/提问卡、检查点锚点与轮次导航轨
 //!   （`<=8.3Hz` 合批、虚拟窗口数学、20px 导航轨；纯逻辑 + 薄渲染）。
 //! - [`composer`]：760px 同步宽输入舱（权限/移交/圆环遥测/芯片补全，纯内存视图模型）。
-//! - [`shell`]：四栏自适应工作台骨架视图（中栏：时间线在上、输入舱在下）。
+//! - [`right_panel`]：右栏上下文与审阅检视器（`Diff`/`Files` 页签、行号槽与 400 行截断，纯内存视图模型）。
+//! - [`settings`]：7 分区设置弹窗（分区导航、几何降级与焦点捕获/还原）。
+//! - [`modals`]：核心业务模态宿主（提交/配对/回退/透视，含焦点锁定与脱敏契约）。
+//! - [`shell`]：四栏自适应工作台骨架视图（中栏：时间线在上、输入舱在下；右栏：审阅检视器）。
 //!
 //! 二进制入口见 `main.rs`。
 
@@ -19,6 +22,9 @@ pub mod focus;
 pub mod font;
 pub mod i18n;
 pub mod layout;
+pub mod modals;
+pub mod right_panel;
+pub mod settings;
 pub mod shell;
 pub mod theme;
 pub mod timeline;

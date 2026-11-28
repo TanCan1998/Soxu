@@ -23,6 +23,7 @@ use crate::composer::render_for_window;
 use crate::focus::FocusStack;
 use crate::i18n::I18n;
 use crate::layout::{LayoutPlan, PanelVisibility};
+use crate::right_panel;
 use crate::theme::theme_state;
 use crate::timeline::TimelineView;
 use crate::tokens::{layout, sizing};
@@ -137,12 +138,7 @@ impl Render for WorkbenchShell {
                             )),
                     )
                     .when(rendered(plan.inspector), |row| {
-                        row.child(placeholder_panel(
-                            "▶",
-                            palette.surface_sidebar,
-                            palette.text_tertiary,
-                            px(layout::INSPECTOR_DEFAULT_PX),
-                        ))
+                        row.child(right_panel::render_default(&palette))
                     }),
             )
             .child(

@@ -29,7 +29,10 @@
 - **M4 Wave 4.1 设计令牌编译器（`#115`，分支 `feat/115-gpui-theme-tokens`）已合入 `main`（squash `01fcdaf`）。** `scripts/sync-design-tokens.mjs` 从唯一真相源 `tokens.json` 同批编译三份产物（`design-system/soxu/tokens.css`、`apps/mobile-web/src/tokens.generated.css`、`crates/soxu-desktop/src/theme/tokens.rs`）；`--check` 对三者逐字节比对，漂移时点名文件并非零退出。`scripts/verify-design-system.mjs` 把 `tokens.rs` 列为必需文件并校验三产物与 `--check` 接线（只做存在性与接线，不用正则重算语义）。新增 `crates/soxu-desktop/src/lib.rs` 与 `theme/{mod.rs,tokens.rs}`，通过库目标公开常量消除 `dead_code`（未用 `allow` 压制）；本单**未引入** gpui/gpui-component 或任何第三方依赖，未改根 `Cargo.toml`、未实现桌面视图、未动移动端。
 - **`wave-20261128` 双路已合入 `main` 并收口。** `#118` / PR `#120`（`0d1165e`，M4-W1b gpui 依赖接入与令牌消费层，主线 run `46058243076` 三平台全绿）与 `#119` / PR `#121`（`1cc9c3f`，M3 `#57-2` Worktree 只读恢复预览契约，PR run `46065749309` 全绿）两路 Paseo Worktree 已归档、本地与远端分支已回收。两路子代理统一使用 `pi` + `magpie/group/jev-adaptive`（`high`），独立 `CARGO_TARGET_DIR`（`soxu-118-gpui-w1b` / `soxu-119-recovery-preview`）零互踩。`#118` 的依赖冲突按 ADR-012 裁决：crates.io 原名 `gpui` 最新稳定版仅 0.2.2，而 `gpui-component 0.11.0` 硬绑定 Zed gpui 0.3.x 线改名包 `gpui-pre`，最终锁定 `gpui-pre =0.3.14 + gpui-component 0.11.0` 单实现组合（`cargo tree` 证据）；`#119` 交付 `GitProbe::recovery_preview` 五类恢复操作（unlock / repair / prune / 移除注册 / 清理部分落盘）的只读预览契约与观察状态分类，Darwin `unused import` 热修一次（L-013 Seen 4×）。两处冻结文件最小可见性扩围（`read_intents` 与 `read_checkout_journal` 转 `pub(crate)`）经主控按 L-020 裁决放行并在 PR 单列说明。
 - **M3 两份设计已合入 `main`。** `#57` 的显式 Init/Clone 与损坏恢复二次授权见 [仓库初始化、克隆与工作树恢复](../dev/git-init-clone-and-recovery.md)。`#58` 的轮次 Checkpoint 快照、先建 Safety Snapshot 再 Rewind 和文件级结构化提交见 [检查点、回退与结构化提交](../dev/git-checkpoint-rewind-commit.md)。
+<<<<<<< HEAD
+- **`wave-m4-w2b-20261128` 轨道 B 已合入 `main`。** `#124` / PR `#125`（`365201b`）交付 GPUI 应用壳层底座；`#130` / PR `#131`（`1684e66`）交付 M5-B 760px 同步宽输入舱与权限/移交/统计圆环。
 - **M5 Wave 进行中：`#129`（M5-A 时间线核心视图）已在独立 Worktree 落地（分支 `feat/129-m5-timeline`，基线 `80a9185`）。** 新增 `crates/soxu-desktop/src/timeline/**`（10 个子模块）：`<=8.3Hz` 合批节拍（120ms 量化、`StreamCadence`）、虚拟窗口/行高数学（`RowMetrics` 前缀和 + 上下占位 + 滚动锚定）、5 类工具卡（含 `400` 行 Diff 截断与「构建一次」快照）、审批卡（高危红线禁用「本会话允许」+ 默认焦点在拒绝 + 跨设备幂等消解）、提问卡（1-9 数字快选/多选/`44px` 热区）、检查点锚点与回退三选一、`LiveSteps` 默认折叠单行、`20px` 轮次导航轨（含刻度优先级与命中边界）、卡片内焦点不逃逸（复用冻结 `focus.rs` 的 `FocusLayer`/`FocusStack`）。`shell.rs` 仅新增 1 个字段、1 行构造与 1 行挂载（与 M5-B 共享，合流冲突由主控解决），`lib.rs` 仅新增模块声明。`cargo clippy -p soxu-desktop --all-targets --locked -- -D warnings` 与 `cargo test -p soxu-desktop --locked`（**112 项**）通过，`scripts/check-all.ps1` 增量门禁全绿。合流 M5-B（`#131`，`1684e663`）后中栏为「时间线在上、输入舱在下」，`lib.rs` 同时声明 `timeline` 与 `composer`，合流后测试增至 **177 项** 全绿。
+- **`wave-m5c-20261128` 执行中。** `#133`（M5-C）在 `feat/133-m5-rightpanel` 落地右栏 Diff/Files、7 分区设置弹窗与提交/配对/回退/透视四模态（纯内存视图模型，渲染零 I/O）。已普通 merge `origin/main`（`dd26757`，M5-A 合入后的当前基线），与 `#129` 共用 `shell.rs` / `lib.rs` / 本看板的合流冲突已由本分支解析。
 - 仓库已启用合并自动删支（`delete_branch_on_merge = true`）与 Paseo Worktree 回收。
 - **参考项目与索引进度（已全部完成）**：
   - [x] 拉取参考项目至 `.refs/`：`paseo`（7,818 文件）、`codeg`（3,324 文件）、`padu`（1,157 文件）、`t3code`（上游 `pingdotgg/t3code`，快照 `f3e36337`，经 `gh-proxy.org` 镜像 FluxDown 下载）
@@ -250,6 +253,31 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 - `mod.rs`：`ComposerState` 组合模型 + `render`/`render_for_window` 落图（`surface.composer` `#212121`、`22px` 圆角、`1px` 常态描边、`44px` 最小输入高度、页脚 `1px` hairline + 圆环/费用/速率读数）。
 
 验证证据：`scripts/mise-doctor.ps1` 实测 rust `1.99.1` / node `26.13.1` / pnpm `12.21.0`、`CARGO_TARGET_DIR` 为工作树内 `target/`；`cargo check/clippy -p soxu-desktop --all-targets --locked`（`-D warnings`）通过；`cargo test -p soxu-desktop --all-targets --locked` `104 passed / 0 failed`（其中新增输入舱单测 33 项）；`cargo fmt --all -- --check` 通过；`pwsh -NoProfile -File scripts/check-all.ps1`（增量）7 步全部通过或按计划跳过。AOCI 完整认知链在本轮被宿主截断（chunk 1/6），按 `L-004` 停链后仅做 source-bound 工程与收尾维护。参考边界：本工作树未检出 `.refs/`，参考仅读取主检出可读根 `F:/workplace/Paseo/work/Soxu/.refs/padu`（`fbe97a38`）的输入舱/统计结构，未复制、未 `init`/`scan`/重建参考索引，也未照搬其依赖或 lint 压制。
+
+#### 进行中波次 `wave-m5c-20261128`（M5-C：右栏 Diff/Files、7 分区设置与核心模态，`#133`）
+
+| Issue / 任务 | 分支 / Paseo 工作树 | Owned Paths |
+| :--- | :--- | :--- |
+| `#133` M5-C 右栏 Diff/Files、7 分区设置与提交/配对/回退/透视模态 | `feat/133-m5-rightpanel` / `19r49pwc` | `crates/soxu-desktop/src/right_panel/**`、`settings/**`、`modals/**`（新增）、`shell.rs`（仅 import + 单行组件挂载）、`lib.rs`（仅 module 声明与导出）、本看板、本分支 AOCI（禁改 `.aoci/config.json`） |
+
+设计权威为 `design-system/soxu/pages/01-desktop-workbench.md` §4/§6、`pages/04-magpie-and-cli-inspector.md` §5.2、`pages/06-modals-onboarding-and-automation.md` §3/§5、`pages/07-settings-fonts-and-motion.md` §二/§三/§七；本单一字未改设计文件，未重新生成 `preview.html`（L-024）。
+
+实现切片（全部纯内存视图模型，渲染零 I/O、零子进程）：
+
+- `right_panel/diff.rs`：归一化 unified diff 解析。文件头剔除、`@@ -a,b +c,d @@` 重置双侧游标、`+`/`-`/上下文分别只占新侧/旧侧/双侧行号；**行号槽右对齐**（`format_gutter`：`{:>4}` 定宽数字，空号位同宽空格）；**400 行截断**（`MAX_DIFF_LINES = 400`，超限置 `truncated` 并给「差异过长，仅显示前 400 行」提示）；结尾空上下文行回收。
+- `right_panel/files.rs`：文件清单快照（归一化→去重→升序）与 `/` 大小写不敏感过滤；`path:line[:col]` 位置后缀剥离、反斜杠统一、`..` 越界一律拒绝（纯词法，不探测文件系统）。
+- `right_panel/mod.rs`：四页签（变更对比/文件树/脚本/终端，页签头 `44px` 取 `TOUCH_HIT_MIN_PX`）、Diff 工具栏（基准 `未提交改动`/`对比 <baseRef>`/`对比检查点 <id>`、单栏/双栏且 `panel_width < 480px` 强制单栏、`/` 过滤、提交入口）、行号槽 + 增删行底色 + 截断提示、加载/错误/无变更/过滤无结果四种空态（`160px` 定高卡，错误态绯红描边）、Files 空快照态与过滤态。提交入口只产出 `ModalKind::Commit` 请求（`request_commit` → `commit_pending`），**不执行任何写入**。
+- `settings/mod.rs`：7 分区（名称/序号/Lucide 图标名/细化配置项与 07 页表一致）、`820×580` + `200px` 导航轨几何、`< 640px` 降级抽屉且行高 `≥ 44px`、焦点捕获（打开压 `ModalDialog`、低层入栈 `RejectedModalLock`）与 Esc 关闭还原（回到打开前所在层，无先前层则回落 `WorkbenchGlobal`）、分区循环导航与 `/` 搜索、字号钳制（UI `12~17`、代码 `11~17`）、`2↔4` 制表符、`codeFollowsUi` 联动禁用下拉并切到界面字体族、偏好越界自检。
+- `modals/mod.rs`：四模态几何（提交 `540px`+`max-h 80vh`、配对 `580px`、回退 `480px`，统一 `p(20)`/`rounded(18)`）、`ModalHost` 焦点锁定/还原与**互斥**打开。
+- `modals/commit.rs`：`✨ feat` 等 8 类类型映射与仓库规范一致；范围预设 8 项 + 自定义校验（空或 `[a-z0-9_/-]` 且首尾为字母数字）；简述 `4~72` 字符且单行；首行合成 `<emoji> <type>(<scope>): <简述>`；门禁栏三态（首行格式/无个人路径/密钥扫描）任一失败或零勾选即禁用提交。
+- `modals/pairing.rs`：`#offer=` 令牌与 6 位码互斥解析（允许 `123 456`/`123-456` 分隔）、`http://<ip>:7698/#offer=<token>` 词法解析、倒计时环（`300s` TTL、进度落 `0..=1`）、局域网不可达时提示切中继、设备在线计数与单台吊销；产出 `PairingRequest`（映射协议 `PairingCredentialInput`），不触网。
+- `modals/rewind.rs`：三选一（仅分叉对话/对话与工作树/取消）单值互斥；初始**未决**、焦点在安全项；破坏性项 `apply` 先返 `NeedsConfirmation`，切换选项重置确认；冲突文件阻止工作树回退并给 `git status` 指引；Safety Stash 无删除入口，失败/取消后仍保留。
+- `modals/inspector.rs`：启动环境透视。含 `KEY/TOKEN/SECRET/COOKIE/PASSWORD` 的键值强制掩码 `••••••••`、主目录折叠 `~`（偏好可关）、`CARGO_TARGET_DIR`/`SOXU_MCP_DIRECT` 徽标、降级态网关文案「未启用，使用 CLI 原生凭据」、`NoopExtensionHost · 预留扩展点未激活`。
+- `shell.rs` / `lib.rs`：右栏挂载替换为 `right_panel::render_default(&palette)`（单行 + import），`lib.rs` 仅增 `modals`/`right_panel`/`settings` 声明与文档条目。
+
+验证证据：`cargo check/clippy -p soxu-desktop --all-targets --locked`（`-D warnings`）通过；`cargo test -p soxu-desktop --locked` `169 passed / 0 failed`（本单新增 65 项：Diff 解析/行号/截断 9、文件清单与路径 5、右栏页签/空态/过滤/提交入口 9、设置 7 分区与焦点 11、模态几何与宿主 4、提交 6、配对 7、回退 7、透视 7）；`cargo fmt --all -- --check` 通过；`pwsh -NoProfile -File scripts/check-all.ps1`（增量）通过。工具链：rust `1.99.1`（`rustfmt 1.10.0`、`clippy 0.1.99`）/ node `26.13.1` / pnpm `12.21.0`，`CARGO_TARGET_DIR` 为工作树内 `target/`，`CARGO_BUILD_JOBS=4`。
+
+参考复用与边界：Padu（`F:/workplace/Paseo/work/Soxu/.refs/padu`，`fbe97a3`）的 `apps/desktop/src/app/right_panel/{diff,files,mod,model,tabs}.rs`（工具栏/文件树/空错态三段式、`ReviewDiff`/`ReviewDiffTree` 双上下文、`old_line`/`new_line` 双侧行号模型）与 `apps/mobile/src/lib/diff-presentation.ts`（`MAX_DIFF_LINES = 400` 与文件头剔除、尾随空行回收）、`apps/desktop/src/app/right_panel/links.rs`（转录文件链接的纯词法路由）；Paseo（`F:/workplace/Paseo/work/Soxu/.refs/paseo`，`7bcd598`）的 AOCI 差分协议条目（`packages/protocol/src/binary-frames/diff.ts` 的差异块/行/样式分段，用于确认行号与分段语义边界）。CodeGraph 用 `codegraph explore --path <Padu 根> "right panel diff review layout gutter line numbers truncation"` 定位上述符号及其调用面；Paseo 的 `.codegraph` 有漂移提示，仅读 AOCI，未据图下结论。采用：三段式内容分发、双侧行号 + 空号位、400 行截断与尾行回收、词法路径归一化。不采用：Padu 的 `bezel-gpui`/`Pierre` 渲染依赖、`#[allow]` 压制、`/ 过滤` 与行内批注的完整交互链（M6 接 daemon 后再评估）。参考索引未复制、未 `init`/`scan`/重建/维护，目标工作树无 `.codegraph`。
 
 ### 3.2 已合入交付与验收证据边界
 
