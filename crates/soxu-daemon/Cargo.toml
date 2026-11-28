@@ -14,6 +14,10 @@ axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
+# 受控 PTY 宿主需要真实伪终端（Windows ConPTY / Unix openpty）。本工作区 lints
+# `unsafe_code = "forbid"`，无法自行封装系统调用，故使用跨平台封装 crate（0.9.0 为
+# 当前 crates-io 最新稳定版，经 `cargo info portable-pty --registry crates-io` 核实）。
+portable-pty = "0.9.0"
 rand.workspace = true
 rusqlite.workspace = true
 rust-embed.workspace = true
