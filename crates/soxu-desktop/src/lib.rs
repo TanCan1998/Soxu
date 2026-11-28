@@ -29,6 +29,7 @@ pub mod layout;
 pub mod modals;
 pub mod onboarding;
 pub mod right_panel;
+pub mod schedules;
 pub mod search;
 pub mod settings;
 pub mod shell;

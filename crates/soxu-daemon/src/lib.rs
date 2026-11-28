@@ -4,6 +4,7 @@ pub mod antigravity;
 pub mod native_assets;
 pub mod pairing;
 pub mod pty;
+pub mod schedules;
 pub mod scripts;
 pub mod server;
 pub mod state;
@@ -14,6 +15,10 @@ pub use native_assets::{NativeAssetError, NativeAssetGuard};
 pub use pty::{
     NullPtyEventSink, PortablePtyBackend, PtyBackend, PtyChild, PtyControl, PtyEventSink, PtyHost,
     PtySpawnSpec,
+};
+pub use schedules::{
+    Clock as ScheduleClock, FinishOutcome, ManualClock, NullScheduleEventSink, ScheduleEventSink,
+    ScheduleService, ScheduleStore, StoredSchedule, SystemClock, TickReport,
 };
 pub use scripts::{
     FeatureGate, NullScriptEventSink, ReapOutcome, RunOutput, RunScriptOptions, ScriptEventSink,

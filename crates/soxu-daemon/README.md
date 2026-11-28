@@ -48,6 +48,35 @@ cargo run -p soxu-daemon
 - **审批**：`risk` 为 `high` / `critical` 的条目必须携带 `approval_id`，否则返回 `PolicyDenied` 且不派生任何子进程。
 - **幂等**：同一 `idempotency_key` 收敛到同一 `run_id`，不重复执行副作用。
 
+## 调度与心跳执行器（M6-C）
+
+`crates/soxu-daemon/src/schedules/**`，消费 `soxu-protocol::schedules` 契约：
+
+- **求值**：`cron.rs` 是 cron 语义的唯一求值点（5 段式、UTC、周字段 `0/7` 等价、
+  范围步进从下界起算、日与周同时受限时取并集）；按「天 → 时 → 分」推进，
+  闰日与月末组合在 8 年窗口内有界收敛，无命中即拒绝创建（不做忙轮询降级）。
+- **时钟**：全部时间来自 `schedules::Clock`；生产用 `SystemClock`，测试用 `ManualClock` 推进，
+  `tick` 不依赖真实等待，也不持有任何 `sleep`。
+- **持久化**：`ScheduleStore` 单文件 JSON + `rename` 原子替换，体积上限 4 MiB，
+  损坏 / 版本未知 / 标识重复一律 fail-closed 拒绝加载；恢复后仍逐条复核节奏与有效期。
+- **幂等**：创建按 `idempotency_key` 收敛到同一定义，手动触发按 `idempotency_key`
+  收敛到同一 `Triggered` 事件（每调度的键表上限 256 条，先进先出淘汰）。
+- **重试**：失败 / 超时沿用同一 `run_id` 与同一 `scheduled_for`，退避上限 3600 秒，
+  次数达到 `retry.max_attempts` 才下发一次 `RunFinished` 收敛结论。
+- **不补发历史**：错过的触发点直接前进到 `now` 之后的最新一次，绝不按积压次数连发；
+  心跳 `only_when_idle = true` 在 Agent 忙碌时跳过并前移周期（`tick_with_idle`）。
+- **停用 / 删除收敛**：停用丢弃在途重试并把 `next_run_at` 置空；删除同时清理创建幂等索引、
+  触发幂等键与在途登记，删除后到达的运行结果只丢弃，绝不复活定义、也不下发事件。
+- **能力门控**：`Schedules` 管理 cron / 固定周期，`Heartbeats` 单独管理心跳；
+  未声明时命令返回 `ErrorCode::Unsupported`，`tick` 也不为对应调度下发任何事件
+  （`TickReport::gated` 如实记录被压制的条数）。
+- **事件出口**：`ScheduleEventSink` 由宿主注入，事件只在持久化成功之后下发；
+  `NullScheduleEventSink` 供只读宿主与回归使用。
+
+> 传输层现状：`RpcCommand` 同样尚无调度请求变体（与脚本 / PTY 域一致，见下节“传输层现状”）。
+> 本单交付 `ScheduleService::handle`（1:1 对应 `ScheduleCommand`）、`tick` / `tick_with_idle`
+> 与 `finish_run`，`RpcCommand` 转发需独立契约 PR 补齐后直接接线，未改动冻结的 `soxu-protocol`。
+
 ## 受控 PTY 宿主（M6-A）
 
 `crates/soxu-daemon/src/pty/**`，消费 `soxu-protocol::pty` 契约：
@@ -67,10 +96,10 @@ cargo run -p soxu-daemon
 
 ## 能力门控（M6-A）
 
-`DaemonFeature::ManagedScripts` / `ControlledPty` **缺省关闭**。门控统一由
-`scripts::FeatureGate` 判定：未声明时脚本域与 PTY 域整族命令一律返回
-`ErrorCode::Unsupported` 的三要素错误，且不下发任何 `ScriptLifecycleChanged` / `PtyActivity` 事件。
-`FeatureGate::from_csv("managed_scripts,controlled_pty")` 供宿主按配置装配。
+`DaemonFeature::ManagedScripts` / `ControlledPty` / `Schedules` / `Heartbeats` **缺省关闭**。门控统一由
+`scripts::FeatureGate` 判定：未声明时对应域整族命令一律返回
+`ErrorCode::Unsupported` 的三要素错误，且不下发任何 `ScriptLifecycleChanged` / `PtyActivity` / `ScheduleActivity` 事件。
+`FeatureGate::from_csv("managed_scripts,controlled_pty,schedules,heartbeats")` 供宿主按配置装配。
 
 > 传输层现状：`soxu-protocol` 的 `RpcCommand` 尚无脚本/PTY 请求变体（契约 PR #137 只交付了结果与事件变体，
 > 见 `docs/ops/PROGRESS.md` §4.14 衔接红线）。本单交付的是执行器与宿主的完整实现、门控与命令处理入口
@@ -86,4 +115,6 @@ cargo test -p soxu-daemon
 覆盖 HTTP/WS 端到端、`afterSeq` 增量追平、配对全生命周期、原生驱动只读会话、PWA 伺服 404/200/鉴权回归，
 以及 M6-A 专项 `tests/scripts_pty.rs`（清单注入面、透传参数越权、高风险审批、输出预算截断、
 超时后进程树有界回收、环境白名单隔离、幂等键去重、PTY 分片序号与终结片、关闭幂等、
-会话上限与空闲回收、真实 ConPTY/openpty 冒烟）。
+会话上限与空闲回收、真实 ConPTY/openpty 冒烟），以及 M6-C 专项 `tests/schedules.rs`
+（门控缺省关闭与事件零下发、创建/手动触发幂等、注入时钟下的周期推进与跳过补发、
+失败重试沿用同一次运行、停用/删除收敛、有效期过期、定义持久化恢复、非 UTC 时区拒绝）。
