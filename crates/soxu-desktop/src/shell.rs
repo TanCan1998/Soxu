@@ -18,6 +18,7 @@ use gpui::{
     Context, Div, Hsla, IntoElement, ParentElement, Pixels, Render, Styled, Window, div, px,
 };
 
+use crate::composer::render_for_window;
 use crate::focus::FocusStack;
 use crate::i18n::I18n;
 use crate::layout::{LayoutPlan, PanelVisibility};
@@ -128,7 +129,12 @@ impl Render for WorkbenchShell {
                                     .text_size(px(17.0))
                                     .text_color(palette.text_secondary)
                                     .child(i18n.t("shell.panel.canvas_empty").to_string()),
-                            ),
+                            )
+                            .child(render_for_window(
+                                &plan,
+                                &palette,
+                                _window.viewport_size().width.as_f32(),
+                            )),
                     )
                     .when(rendered(plan.inspector), |row| {
                         row.child(placeholder_panel(
