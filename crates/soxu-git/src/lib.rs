@@ -47,10 +47,12 @@ pub use worktree_lifecycle::{
 pub use worktree_recovery::{
     EvidenceGap, ObservedWorktreeState, PartialCleanupPreview, PartialCleanupRejection,
     PartialCleanupScope, PreviewObservation, PreviewOutcome, PrunePreview, PrunePreviewCandidate,
-    PruneRejection, RecoveryOperation, RecoveryPreviewError, RecoveryPreviewRequest,
-    RemoveRegistrationPreview, RemoveRegistrationRejection, RemoveRegistrationScope, RepairPreview,
-    RepairPreviewCandidate, RepairRejection, UnlockPreview, UnlockPreviewCandidate,
-    UnlockRejection, WorktreeObservationKind,
+    PruneRejection, RecoveryCancellation, RecoveryConfirmation, RecoveryExecuteError,
+    RecoveryExecutionOutcome, RecoveryExecutionPreview, RecoveryExecutionRecord, RecoveryNote,
+    RecoveryObservation, RecoveryOperation, RecoveryPreviewDigest, RecoveryPreviewError,
+    RecoveryPreviewRequest, RemoveRegistrationPreview, RemoveRegistrationRejection,
+    RemoveRegistrationScope, RepairPreview, RepairPreviewCandidate, RepairRejection, UnlockPreview,
+    UnlockPreviewCandidate, UnlockRejection, WorktreeObservationKind, recovery_preview_digest,
 };
 
 pub use worktrees::{

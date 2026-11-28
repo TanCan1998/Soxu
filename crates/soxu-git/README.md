@@ -1,10 +1,10 @@
 # soxu-git：本地项目身份、Git 探测与受控 Worktree
 
-M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控检出。M3d 提供已跟踪文件的四种只读 Diff，以及只接受已授权 Checkpoint 或完整本地提交的固定端点双端 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
+M3f 提供 Worktree 恢复审批预览、受控解锁、无残留结论与重启只读 journal 复核。M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控检出。M3d 提供已跟踪文件的四种只读 Diff，以及只接受已授权 Checkpoint 或完整本地提交的固定端点双端 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
 
 ## Worktree 只读恢复预览（M3 #57-2）
 
-`GitProbe::recovery_preview(RecoveryPreviewRequest)` 为 `unlock`、`repair`、`prune`、移除注册与清理部分落盘五类恢复操作建立只读预览契约：输出候选身份、影响对象、证据缺口与不确定性，供宿主生成二次授权摘要。本模块零写入、零推断性自愈；执行与持久日志属后续工作包（`execute.rs` / `journal.rs`）。
+`GitProbe::recovery_preview(RecoveryPreviewRequest)` 为 `unlock`、`repair`、`prune`、移除注册与清理部分落盘五类恢复操作建立只读预览契约：输出候选身份、影响对象、证据缺口与不确定性，供宿主生成二次授权摘要。该入口只采集证据。能否写入由下节所述执行入口独立判定。
 
 - **观察状态**：`recovery_preview` 复用 `open_local_project` + `list_worktrees` 建立快照，把设计文档第 5 节表格的全部观察状态分类为 `WorktreeObservationKind`：有效保护锁（清单 `locked` 且授权目标确认为可达目录）、疑似孤立锁（有锁但无目标/意图证据）、prunable 或路径不可达、卷离线与身份漂移、`Unavailable`/bare/HEAD 异常、`Prepared`/`Started` 结果未定、`Pending`/`Disabled` 检出。证据缺口用 `EvidenceGap` 逐项记录，不推断注册路径的存在性或健康度。
 - **unlock 预览**：绑定唯一 linked 注册、原始锁理由字节与失去锁保护的影响说明。无 linked 注册、无锁或锁租约证据不足（未知所有者、卷离线、记录不一致）时分别拒绝，保留锁。
@@ -14,6 +14,16 @@ M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控
 - **清理部分落盘预览**：绑定请求 ID，只读回查协调域意图与检出留痕；执行结果未定（`Prepared`/`Started`/`Unknown`）时禁止清理；目标缺失且无异议时才允许进入授权，目录存在或含其他内容时按归属无法证明拒绝。
 - **可见性最小扩围（主控裁决放行）**：`worktree_lifecycle::read_intents` 改为 `pub(crate)`、`worktree_checkout` 新增 `pub(crate) read_checkout_journal` 只读访问器，供预览复用既有持久日志解码；不改持久格式、行为或签名语义。
 - 验证：`tests/worktree_recovery_preview.rs` 在 Windows 以真实 Git 夹具覆盖有效保护锁、疑似孤立锁拒绝、prune 候选与锁定裁决拒绝、repair 范围拒绝、在线干净/失联移除分类、请求 ID 绑定与未知请求拒绝、相对路径/普通目录拒绝；每个预览前后对夹具整树快照断言零写入。Linux 专属 HEAD 损坏用例由 Unix 门控执行。
+
+## Worktree 恢复执行与 journal（M3 #57-3）
+
+宿主用 `GitProbe::prepare_recovery` 建立审批预览，展示候选、`digest()` 和 `execution_blocker()`。获得本机用户确认后，通过 `confirm(expires_at)` 生成绑定原执行 ID 的确认，再调用 `execute_recovery`。当前原生写命令为 `git worktree unlock -- <目标>`。清理部分落盘只有在同一注册意图复核得出目标缺失、注册缺失、分支 ref 缺失时，才记录 `NothingToClean`。
+
+- 审批摘要使用工作区的 `sha2`，覆盖 Git 版本、预览内容、执行 ID、显式授权目标和协调域及仓库的原生目录身份。解锁另核验目标目录、linked 管理目录、`.git`、`gitdir` 和 `commondir` 的关联。协调域锁内重算预览，再在写 journal 和启动 Git 前复核保留的目录身份。协调域锁覆盖同一状态根内的 Soxu 写者。宿主须持续排除域外写者、活动任务及授权路径的并发替换。
+- `prune` 保留 dry-run 候选。写入口缺少每个候选的管理目录身份、永久丢失裁决、未推送 ref、局部对象、reflog、备份证据和可验证的外部写入排除能力，故在取得协调锁前返回 `EvidenceUnavailable`。单候选适用同一门槛。`repair` 缺少移动前后映射与全部触及记录的证明。在线移除缺少目标本身的完整清洁度与恢复来源证明。失联移除依赖整仓 prune 的证据。上述操作均保留只读预览。
+- 确认在等锁前、获锁后、写 journal 前和 Git 启动前检查过期与取消。有效期上限 10 分钟，审批预览同样受 10 分钟时限约束。锁等待中到期不会创建执行记录。首次尝试可能创建协调锁文件。若意图已落盘后才到期或取消，则保留该执行 ID 并记录 `NotStarted`，Git 写入保持为零。
+- journal 在私有协调域内持久化 `Prepared`、`Started`、`Completed` 和 `Observed`。子任务在调用者退出后继续持锁到结局落盘。运行中的取消、超时或管道异常下，执行者尝试回收直接子进程，记录 `Unknown { stop_confirmed: false }` 并保留预约和接入阻断。重启读取兼容旧记录，旧记录里的直接子进程回收标记无法解除预约。`diagnose_recovery` 和 `recovery_execution_records` 只读回查留痕。
+- WSL Linux 正向夹具覆盖受控解锁、并发重放及重启诊断。负向夹具覆盖单候选和多候选 prune、无关联 repair 目标、在线目标含忽略文件、同路径同字节目录替换及等锁过期。原生子进程夹具覆盖启动后的协作取消、超时和输出上限。Windows 协调域缺少稳定目录身份，打开时返回 `UnsupportedFilesystem`。
 
 ## 轮次 Checkpoint
 

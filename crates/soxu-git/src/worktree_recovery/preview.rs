@@ -431,7 +431,7 @@ fn observe_target(target: Option<&Path>) -> Result<Option<TargetState>, Recovery
     Ok(Some(target_state_of(target)))
 }
 
-fn target_state_of(target: &Path) -> TargetState {
+pub(super) fn target_state_of(target: &Path) -> TargetState {
     match target.symlink_metadata() {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => TargetState::Absent,
         Err(_) => TargetState::Inaccessible,

@@ -22,9 +22,9 @@
 
 ## 2. 当前阶段（2026-11-28）
 
-- **主线基线**：`main` = `7084de7`（M6 端到端接线合入）。
+- **主线基线**：`main` = `285a4c9`（`#154` 收口 M6 功能并登记 M3）。
 - **最近合入**：M6 接线 `#152`（`7084de7`，14 变体全部进域服务、能力门控先于工作区解析、事件同管线、真实 daemon 冒烟 26 项）、M6 传输契约 `#149`（`08bd29f`）、M6-C `#146`（`0ddd041`）、看板重构 `#145`（`f360bec`）、M6-A/B、M6 契约、M5、M4-W2。
-- **进行中**：`#153` M3 Worktree 恢复执行与重启复核（`execute.rs`/`journal.rs`），工作树 `feat-153-m3-recovery-execute`（`wks_43bbf4a512b528d6`，agent `96b79a6`）。
+- **进行中**：`#153` M3 Worktree 恢复执行与重启复核（PR `#156`，暂停合入）已复核审批预览与原生身份绑定、受控解锁、超时/取消及重启留痕。整仓 `prune`、`repair` 和移除注册保留只读候选，写入口等待范围与数据保全证据。
 - **已知缺口（真实）**：`ClientHello` 无能力字段，M6 门控是守护进程级（`SOXU_DAEMON_FEATURES`，缺省全关）而非按连接级；调度节拍需宿主驱动，独立入口尚未起定时器。
 - **门禁**：三平台 Rust（windows/linux/macos-arm64）+ PWA + 格式 + 隐私 + `CI Gate`；合入统一 `--match-head-commit`，合并后归档工作树与分支。
 - **尚未交付**：Git 恢复执行/回退/结构化提交、`direct` MCP 运行时挂载、非 Windows 宿主真机补测、Antigravity 项目入口与全代理验收、正式发布（未核验原生测试）。
@@ -42,7 +42,7 @@
 
 ## 4. 下一步行动队列（Next Actions）
 
-1. **M3 恢复执行收口**：`#153` 审查/合入后做真实夹具演练（确认漂移作废、部分落盘留痕、重启只读诊断）；随后排 Rewind 与结构化提交。
+1. **M3 恢复执行收口**：复审 PR `#156` 的原生身份绑定、拒绝路径和未知进程结局留痕，再由主控决定合入范围；随后排 Rewind 与结构化提交。
 2. **M6-D 打包与发布核验**：`soxu-releases` 四平台构建已在 `cargo build` 前执行 `pnpm build`（Linux/Windows/macOS 均确认），并含活二进制校验与 `soxu`+`soxu-daemon` 双产物；正式发版前补一次 tag 级 dry-run。
 3. **调度节拍宿主驱动**：把 `DaemonState::tick_schedules` / `finish_schedule_run` 接入可执行入口的定时器与触发执行器（需改 `main.rs`，须独立派发）。
 4. **M3 剩余**：恢复执行与 journal（`execute.rs`/`journal.rs`）、Safety Snapshot 先行 Rewind、文件级结构化提交预检；按设计文档顺序，涉及协议变更先走独立契约 PR。

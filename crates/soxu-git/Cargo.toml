@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 chrono.workspace = true
 serde.workspace = true
+sha2.workspace = true
 soxu-core.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
