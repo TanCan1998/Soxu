@@ -476,6 +476,7 @@ async fn timeout_stops_run_and_reclaims_process_tree_within_bounds() {
 #[tokio::test]
 async fn environment_is_cleared_unless_allowlisted() {
     let root = tempfile::tempdir().expect("临时工作区");
+    let parent_has_path = std::env::var_os("PATH").is_some();
     let mut isolated = script_entry("env-isolated", "stub_child_reports_environment");
     isolated.env_policy = ScriptEnvPolicy::default();
     write_manifest(root.path(), &[&isolated]);
@@ -489,15 +490,21 @@ async fn environment_is_cleared_unless_allowlisted() {
     );
     wait_terminal(&service, &accepted.run_id).await;
     let output = service.runner().output(&accepted.run_id).expect("输出");
-    let text = String::from_utf8_lossy(output.as_bytes()).into_owned();
+    let cleared = String::from_utf8_lossy(output.as_bytes()).into_owned();
+    let cleared_keys = stub_env_keys(&cleared);
     assert!(
-        text.contains("SOXU-STUB-ENV-COUNT=0"),
-        "默认必须清空环境，桩实际看到：{text}"
+        !stub_env_path(&cleared),
+        "未放行的 PATH 不得泄漏给子进程，桩实际看到：{cleared}"
     );
-    assert!(
-        text.contains("SOXU-STUB-PATH=absent"),
-        "未放行的 PATH 不得泄漏给子进程：{text}"
-    );
+    // 绝对数量不做断言：平台运行时可能在进程初始化时自行注入自有变量
+    // （例如 macOS 的 `__CF_USER_TEXT_ENCODING`），那不属于父环境继承。
+    // 真正的安全断言是「父进程的可识别变量一个都不出现」。
+    for sensitive in ["HOME", "USER", "SHELL", "TMPDIR", "CARGO_HOME"] {
+        assert!(
+            !cleared_keys.iter().any(|key| key == sensitive),
+            "默认清空环境后不得继承 {sensitive}：{cleared_keys:?}"
+        );
+    }
 
     let mut allowed = script_entry("env-allowed", "stub_child_reports_environment");
     allowed.env_policy = ScriptEnvPolicy {
@@ -512,15 +519,54 @@ async fn environment_is_cleared_unless_allowlisted() {
     );
     wait_terminal(&service, &accepted.run_id).await;
     let output = service.runner().output(&accepted.run_id).expect("输出");
-    let text = String::from_utf8_lossy(output.as_bytes()).into_owned();
-    assert!(
-        text.contains("SOXU-STUB-PATH=present"),
-        "白名单内的变量必须按名注入：{text}"
+    let allowed = String::from_utf8_lossy(output.as_bytes()).into_owned();
+    let allowed_keys = stub_env_keys(&allowed);
+    assert_eq!(
+        stub_env_path(&allowed),
+        parent_has_path,
+        "白名单内的变量必须按名注入，桩实际看到：{allowed}"
     );
     assert!(
-        text.contains("SOXU-STUB-ENV-COUNT=1"),
-        "除白名单外不得有任何其他环境项：{text}"
+        !allowed_keys.iter().any(|key| key == "HOME"),
+        "白名单之外的变量仍不得注入：{allowed_keys:?}"
     );
+    // 与清空环境的那次相比，只能多出被放行的那一个变量；平台自有注入两边都计，故差值稳定。
+    let expected_delta = usize::from(parent_has_path);
+    assert_eq!(
+        stub_env_count(&allowed),
+        stub_env_count(&cleared) + expected_delta,
+        "白名单只应多注入被放行的变量：cleared={cleared_keys:?} allowed={allowed_keys:?}"
+    );
+}
+
+fn stub_env_count(text: &str) -> usize {
+    stub_env_value(text, "SOXU-STUB-ENV-COUNT=")
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or_else(|| panic!("桩未报告环境变量数量：{text}"))
+}
+
+fn stub_env_keys(text: &str) -> Vec<String> {
+    stub_env_value(text, "SOXU-STUB-ENV-KEYS=")
+        .map(|raw| {
+            raw.split(',')
+                .map(|key| key.trim().to_ascii_uppercase())
+                .filter(|key| !key.is_empty())
+                .collect()
+        })
+        .unwrap_or_else(|| panic!("桩未报告环境变量键名：{text}"))
+}
+
+fn stub_env_path(text: &str) -> bool {
+    match stub_env_value(text, "SOXU-STUB-PATH=") {
+        Some("present") => true,
+        Some("absent") => false,
+        other => panic!("桩未报告 PATH 存在性（{other:?}）：{text}"),
+    }
+}
+
+fn stub_env_value<'a>(text: &'a str, marker: &str) -> Option<&'a str> {
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix(marker))
 }
 
 #[tokio::test]
@@ -875,17 +921,21 @@ fn stub_child_idles() {
     std::thread::sleep(Duration::from_secs(60));
 }
 
-/// 受控子进程桩：只报告自身可见的环境变量数量与 PATH 存在性。
+/// 受控子进程桩：只报告自身可见的环境变量数量、键名与 PATH 存在性。
 #[test]
 #[ignore = "受控子进程桩：仅由父测试经当前二进制重新执行"]
 fn stub_child_reports_environment() {
-    let count = std::env::vars_os().count();
+    let mut keys: Vec<String> = std::env::vars_os()
+        .map(|(key, _)| key.to_string_lossy().into_owned())
+        .collect();
+    keys.sort();
     let path = if std::env::var_os("PATH").is_some() {
         "present"
     } else {
         "absent"
     };
-    println!("SOXU-STUB-ENV-COUNT={count}");
+    println!("SOXU-STUB-ENV-COUNT={}", keys.len());
+    println!("SOXU-STUB-ENV-KEYS={}", keys.join(","));
     println!("SOXU-STUB-PATH={path}");
 }
 
