@@ -131,6 +131,20 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 **验证证据**：`cargo test -p soxu-desktop --all-targets --locked` **277 项全绿**（新增 24 项：分区顺序与排序、防抖窗口与 LRU 淘汰、双段 Esc、上下键不重算、分区跳转回绕、符号前缀过滤与选中回调、Onboarding 状态机与触发条件、几何常量对照）；`cargo clippy -p soxu-desktop --all-targets --locked -- -D warnings` 零告警；`cargo fmt --all -- --check` 干净；增量 `scripts/check-all.ps1` 7/7 全绿（未触前端，`design-system/soxu/preview.html` 未重新生成，L-024）。工具链实测 `rustc 1.99.1` / `node v26.13.1` / `pnpm 12.21.0`，`CARGO_TARGET_DIR` 为工作树内 `target/`。
 
+#### M6-A Wave（审查中）：`#139` 受管脚本执行器与受控 PTY 宿主
+
+| Issue / 任务 | 分支 / Paseo 工作区 | Owned Paths |
+| :--- | :--- | :--- |
+| `#139` M6-A daemon 受管脚本执行器 + 受控 PTY 宿主 | `feat/139-m6-daemon-scripts-pty` / `F:\AI\paseo\worktrees\19r49pwc\feat-139-m6-daemon-scripts-pty`（[PR #142](https://github.com/TanCan1998/Soxu/pull/142)） | `crates/soxu-daemon/src/{scripts,pty}/**`、`crates/soxu-daemon/tests/**`、`lib.rs`（仅 module 与导出）、`crates/soxu-daemon/Cargo.toml`（必要依赖）、`crates/soxu-daemon/README.md`、`docs/ops/PROGRESS.md`、本分支 AOCI |
+
+**实现要点**：`scripts/`（`gate` 能力门控、`manifest` 只读 `paseo.json` 严格校验、`runner` 直传参数派生 + 输出预算 + 进程树有界回收、`service` 1:1 命令入口）与 `pty/`（`mod` 会话上限/空闲回收/幂等关闭、`session` 输出泵与分片序号、`backend` 经 `portable-pty` 的 ConPTY/openpty 后端）。基线为 `142cc22`，已合流 M6-B（`edbe47b`）。
+
+**传输层缺口（已如实登记）**：`soxu-protocol` 冻结范围内的 `RpcCommand` 无脚本/PTY 请求变体，`ClientHello` 也无能力声明字段，故本单不改协议、不在 `server.rs` 另起请求类型（§4.14 红线①），交付命令处理入口 `ScriptService::handle` / `PtyHost::handle`。接线所需最小加法契约（`RpcCommand::{Script,ControlledPty}` + `ClientHello.declared_features`）待独立契约 PR 补齐后直接调用既有入口。
+
+**验证证据**：Windows `cargo test -p soxu-daemon --all-targets --locked` **65 项全绿**（新增 `tests/scripts_pty.rs` 15 项）、`cargo clippy -p soxu-daemon --all-targets --locked -- -D warnings` 零告警、`cargo fmt` 干净、增量 `check-all` 7/7 通过；合流后同两命令复跑仍全绿。WSL `Ubuntu-26.04`（实体 rust 1.99.1 / node 26.13.1，独立 `/root/.cache/soxu-139-m6a`）`clippy -D warnings` 与 `scripts_pty` **15 passed** 均通过，并真机暴露并修掉一处 Linux 独有 `unused_mut`（L-006/L-013）。工具链 `CARGO_TARGET_DIR` 为工作树内 `target/`，全程 `CARGO_BUILD_JOBS=4`。
+
+**参考与索引边界**：t3code（`.refs/t3code`，`f3e36337`，无 AOCI）仅以 CodeGraph + 源码对照终端会话/分片的「有界缓冲 + 单调序号 + 终结片」组织；Paseo（`.refs/paseo`，`7bcd598`）复用既有 AOCI 与 CodeGraph 对照脚本/终端职责边界，其 `.codegraph` 有漂移提示故仅读 AOCI、未据图下结论。**未移植** TypeScript 实现，未复制/初始化/重建参考索引，目标工作树无 `.codegraph`。
+
 #### 已收口波次 `wave-m3-next-20261126`（三路已全部合入 `main` 并归档）
 
 | Issue / 任务 | 分支 / Paseo 工作区 | Owned Paths |
