@@ -15,13 +15,15 @@
 //! 面板内容全部为占位组件——M5 落地对话流、输入舱与审阅栏。
 
 use gpui::{
-    Context, Div, Hsla, IntoElement, ParentElement, Pixels, Render, Styled, Window, div, px,
+    AppContext, Context, Div, Entity, Hsla, IntoElement, ParentElement, Pixels, Render, Styled,
+    Window, div, px,
 };
 
 use crate::focus::FocusStack;
 use crate::i18n::I18n;
 use crate::layout::{LayoutPlan, PanelVisibility};
 use crate::theme::theme_state;
+use crate::timeline::TimelineView;
 use crate::tokens::{layout, sizing};
 
 /// 工作台壳层根视图。
@@ -30,14 +32,17 @@ pub struct WorkbenchShell {
     focus_stack: FocusStack,
     /// i18n 骨架（语言切换入口占位）。
     i18n: I18n,
+    /// 中栏主对话时间线（M5-A）。
+    timeline: Entity<TimelineView>,
 }
 
 impl WorkbenchShell {
     /// 创建壳层状态。
-    pub fn new(_cx: &mut Context<Self>) -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus_stack: FocusStack::new(),
             i18n: I18n::new(),
+            timeline: cx.new(TimelineView::new),
         }
     }
 
@@ -114,21 +119,15 @@ impl Render for WorkbenchShell {
                         ))
                     })
                     .child(
-                        // 中栏：Pure Black 画布 + 居中占位（M5 落对话流与输入舱）。
+                        // 中栏：Pure Black 画布 + M5-A 虚拟时间线（对话流/工具卡/导航轨）。
                         div()
                             .flex()
                             .flex_col()
                             .flex_1()
                             .min_w_0()
-                            .justify_center()
-                            .items_center()
+                            .min_h_0()
                             .bg(palette.surface_canvas)
-                            .child(
-                                div()
-                                    .text_size(px(17.0))
-                                    .text_color(palette.text_secondary)
-                                    .child(i18n.t("shell.panel.canvas_empty").to_string()),
-                            ),
+                            .child(self.timeline.clone()),
                     )
                     .when(rendered(plan.inspector), |row| {
                         row.child(placeholder_panel(

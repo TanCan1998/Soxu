@@ -29,6 +29,7 @@
 - **M4 Wave 4.1 设计令牌编译器（`#115`，分支 `feat/115-gpui-theme-tokens`）已合入 `main`（squash `01fcdaf`）。** `scripts/sync-design-tokens.mjs` 从唯一真相源 `tokens.json` 同批编译三份产物（`design-system/soxu/tokens.css`、`apps/mobile-web/src/tokens.generated.css`、`crates/soxu-desktop/src/theme/tokens.rs`）；`--check` 对三者逐字节比对，漂移时点名文件并非零退出。`scripts/verify-design-system.mjs` 把 `tokens.rs` 列为必需文件并校验三产物与 `--check` 接线（只做存在性与接线，不用正则重算语义）。新增 `crates/soxu-desktop/src/lib.rs` 与 `theme/{mod.rs,tokens.rs}`，通过库目标公开常量消除 `dead_code`（未用 `allow` 压制）；本单**未引入** gpui/gpui-component 或任何第三方依赖，未改根 `Cargo.toml`、未实现桌面视图、未动移动端。
 - **`wave-20261128` 双路已合入 `main` 并收口。** `#118` / PR `#120`（`0d1165e`，M4-W1b gpui 依赖接入与令牌消费层，主线 run `46058243076` 三平台全绿）与 `#119` / PR `#121`（`1cc9c3f`，M3 `#57-2` Worktree 只读恢复预览契约，PR run `46065749309` 全绿）两路 Paseo Worktree 已归档、本地与远端分支已回收。两路子代理统一使用 `pi` + `magpie/group/jev-adaptive`（`high`），独立 `CARGO_TARGET_DIR`（`soxu-118-gpui-w1b` / `soxu-119-recovery-preview`）零互踩。`#118` 的依赖冲突按 ADR-012 裁决：crates.io 原名 `gpui` 最新稳定版仅 0.2.2，而 `gpui-component 0.11.0` 硬绑定 Zed gpui 0.3.x 线改名包 `gpui-pre`，最终锁定 `gpui-pre =0.3.14 + gpui-component 0.11.0` 单实现组合（`cargo tree` 证据）；`#119` 交付 `GitProbe::recovery_preview` 五类恢复操作（unlock / repair / prune / 移除注册 / 清理部分落盘）的只读预览契约与观察状态分类，Darwin `unused import` 热修一次（L-013 Seen 4×）。两处冻结文件最小可见性扩围（`read_intents` 与 `read_checkout_journal` 转 `pub(crate)`）经主控按 L-020 裁决放行并在 PR 单列说明。
 - **M3 两份设计已合入 `main`。** `#57` 的显式 Init/Clone 与损坏恢复二次授权见 [仓库初始化、克隆与工作树恢复](../dev/git-init-clone-and-recovery.md)。`#58` 的轮次 Checkpoint 快照、先建 Safety Snapshot 再 Rewind 和文件级结构化提交见 [检查点、回退与结构化提交](../dev/git-checkpoint-rewind-commit.md)。
+- **M5 Wave 进行中：`#129`（M5-A 时间线核心视图）已在独立 Worktree 落地（分支 `feat/129-m5-timeline`，基线 `80a9185`）。** 新增 `crates/soxu-desktop/src/timeline/**`（10 个子模块）：`<=8.3Hz` 合批节拍（120ms 量化、`StreamCadence`）、虚拟窗口/行高数学（`RowMetrics` 前缀和 + 上下占位 + 滚动锚定）、5 类工具卡（含 `400` 行 Diff 截断与「构建一次」快照）、审批卡（高危红线禁用「本会话允许」+ 默认焦点在拒绝 + 跨设备幂等消解）、提问卡（1-9 数字快选/多选/`44px` 热区）、检查点锚点与回退三选一、`LiveSteps` 默认折叠单行、`20px` 轮次导航轨（含刻度优先级与命中边界）、卡片内焦点不逃逸（复用冻结 `focus.rs` 的 `FocusLayer`/`FocusStack`）。`shell.rs` 仅新增 1 个字段、1 行构造与 1 行挂载（与 M5-B 共享，合流冲突由主控解决），`lib.rs` 仅新增模块声明。`cargo clippy -p soxu-desktop --all-targets --locked -- -D warnings` 与 `cargo test -p soxu-desktop --locked`（**112 项**）通过，`scripts/check-all.ps1` 增量门禁全绿。
 - 仓库已启用合并自动删支（`delete_branch_on_merge = true`）与 Paseo Worktree 回收。
 - **参考项目与索引进度（已全部完成）**：
   - [x] 拉取参考项目至 `.refs/`：`paseo`（7,818 文件）、`codeg`（3,324 文件）、`padu`（1,157 文件）、`t3code`（上游 `pingdotgg/t3code`，快照 `f3e36337`，经 `gh-proxy.org` 镜像 FluxDown 下载）
@@ -102,6 +103,16 @@
 | Diff 同秒 OID 夹具修复 | `fix/diff-same-second-oid` | [PR #62](https://github.com/TanCan1998/Soxu/pull/62) 复验与远端 CI 通过，合入 `810b670`，工作区已归档。 |
 
 Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0f5e2e5`（`main`）。执行代理完成各自验证、推送和建 PR，主控负责审查、合入与归档。
+
+#### M5 Wave（进行中）
+
+| Issue / 任务 | 分支 / Paseo 工作区 | Owned Paths |
+| :--- | :--- | :--- |
+| `#129` M5-A 虚拟时间线、工具/审批卡与轮次导航轨 | `feat/129-m5-timeline` / `F:\AI\paseo\worktrees\19r49pwc\feat-129-m5-timeline` | `crates/soxu-desktop/src/timeline/**`（新增）、`shell.rs`（仅 import + 单行挂载）、`lib.rs`（仅 module 声明）、`docs/ops/PROGRESS.md`、本分支 AOCI |
+
+与 `#130`（M5-B 输入舱）并行：两路共用 `shell.rs` 挂载点，冲突由主控在合流时解决；各自使用检出内 `target/` 与 `CARGO_BUILD_JOBS=4`，不共用构建目录。
+
+**参考与索引边界**：本轮复用 Padu（`F:/workplace/Paseo/work/Soxu/.refs/padu`，`fbe97a3`）既有 AOCI（`aoci.code.txt` 直读 `transcript_view.rs` / `cadence-invariants.md` / `scrollbar.rs` 条目）与 CodeGraph（`codegraph explore --path <Padu 根>`），实际采用「虚拟列表 + 导航轨 + 120ms 提交节拍 + 尾行重测」结构；**未**移植 `bezel-gpui` 依赖、未用 `#[allow(dead_code)]`，导航轨宽度/刻度几何全部改由本仓令牌推导。参考索引未复制、未 init/scan/重建/维护；目标工作树无 `.codegraph`，按任务书回退到完整源码阅读。
 
 #### 已收口波次 `wave-m3-next-20261126`（三路已全部合入 `main` 并归档）
 
@@ -313,3 +324,4 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 9. **M4 Wave 4.1 令牌底座（`#115`）已合入 `main`（`01fcdaf`，主线 run `46038032799` 全绿）。** 已交付 `tokens.json → {tokens.css, tokens.generated.css, theme/tokens.rs}` 三产物编译与逐字节零漂移门禁，并做真实负向漂移实验（篡改 `theme/tokens.rs` 的 `z_index::BASE` 与 `tokens.css` 的 `--soxu-space-2` 均 `exit 1` 且点名文件，恢复后 `exit 0`）。Wave 4.1 剩余部分（根 `Cargo.toml` 引入 `gpui`/`gpui-component` 与构建优化配置、GPUI 侧消费层）已由 `#118` / PR `#120`（`0d1165e`）完成，Wave 4.1 全部收口。
 10. **下一步转入 M4 Wave 4.2 双轨正交并行**：轨道 A（`apps/mobile-web` + `soxu-daemon` Web 伺服）去 Mock 接通真实 Daemon WS / `rust-embed` / 扫码配对与 13 组视口验收；轨道 B（`soxu-desktop`）Pure Black/Light 主题插值、双开源字体与 `effective_code_family()`、可扩展 i18n、7 层焦点栈与四栏自适应壳层。t3code 作为新纳参考（仅 CodeGraph + 源码级）可在控制平面与 PWA 相关任务中对照其 `contracts` / `source-control` 契约组织。
 11. **构建目录策略调整（2026-11-28 用户决策）**：`mise.toml` 的 `CARGO_TARGET_DIR` 由共享 `../.cargo-target/soxu` 改为检出内 `target/`（`.gitignore` 已注册 `/target/`），工作树归档时构建缓存随目录一并回收；并行隔离规则（L-001）保持「禁 `mise run` + 进程内注入」。旧共享 target 目录（`F:\AI\paseo\worktrees\19r49pwc\.cargo-target\**`）在活动任务结束后统一清理。
+12. **M5-A（`#129`）与 M5-B（`#130`）并行进行中**：两路都以 `soxu-desktop/src/` 下的独立子目录为主战场，仅共享 `shell.rs` 的挂载点；M5-A 已完成纯逻辑 + 薄渲染落地与 112 项单测，待主控审查合入后再由主控解决 `shell.rs` 合流冲突（不自行改动 M5-B 的 `composer/` 范围）。
