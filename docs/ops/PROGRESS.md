@@ -117,6 +117,20 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 **参考与索引边界**：本轮复用 Padu（`F:/workplace/Paseo/work/Soxu/.refs/padu`，`fbe97a3`）既有 AOCI（`aoci.code.txt` 直读 `transcript_view.rs` / `cadence-invariants.md` / `scrollbar.rs` 条目）与 CodeGraph（`codegraph explore --path <Padu 根>`），实际采用「虚拟列表 + 导航轨 + 120ms 提交节拍 + 尾行重测」结构；**未**移植 `bezel-gpui` 依赖、未用 `#[allow(dead_code)]`，导航轨宽度/刻度几何全部改由本仓令牌推导。参考索引未复制、未 init/scan/重建/维护；目标工作树无 `.codegraph`，按任务书回退到完整源码阅读。
 
+#### M6-B Wave（进行中）：`#140` 命令面板、符号补全与三步 Onboarding
+
+| Issue / 任务 | 分支 / Paseo 工作区 | Owned Paths |
+| :--- | :--- | :--- |
+| `#140` M6-B `Cmd+K` 五分区检索、符号补全与三步 Onboarding | `feat/140-m6-desktop-search` / `F:\AI\paseo\worktrees\19r49pwc\feat-140-m6-desktop-search` | `crates/soxu-desktop/src/search/**`、`crates/soxu-desktop/src/onboarding/**`（新增）、`shell.rs`（仅 import + 单行挂载）、`lib.rs`（仅 module 声明）、`docs/ops/PROGRESS.md`、本分支 AOCI |
+
+**实现要点**：新增 `search/`（`model` 五分区与纯内存目录、`rank` 命中层级与排序、`cache` 90ms 防抖 + 24 条 LRU、`symbols` 内存符号目录与前缀补全、`keymap` 键位语义、`view` 薄渲染）与 `onboarding/`（三步状态机 + 卡片渲染）。全部为纯内存视图模型，渲染零 I/O，不调用 CodeGraph 或 daemon，也不新增协议类型。
+
+**06 页条款对照**：五分区固定顺序 `Suggested → Sessions → Files → History → Commands`（`SearchSection::ALL` 与 `rank()` 双保险，分区不参与打分比较）；`90ms` 防抖与 `24` 条 LRU（`DEBOUNCE_MS` / `QUERY_CACHE_CAPACITY`）；前缀优先（完全相等 → 前缀 → 词首 → 子串，再比位置、标题长度、声明序）；每区最多 `8` 行；`Cmd/Ctrl+K` 打开幂等且模态锁定时拒绝夺焦；双段 `Esc`（有文字只清空并留焦，为空才关闭并还原打开前焦点层）；`↑↓`/`⇥` 只移动选中、不重算结果；分区头 `26px`、行高 `40 / 54 / 48`、输入区 `52px`、键位栏 `36px`、空态 `160px`、面板 `640 × ≤440`、`rounded(16)`；Onboarding `560px`（`92vw` 自适应）/ `p(20)` / `rounded(18)`，三步可跳过可完成，完成与跳过后均不再自动弹出。
+
+**参考与索引边界**：复用 Paseo（`.refs/paseo`，AOCI 202 条）`packages/app/src/command-center/{sections,list-metrics,interaction}.ts` 与 `packages/protocol/src/search/text-match.ts` 登记的分区 band+rank 总序、行高单一来源、选中态按 ID 保位、tier+offset 评分；复用 CodeG（`.refs/codeg`，AOCI 177 条）`src/lib/file-search-match.ts` 与 `src/contexts/search-dialog-context.tsx` 的「层级 → 位置 → 长度」三段排序与常驻 ⌘K 弹窗；t3code（无 AOCI，CodeGraph + 源码）`apps/mobile/src/features/keyboard/commandPaletteItems.ts` 与 `packages/shared/src/paletteSearch.ts` 的 `nextPaletteIndex` 取模回绕与按组限流。**未移植**拼写容错层、daemon/服务端匹配、React 状态与宿主框架代码；参考索引未复制、未 init/scan/重建/维护。
+
+**验证证据**：`cargo test -p soxu-desktop --all-targets --locked` **277 项全绿**（新增 24 项：分区顺序与排序、防抖窗口与 LRU 淘汰、双段 Esc、上下键不重算、分区跳转回绕、符号前缀过滤与选中回调、Onboarding 状态机与触发条件、几何常量对照）；`cargo clippy -p soxu-desktop --all-targets --locked -- -D warnings` 零告警；`cargo fmt --all -- --check` 干净；增量 `scripts/check-all.ps1` 7/7 全绿（未触前端，`design-system/soxu/preview.html` 未重新生成，L-024）。工具链实测 `rustc 1.99.1` / `node v26.13.1` / `pnpm 12.21.0`，`CARGO_TARGET_DIR` 为工作树内 `target/`。
+
 #### 已收口波次 `wave-m3-next-20261126`（三路已全部合入 `main` 并归档）
 
 | Issue / 任务 | 分支 / Paseo 工作区 | Owned Paths |
