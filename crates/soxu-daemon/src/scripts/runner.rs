@@ -259,8 +259,13 @@ impl ScriptRunner {
     /// 启动一次受管脚本运行。
     ///
     /// 所有校验都在派生之前完成；任一项不通过就返回可执行错误且不产生子进程。
+    ///
+    /// `workspace_id` 由守护进程按已登记的 `workspace_id` 原样注入：运行快照与
+    /// 生命周期事件都沿用它，客户端才能把事件回挂到具体工作区，而不是靠路径
+    /// 末段猜一个标识。
     pub fn run(
         &self,
+        workspace_id: &str,
         workspace_root: &Path,
         entry: &ManagedScriptEntry,
         options: RunScriptOptions,
@@ -302,7 +307,7 @@ impl ScriptRunner {
         let run_id = format!("run_{}", uuid::Uuid::now_v7().simple());
         let snapshot = ScriptRunSnapshot {
             run_id: run_id.clone(),
-            workspace_id: workspace_id_of(workspace_root),
+            workspace_id: workspace_id.to_owned(),
             script_id: entry.script_id.clone(),
             state: ScriptRunState::Queued,
             exit_code: None,
@@ -829,13 +834,6 @@ fn program_missing(raw: &str) -> ActionableError {
 }
 
 /// 工作区标识：沿用守护进程对工作区目录的稳定命名口径（目录名）。
-fn workspace_id_of(workspace_root: &Path) -> String {
-    workspace_root.file_name().map_or_else(
-        || workspace_root.display().to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    )
-}
-
 fn unknown_run(run_id: &str) -> ActionableError {
     ActionableError::new(
         ErrorCode::NotFound,

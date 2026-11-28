@@ -1,7 +1,8 @@
 //! 脚本域命令处理入口（`ScriptCommand` → `ScriptCommandResult`，1:1 对应协议变体）。
 //!
 //! 门控在最前面：`managed_scripts` 未声明时整族命令一律拒绝，且不下发任何事件。
-//! 传输层（`RpcCommand` 转发）属 `soxu-protocol` 冻结范围，待契约补齐后直接调用本入口。
+//! 全局 `RpcCommand` 的 14 个 M6 变体由守护进程折叠成 `RpcDomainCommand` 后
+//! 1:1 转发到本入口（见 `crate::state::DaemonState::dispatch_domain_command`）。
 
 use crate::scripts::gate::FeatureGate;
 use crate::scripts::manifest::{PASEO_MANIFEST_FILE, ScriptManifest};
@@ -12,6 +13,18 @@ use soxu_protocol::{
 };
 use std::path::Path;
 use std::sync::Arc;
+
+/// 需要工作区根的命令在缺根时给出可执行拒绝，绝不以当前目录或空路径顶替。
+fn require_workspace_root(workspace_root: Option<&Path>) -> Result<&Path, ActionableError> {
+    workspace_root.ok_or_else(|| {
+        ActionableError::new(
+            ErrorCode::ValidationFailed,
+            "该脚本命令必须绑定工作区根目录",
+            "该请求未执行，未读取清单也未派生子进程",
+            "请由守护进程按 workspace_id 解析受控目录后重试",
+        )
+    })
+}
 
 /// 受管脚本域服务。
 pub struct ScriptService {
@@ -49,14 +62,18 @@ impl ScriptService {
     ///
     /// `workspace_root` 由宿主按 `workspace_id` 解析并授权，服务层只做**真实路径**
     /// 复核与执行前校验；解析失败一律拒绝，不做猜测式降级。
+    ///
+    /// 只有 `List` / `Run` 需要工作区根；`Stop` / `Inspect` 以 `run_id` 定位运行，
+    /// 传 `None` 即可——停掉一个已经失去工作区的失控进程树不能被路径复核挡住。
     pub fn handle(
         &self,
-        workspace_root: &Path,
+        workspace_root: Option<&Path>,
         command: ScriptCommand,
     ) -> Result<ScriptCommandResult, ActionableError> {
         self.runner.gate().require(DaemonFeature::ManagedScripts)?;
         match command {
             ScriptCommand::List(request) => {
+                let workspace_root = require_workspace_root(workspace_root)?;
                 let manifest = ScriptManifest::load(workspace_root)?;
                 Ok(ScriptCommandResult::Listed(ScriptManifestListing {
                     workspace_id: request.workspace_id,
@@ -65,6 +82,7 @@ impl ScriptService {
                 }))
             }
             ScriptCommand::Run(request) => {
+                let workspace_root = require_workspace_root(workspace_root)?;
                 let manifest = ScriptManifest::load(workspace_root)?;
                 let Some(entry) = manifest.get(&request.script_id) else {
                     return Err(ActionableError::new(
@@ -75,6 +93,7 @@ impl ScriptService {
                     ));
                 };
                 let snapshot = self.runner.run(
+                    &request.workspace_id,
                     workspace_root,
                     entry,
                     RunScriptOptions {

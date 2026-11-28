@@ -1,6 +1,9 @@
 //! 守护进程核心运行态、RPC 命令调度器与单调游标广播总线。
 
 use crate::pairing::PairingManager;
+use crate::pty::{PtyBackend, PtyEventSink, PtyHost, discover_or_unavailable};
+use crate::schedules::{FinishOutcome, ScheduleEventSink, ScheduleService, TickReport};
+use crate::scripts::{FeatureGate, ScriptEventSink, ScriptService};
 use crate::store::SqliteStore;
 use anyhow::Result;
 use chrono::Utc;
@@ -8,15 +11,16 @@ use soxu_core::{CoreOrchestrator, DraftSaveOutcome, ReconcileRequest};
 use soxu_magpie::{EnvironmentMode, discover_environment};
 use soxu_protocol::{
     ActionableError, ActiveTurnBehavior, ApprovalAuditRecord, ApprovalItemSnapshot, DaemonEvent,
-    ErrorCode, EventEnvelope, HandoffAnchorCard, HealthSnapshot, PROTOCOL_VERSION,
-    PairedDeviceSummary, PendingUserInputRequest, ProjectSummary, QueuedMessageItem,
-    QuickChatSummary, RpcCommand, RpcRequest, RpcResponse, RpcResultData, SessionSummary,
-    SessionTarget, StateSnapshot, SubagentSummary, TurnLifecycleState, TurnMessageRole,
-    TurnMessageSnapshot, WorkspaceBucket, WorkspaceIsolation, WorkspaceSummary,
+    DaemonFeature, ErrorCode, EventEnvelope, HandoffAnchorCard, HealthSnapshot, PROTOCOL_VERSION,
+    PairedDeviceSummary, PendingUserInputRequest, ProjectSummary, PtyCommand, PtyEvent,
+    QueuedMessageItem, QuickChatSummary, RpcCommand, RpcDomainCommand, RpcRequest, RpcResponse,
+    RpcResultData, ScheduleEvent, ScheduleRunResult, ScriptCommand, ScriptLifecycleEvent,
+    SessionSummary, SessionTarget, StateSnapshot, SubagentSummary, TurnLifecycleState,
+    TurnMessageRole, TurnMessageSnapshot, WorkspaceBucket, WorkspaceIsolation, WorkspaceSummary,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -39,21 +43,139 @@ pub fn detect_local_magpie() -> bool {
     discover_environment().mode == EnvironmentMode::MagpieManaged
 }
 
+/// 宿主能力位环境变量：逗号分隔的 [`DaemonFeature`] 令牌；未设置即三组 M6 能力全关。
+///
+/// 线缆级 `ClientHello` 能力字段属 `soxu-protocol` 冻结范围，本阶段由宿主配置注入；
+/// 将来握手携带能力集合时只需把它灌入同一个 [`FeatureGate`]，判定逻辑不变。
+pub const DAEMON_FEATURES_ENV: &str = "SOXU_DAEMON_FEATURES";
+
+/// 调度定义持久化文件名（与 `soxu-daemon.db` 同放在宿主数据目录）。
+pub const SCHEDULES_STORE_FILE: &str = "schedules.json";
+
+/// 域事件出口：与 [`DaemonState`] 共用同一条「落盘 + 广播」管线。
+///
+/// 域服务会在自己的后台线程（脚本执行器、PTY 排流线程）里回调事件出口，
+/// 因此这里只能持有可克隆的 `Arc` 句柄，绝不能反向持有 `DaemonState`
+/// （否则形成 Arc 自引用环，守护进程实例永不释放）。
+#[derive(Clone)]
+struct DomainEventBus {
+    store: Arc<SqliteStore>,
+    order: Arc<Mutex<()>>,
+    tx: broadcast::Sender<EventEnvelope<DaemonEvent>>,
+}
+
+impl DomainEventBus {
+    /// 与 [`DaemonState::emit`] 完全同一条路径：同一把顺序锁、同一 `seq` 序列。
+    fn emit(&self, event: DaemonEvent) -> Result<EventEnvelope<DaemonEvent>, ActionableError> {
+        let _order = self.order.lock().map_err(|_| lock_err("events"))?;
+        let envelope = self.store.append_event(&event).map_err(internal_err)?;
+        let _ = self.tx.send(envelope.clone());
+        Ok(envelope)
+    }
+}
+
+/// 三域服务事件 → 全局事件信封的适配器。
+///
+/// 域服务的事件出口是不可失败的同步 `emit`，因此这里只能吐下落盘错误并留下
+/// 脱敏告警：域操作本身已经成功，不能因为事件日志写失败而反向失败一次已派生的运行。
+#[derive(Clone)]
+struct DomainEventSink {
+    bus: DomainEventBus,
+}
+
+impl DomainEventSink {
+    fn publish(&self, event: DaemonEvent) {
+        if let Err(error) = self.bus.emit(event) {
+            tracing::warn!(
+                code = ?error.code,
+                summary = %error.summary_zh,
+                "M6 域事件未能写入事件日志或广播通道"
+            );
+        }
+    }
+}
+
+impl ScriptEventSink for DomainEventSink {
+    fn emit(&self, event: ScriptLifecycleEvent) {
+        self.publish(DaemonEvent::ScriptLifecycleChanged(event));
+    }
+}
+
+impl ScheduleEventSink for DomainEventSink {
+    fn emit(&self, event: ScheduleEvent) {
+        self.publish(DaemonEvent::ScheduleActivity(event));
+    }
+}
+
+impl PtyEventSink for DomainEventSink {
+    fn emit(&self, event: PtyEvent) {
+        self.publish(DaemonEvent::PtyActivity(event));
+    }
+}
+
+/// M6 三域服务：脚本、调度、受控终端。
+struct DomainServices {
+    scripts: ScriptService,
+    schedules: ScheduleService,
+    pty: PtyHost,
+}
+
+impl DomainServices {
+    /// 按同一门控与同一事件总线装配三域服务。
+    fn build(
+        gate: &FeatureGate,
+        bus: &DomainEventBus,
+        data_dir: Option<&Path>,
+        pty_backend: Arc<dyn PtyBackend>,
+    ) -> anyhow::Result<Self> {
+        let sink = Arc::new(DomainEventSink { bus: bus.clone() });
+        let schedules = ScheduleService::new(gate.clone(), sink.clone());
+        // 有宿主数据目录时绑定持久化定义；加载失败即 fail-closed，不带入不可信定义。
+        let schedules = match data_dir {
+            Some(dir) => schedules.with_store(dir.join(SCHEDULES_STORE_FILE))?,
+            None => schedules,
+        };
+        Ok(Self {
+            scripts: ScriptService::new(gate.clone(), sink.clone()),
+            schedules,
+            pty: PtyHost::new(gate.clone(), sink, pty_backend),
+        })
+    }
+}
+
+/// 读取宿主能力位配置；未设置时全关（M6 契约红线：能力位缺省关闭）。
+fn host_feature_gate() -> FeatureGate {
+    let raw = std::env::var(DAEMON_FEATURES_ENV).unwrap_or_default();
+    let gate = FeatureGate::from_csv(&raw);
+    let unknown = gate.declared().unknown_tokens();
+    if !unknown.is_empty() {
+        tracing::warn!(
+            env = DAEMON_FEATURES_ENV,
+            tokens = ?unknown,
+            "忽略未识别的 M6 能力令牌"
+        );
+    }
+    gate
+}
+
 /// 守护进程共享运行时核心。
 pub struct DaemonState {
-    store: SqliteStore,
+    store: Arc<SqliteStore>,
     orchestrator: Mutex<CoreOrchestrator>,
     pairing: Mutex<PairingManager>,
     subagents: Mutex<BTreeMap<String, SubagentSummary>>,
     pending_inputs: Mutex<BTreeMap<String, PendingUserInputRequest>>,
-    events_tx: broadcast::Sender<EventEnvelope<DaemonEvent>>,
-    event_order: Mutex<()>,
+    event_bus: DomainEventBus,
     native_turns: Option<native::NativeTurns>,
     worktree_admission_lock: tokio::sync::Mutex<()>,
     worktree_ready: Mutex<BTreeMap<String, soxu_magpie::WorktreeDirectory>>,
     daemon_fingerprint: String,
     magpie_detected: bool,
     require_auth_for_all: bool,
+    feature_gate: FeatureGate,
+    domain: DomainServices,
+    pty_backend: Arc<dyn PtyBackend>,
+    data_dir: Option<PathBuf>,
 }
 
 impl DaemonState {
@@ -85,7 +207,25 @@ impl DaemonState {
         let daemon_fingerprint = store.get_or_create_daemon_fingerprint()?;
         let pairing = PairingManager::new(daemon_fingerprint.clone(), endpoint_base_url.to_owned());
         let (events_tx, _) = broadcast::channel(512);
+        let store = Arc::new(store);
+        let event_bus = DomainEventBus {
+            store: Arc::clone(&store),
+            order: Arc::new(Mutex::new(())),
+            tx: events_tx,
+        };
         let magpie_detected = environment_mode == EnvironmentMode::MagpieManaged;
+        // M6：能力位来自宿主配置（缺省全关），三域服务在装配阶段一次性完成接线。
+        let feature_gate = host_feature_gate();
+        let (pty_backend, pty_error) = discover_or_unavailable();
+        if let Some(error) = pty_error {
+            tracing::warn!(summary = %error.summary_zh, "受控终端本次不可用（不影响守护进程启动）");
+        }
+        let domain = DomainServices::build(
+            &feature_gate,
+            &event_bus,
+            data_dir,
+            Arc::clone(&pty_backend),
+        )?;
 
         Ok(Self {
             store,
@@ -93,14 +233,17 @@ impl DaemonState {
             pairing: Mutex::new(pairing),
             subagents: Mutex::new(BTreeMap::new()),
             pending_inputs: Mutex::new(BTreeMap::new()),
-            events_tx,
-            event_order: Mutex::new(()),
+            event_bus,
             native_turns: None,
             worktree_admission_lock: tokio::sync::Mutex::new(()),
             worktree_ready: Mutex::new(BTreeMap::new()),
             daemon_fingerprint,
             magpie_detected,
             require_auth_for_all,
+            feature_gate,
+            domain,
+            pty_backend,
+            data_dir: data_dir.map(Path::to_path_buf),
         })
     }
 
@@ -131,7 +274,40 @@ impl DaemonState {
 
     #[must_use]
     pub fn subscribe_events(&self) -> broadcast::Receiver<EventEnvelope<DaemonEvent>> {
-        self.events_tx.subscribe()
+        self.event_bus.tx.subscribe()
+    }
+
+    /// 当前 M6 能力门控（宿主配置注入，缺省全关）。
+    #[must_use]
+    pub fn feature_gate(&self) -> &FeatureGate {
+        &self.feature_gate
+    }
+
+    /// 以宿主配置重设 M6 能力门控，并按新门控重建三域服务。
+    ///
+    /// 必须在启动装配阶段（任何域命令之前）调用：重建会丢弃域服务内存中已有的
+    /// 运行登记与会话表；已落盘的调度定义会被重新加载。
+    pub fn with_feature_gate(mut self, gate: FeatureGate) -> anyhow::Result<Self> {
+        self.domain = DomainServices::build(
+            &gate,
+            &self.event_bus,
+            self.data_dir.as_deref(),
+            Arc::clone(&self.pty_backend),
+        )?;
+        self.feature_gate = gate;
+        Ok(self)
+    }
+
+    /// 注入宿主提供的 PTY 后端（生产默认按 `SOXU_PTY_SHELL` 发现）。
+    ///
+    /// 同样只应在启动装配阶段调用，避免丢掉已经打开的终端会话。
+    pub fn with_pty_backend(mut self, backend: Arc<dyn PtyBackend>) -> Self {
+        let sink = Arc::new(DomainEventSink {
+            bus: self.event_bus.clone(),
+        });
+        self.domain.pty = PtyHost::new(self.feature_gate.clone(), sink, Arc::clone(&backend));
+        self.pty_backend = backend;
+        self
     }
 
     pub fn latest_seq(&self) -> Result<u64, ActionableError> {
@@ -377,10 +553,7 @@ impl DaemonState {
     }
 
     fn emit(&self, event: DaemonEvent) -> Result<EventEnvelope<DaemonEvent>, ActionableError> {
-        let _order = self.event_order.lock().map_err(|_| lock_err("events"))?;
-        let env = self.store.append_event(&event).map_err(internal_err)?;
-        let _ = self.events_tx.send(env.clone());
-        Ok(env)
+        self.event_bus.emit(event)
     }
 
     fn dispatch_command(&self, cmd: RpcCommand) -> Result<RpcResultData, ActionableError> {
@@ -397,8 +570,8 @@ impl DaemonState {
                 "当前请求未执行，工作树、暂存区和分支均未修改",
                 "请在守护进程接入相应 Git 能力后重试",
             )),
-            // M6 传输契约（#147）已定型，但脚本/调度/PTY 的守护进程接线属后续实现 PR。
-            // 此处统一回 `Unsupported`（能力位缺省关闭），避免旧客户端收到静默空实现。
+            // M6 域命令：能力门控 → 工作区解析 → 1:1 转发三域服务（#150 接线）。
+            // 折叠关系由 `RpcCommand::into_domain_command` 唯一给出，本层不解释任何字段。
             RpcCommand::ListScripts(_)
             | RpcCommand::RunScript(_)
             | RpcCommand::StopScript(_)
@@ -412,12 +585,15 @@ impl DaemonState {
             | RpcCommand::OpenPty(_)
             | RpcCommand::WritePty(_)
             | RpcCommand::ResizePty(_)
-            | RpcCommand::ClosePty(_) => Err(ActionableError::new(
-                ErrorCode::Unsupported,
-                "脚本 / 调度 / PTY 的守护进程接线尚未落地",
-                "当前请求未执行，未派发任何子进程、终端会话或调度任务",
-                "请在守护进程接入对应域服务后重试",
-            )),
+            | RpcCommand::ClosePty(_) => match cmd.into_domain_command() {
+                Some(domain) => self.dispatch_domain_command(domain),
+                None => Err(ActionableError::new(
+                    ErrorCode::InternalError,
+                    "RPC 域命令折叠失败",
+                    "该请求未执行，未派发任何子进程、终端会话或调度任务",
+                    "请升级守护进程：这是协议映射缺陷",
+                )),
+            },
             RpcCommand::GetStateSnapshot => Ok(RpcResultData::StateSnapshot(self.snapshot()?)),
             RpcCommand::CatchUpEvents { after_seq, limit } => {
                 let (events, latest_seq) = self.events_after(after_seq, limit.unwrap_or(500))?;
@@ -890,6 +1066,162 @@ impl DaemonState {
                 Ok(RpcResultData::Ack)
             }
         }
+    }
+
+    /// 分派一条折叠后的 M6 域命令。
+    ///
+    /// 顺序红线：先做能力位门控（未声明即回 `Unsupported` 三要素、零事件），
+    /// 再按 `workspace_id` 解析并复核受控工作区根，最后才 1:1 转发域服务。
+    ///
+    /// `StopScript` / `InspectScript` / `WritePty` / `ResizePty` / `ClosePty` 以域内
+    /// 标识定位，**不**解析工作区根：停掉一个已经失去工作区的失控进程树或关闭一个
+    /// 失效终端会话，不能被路径复核挡住。
+    fn dispatch_domain_command(
+        &self,
+        command: RpcDomainCommand,
+    ) -> Result<RpcResultData, ActionableError> {
+        match command {
+            RpcDomainCommand::Script(command) => match command {
+                ScriptCommand::List(request) => {
+                    self.feature_gate.require(DaemonFeature::ManagedScripts)?;
+                    let root = self.resolve_workspace_root(&request.workspace_id)?;
+                    Ok(RpcResultData::ManagedScript(
+                        self.domain
+                            .scripts
+                            .handle(Some(&root), ScriptCommand::List(request))?,
+                    ))
+                }
+                ScriptCommand::Run(request) => {
+                    self.feature_gate.require(DaemonFeature::ManagedScripts)?;
+                    let root = self.resolve_workspace_root(&request.workspace_id)?;
+                    Ok(RpcResultData::ManagedScript(
+                        self.domain
+                            .scripts
+                            .handle(Some(&root), ScriptCommand::Run(request))?,
+                    ))
+                }
+                ScriptCommand::Stop(request) => Ok(RpcResultData::ManagedScript(
+                    self.domain
+                        .scripts
+                        .handle(None, ScriptCommand::Stop(request))?,
+                )),
+                ScriptCommand::Inspect(request) => Ok(RpcResultData::ManagedScript(
+                    self.domain
+                        .scripts
+                        .handle(None, ScriptCommand::Inspect(request))?,
+                )),
+            },
+            // 调度域自带按节奏展开的能力门控（`Schedules` / `Heartbeats`），
+            // 且全部命令不依赖工作区根；这里只先做一次总门控——否则未知
+            // `schedule_id` 会先命中 `NotFound`，让关闭的能力位漏成“定义不存在”。
+            RpcDomainCommand::Schedule(command) => {
+                self.require_schedule_feature()?;
+                Ok(RpcResultData::Schedule(
+                    self.domain.schedules.handle(command)?,
+                ))
+            }
+            RpcDomainCommand::Pty(command) => match command {
+                PtyCommand::Open(request) => {
+                    self.feature_gate.require(DaemonFeature::ControlledPty)?;
+                    let root = self.resolve_workspace_root(&request.workspace_id)?;
+                    Ok(RpcResultData::ControlledPty(
+                        self.domain
+                            .pty
+                            .handle(Some(&root), PtyCommand::Open(request))?,
+                    ))
+                }
+                PtyCommand::Write(request) => Ok(RpcResultData::ControlledPty(
+                    self.domain.pty.handle(None, PtyCommand::Write(request))?,
+                )),
+                PtyCommand::Resize(request) => Ok(RpcResultData::ControlledPty(
+                    self.domain.pty.handle(None, PtyCommand::Resize(request))?,
+                )),
+                PtyCommand::Close(request) => Ok(RpcResultData::ControlledPty(
+                    self.domain.pty.handle(None, PtyCommand::Close(request))?,
+                )),
+            },
+        }
+    }
+
+    /// 调度域总门控：`Schedules` 与 `Heartbeats` 都未声明时整族命令拒绝。
+    ///
+    /// 单个节奏类型的能力位由域服务按 `cadence` 再判一次（例如只声明
+    /// `heartbeats` 时 cron / interval 调度仍被拒绕）。
+    fn require_schedule_feature(&self) -> Result<(), ActionableError> {
+        if self.feature_gate.is_enabled(DaemonFeature::Schedules)
+            || self.feature_gate.is_enabled(DaemonFeature::Heartbeats)
+        {
+            return Ok(());
+        }
+        // 两个能力位都关闭：复用同一门控错误（含 `declared=[...]` 诊断），零事件下发。
+        self.feature_gate.require(DaemonFeature::Schedules)
+    }
+
+    /// 按 `workspace_id` 解析已登记的受控工作区根目录。
+    ///
+    /// 与原生对话同一套授权语义：归档、待恢复、Worktree 未通过宿主复核一律拒绝；
+    /// `Local` 工作区取项目登记的真实根路径，绝不使用脱敏展示路径。
+    fn resolve_workspace_root(&self, workspace_id: &str) -> Result<PathBuf, ActionableError> {
+        let workspace = self
+            .store
+            .get_workspace(workspace_id)
+            .map_err(internal_err)?
+            .ok_or_else(|| {
+                ActionableError::new(
+                    ErrorCode::NotFound,
+                    "指定的工作区不存在",
+                    "该请求未执行，未读取清单也未派生任何进程",
+                    "请刷新工作区列表或重新绑定项目目录后重试",
+                )
+            })?;
+        if workspace.archived || workspace.needs_recovery {
+            return Err(ActionableError::new(
+                ErrorCode::WorkspaceDamaged,
+                "该工作区已归档或需要恢复",
+                "该请求未执行，未读取清单也未派生任何进程",
+                "请恢复工作区后重试",
+            ));
+        }
+        match &workspace.isolation {
+            WorkspaceIsolation::Local => {
+                let project = self
+                    .store
+                    .get_project(&workspace.project_id)
+                    .map_err(internal_err)?
+                    .ok_or_else(|| not_found_err("项目"))?;
+                let root = PathBuf::from(&project.root_path);
+                if !root.is_absolute() || !root.is_dir() {
+                    return Err(ActionableError::new(
+                        ErrorCode::WorkspaceDamaged,
+                        "该工作区的项目根目录当前不可用",
+                        "该请求未执行，未读取清单也未派生任何进程",
+                        "请核对项目绑定目录是否存在且有权限后重试",
+                    ));
+                }
+                Ok(root)
+            }
+            WorkspaceIsolation::Worktree { .. } => {
+                self.resolve_ready_worktree_dir(&workspace.workspace_id, &workspace.display_path)
+            }
+        }
+    }
+
+    /// 推进一次调度（宿主按自身节拍驱动，或测试推进 `ManualClock`）。
+    ///
+    /// 心跳节奏由 `agent_idle` 决定是否跳过；触发事件经同一信封下发。
+    pub fn tick_schedules(&self, agent_idle: bool) -> Result<TickReport, ActionableError> {
+        self.domain.schedules.tick_with_idle(agent_idle)
+    }
+
+    /// 收敛一次调度运行结果（宿主执行完触发后回调）。
+    ///
+    /// 只在本次实例下发过触发事件时收敛；未知 `run_id` 返回可执行错误，
+    /// 绝不伪造运行记录，也不复活已删除的定义。
+    pub fn finish_schedule_run(
+        &self,
+        result: ScheduleRunResult,
+    ) -> Result<FinishOutcome, ActionableError> {
+        self.domain.schedules.finish_run(result)
     }
 
     fn handle_submit_turn(

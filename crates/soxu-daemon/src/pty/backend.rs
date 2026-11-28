@@ -17,6 +17,47 @@ use soxu_protocol::{ActionableError, ErrorCode, PtyExitStatus, PtySize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+/// 受控 shell 无法发现时的降级后端。
+///
+/// 宿主装配绝不应因为本机没有受控 shell 而整体启动失败：其他能力（脚本、调度、
+/// 会话）与本机是否装有 PowerShell / `sh` 无关。本后端把发现阶段的错误原样保留，
+/// 只在真正 `Open` 时以可执行错误回给客户端，且不派生任何进程。
+#[derive(Debug, Clone)]
+pub struct UnavailablePtyBackend {
+    error: ActionableError,
+}
+
+impl UnavailablePtyBackend {
+    /// 用发现阶段的可执行错误构造降级后端。
+    #[must_use]
+    pub fn new(error: ActionableError) -> Self {
+        Self { error }
+    }
+
+    /// 降级原因（供宿主日志与健障）。
+    #[must_use]
+    pub fn error(&self) -> &ActionableError {
+        &self.error
+    }
+}
+
+impl PtyBackend for UnavailablePtyBackend {
+    fn spawn(&self, _spec: &PtySpawnSpec) -> Result<PtyChild, ActionableError> {
+        Err(self.error.clone())
+    }
+}
+
+/// 发现受控 shell；失败时返回降级后端而不把错误上推为启动失败。
+pub fn discover_or_unavailable() -> (Arc<dyn PtyBackend>, Option<ActionableError>) {
+    match PortablePtyBackend::discover() {
+        Ok(backend) => (Arc::new(backend), None),
+        Err(error) => (
+            Arc::new(UnavailablePtyBackend::new(error.clone())),
+            Some(error),
+        ),
+    }
+}
+
 /// 受控 shell 的环境变量名（仅接受绝对路径的已存在文件）。
 pub const PTY_SHELL_ENV: &str = "SOXU_PTY_SHELL";
 

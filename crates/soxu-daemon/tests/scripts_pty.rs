@@ -218,7 +218,7 @@ async fn managed_scripts_are_off_by_default_and_emit_no_events() {
 
     let error = service
         .handle(
-            root.path(),
+            Some(root.path()),
             ScriptCommand::List(soxu_protocol::ListScriptsRequest {
                 workspace_id: "wks_test".to_owned(),
             }),
@@ -229,7 +229,7 @@ async fn managed_scripts_are_off_by_default_and_emit_no_events() {
     assert_eq!(sink.len(), 0, "拒绝路径不得下发任何事件");
 
     let error = service
-        .handle(root.path(), run_request("check"))
+        .handle(Some(root.path()), run_request("check"))
         .expect_err("能力位缺省关闭必须拒绝");
     assert_eq!(error.code, ErrorCode::Unsupported);
     assert_eq!(sink.len(), 0);
@@ -247,7 +247,7 @@ async fn capability_off_rejects_pty_open_and_emits_nothing() {
     let root = tempfile::tempdir().expect("临时工作区");
 
     let error = host
-        .handle(root.path(), PtyCommand::Open(open_request()))
+        .handle(Some(root.path()), PtyCommand::Open(open_request()))
         .expect_err("能力位缺省关闭必须拒绝");
     assert_eq!(error.code, ErrorCode::Unsupported);
     assert!(error.summary_zh.contains("controlled_pty"));
@@ -287,7 +287,7 @@ async fn manifest_rejects_injection_surfaces_before_any_spawn() {
     )
     .expect("写入清单");
     let error = service
-        .handle(root.path(), run_request("shell"))
+        .handle(Some(root.path()), run_request("shell"))
         .expect_err("解释器程序必须被拒绝");
     assert_eq!(
         error.code,
@@ -304,7 +304,7 @@ async fn manifest_rejects_injection_surfaces_before_any_spawn() {
     };
     write_manifest(root.path(), &[&escaping]);
     let error = service
-        .handle(root.path(), run_request("escape"))
+        .handle(Some(root.path()), run_request("escape"))
         .expect_err("越界/缺失工作目录必须拒绝");
     assert_eq!(error.code, ErrorCode::ValidationFailed);
     assert_eq!(sink.len(), 0);
@@ -314,7 +314,7 @@ async fn manifest_rejects_injection_surfaces_before_any_spawn() {
     write_manifest(root.path(), &[&strict]);
     let error = service
         .handle(
-            root.path(),
+            Some(root.path()),
             ScriptCommand::Run(RunScriptRequest {
                 workspace_id: "wks_test".to_owned(),
                 script_id: ScriptId::try_from("strict".to_owned()).expect("标识"),
@@ -354,7 +354,7 @@ async fn high_risk_entry_requires_approval_marker() {
     let service = ScriptService::new(enabled_scripts(), sink.clone());
     let error = service
         .handle(
-            root.path(),
+            Some(root.path()),
             ScriptCommand::Run(RunScriptRequest {
                 workspace_id: "wks_test".to_owned(),
                 script_id: ScriptId::try_from("risky".to_owned()).expect("标识"),
@@ -382,7 +382,7 @@ async fn script_runs_without_shell_and_reports_lifecycle() {
 
     let accepted = accepted_snapshot(
         service
-            .handle(root.path(), run_request("echo"))
+            .handle(Some(root.path()), run_request("echo"))
             .expect("脚本应可执行"),
     );
     assert_eq!(accepted.state, ScriptRunState::Queued);
@@ -422,7 +422,7 @@ async fn output_budget_truncates_instead_of_unbounded_buffering() {
 
     let accepted = accepted_snapshot(
         service
-            .handle(root.path(), run_request("chatter"))
+            .handle(Some(root.path()), run_request("chatter"))
             .expect("脚本应可执行"),
     );
     wait_terminal(&service, &accepted.run_id).await;
@@ -448,7 +448,7 @@ async fn timeout_stops_run_and_reclaims_process_tree_within_bounds() {
     let started = Instant::now();
     let accepted = accepted_snapshot(
         service
-            .handle(root.path(), run_request("sleeper"))
+            .handle(Some(root.path()), run_request("sleeper"))
             .expect("脚本应可执行"),
     );
     let final_snapshot = wait_terminal(&service, &accepted.run_id).await;
@@ -485,7 +485,7 @@ async fn environment_is_cleared_unless_allowlisted() {
 
     let accepted = accepted_snapshot(
         service
-            .handle(root.path(), run_request("env-isolated"))
+            .handle(Some(root.path()), run_request("env-isolated"))
             .expect("脚本应可执行"),
     );
     wait_terminal(&service, &accepted.run_id).await;
@@ -514,7 +514,7 @@ async fn environment_is_cleared_unless_allowlisted() {
     write_manifest(root.path(), &[&allowed]);
     let accepted = accepted_snapshot(
         service
-            .handle(root.path(), run_request("env-allowed"))
+            .handle(Some(root.path()), run_request("env-allowed"))
             .expect("脚本应可执行"),
     );
     wait_terminal(&service, &accepted.run_id).await;
@@ -587,8 +587,8 @@ async fn identical_idempotency_key_never_runs_twice() {
             approval_id: Some("approval_test".to_owned()),
         })
     };
-    let first = accepted_snapshot(service.handle(root.path(), command()).expect("首跑"));
-    let second = accepted_snapshot(service.handle(root.path(), command()).expect("重放"));
+    let first = accepted_snapshot(service.handle(Some(root.path()), command()).expect("首跑"));
+    let second = accepted_snapshot(service.handle(Some(root.path()), command()).expect("重放"));
     assert_eq!(first.run_id, second.run_id, "同键必须收敛到同一运行");
     wait_terminal(&service, &first.run_id).await;
 }

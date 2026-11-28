@@ -22,10 +22,10 @@
 
 ## 2. 当前阶段（2026-11-28）
 
-- **主线基线**：`main` = `08bd29f`（M6 传输契约合入）。
-- **最近合入**：M6 传输契约 `#149`（`08bd29f`，14 个 `RpcCommand` 变体 + `Unsupported` 占位扩围）、M6-C `#146`（`0ddd041`）、看板重构 `#145`（`f360bec`）、M6-A `#142`（`8097f12`）、M6-B `#141`（`edbe47b`）、M6 契约 `#137`（`2debe53`）、M5-C/B/A、M4-W2A/B、构建目录治理 `#127`。
-- **进行中**：`#150` M6 daemon 端到端接线（三域 handler 替换 `Unsupported` + 能力门控 + 事件广播），工作树 `feat-150-m6-daemon-wiring`（`wks_c98ded19f8b827eb`，agent `4ed1e02`）。
-- **已知缺口（真实）**：daemon 传输层尚未把 14 个变体接到域服务；`#150` 完成后才能端到端调用脚本/PTY/调度。
+- **主线基线**：`main` = `08bd29f`（M6 传输契约 `#149` 合入）。
+- **最近合入**：M6 传输契约 `#149`（`08bd29f`，14 个 `RpcCommand` 变体 + `RpcDomainCommand` 折叠 + `Unsupported` 占位扩围）、M6-C `#146`（`0ddd041`）、看板重构 `#145`（`f360bec`）、M6-A `#142`（`8097f12`）、M6-B `#141`（`edbe47b`）、M6 契约 `#137`（`2debe53`）、M5-C/B/A、M4-W2A/B、构建目录治理 `#127`。
+- **进行中**：`#150` M6 daemon 端到端接线（分支 `feat/150-m6-daemon-wiring`，PR `#152`）——`state.rs` 用 `into_domain_command()` 把 14 个变体路由到 `ScriptService` / `ScheduleService` / `PtyHost`，按 `DaemonFeatureSet` 门控（`SOXU_DAEMON_FEATURES`，缺省全关；过渡期只允许 daemon 宿主进程环境开启，RPC 不提供开启入口）并把三类域事件经既有信封广播；新增 `tests/domain_wiring.rs` 与真实守护进程冒烟。
+- **已知缺口（真实）**：`ClientHello` 仍无能力字段（`soxu-protocol` 冻结），M6 门控目前是守护进程级而非按连接级；调度节拍（`tick_schedules`）需宿主驱动，独立可执行入口尚未起定时器。
 - **门禁**：三平台 Rust（windows/linux/macos-arm64）+ PWA + 格式 + 隐私 + `CI Gate`；合入统一 `--match-head-commit`，合并后归档工作树与分支。
 - **尚未交付**：Git 恢复执行/回退/结构化提交、`direct` MCP 运行时挂载、非 Windows 宿主真机补测、Antigravity 项目入口与全代理验收、正式发布（未核验原生测试）。
 
@@ -42,9 +42,9 @@
 
 ## 4. 下一步行动队列（Next Actions）
 
-1. **M6 端到端接线**：`#150` 审查/合入（三域 handler 替换 `Unsupported` + 能力门控 + 事件广播），然后做真实 daemon 冒烟（脚本运行、PTY 输出、调度触发各一条）。
-2. **M6 daemon 接线**：消费 `into_domain_command()`，把域命令转给 `scripts::ScriptService` / `schedules::ScheduleExecutor` / `pty::PtyHub`，按能力位判定广播事件，再做一次真实端到端冒烟（脚本运行、PTY 输出、调度触发）。
-3. **M6-D 打包与发布核验**：`soxu-releases` 四平台构建已在 `cargo build` 前执行 `pnpm build`（Linux/Windows/macOS 均确认），并含活二进制校验与 `soxu`+`soxu-daemon` 双产物；正式发版前补一次 tag 级 dry-run。
+1. **M6 daemon 接线收口**：审查/合入 `#150`（PR `#152`，分支 `feat/150-m6-daemon-wiring`）——14 个变体路由 + 能力门控 + 事件广播 + `tests/domain_wiring.rs` + 真实守护进程冒烟（脚本/PTY/调度各一条）；未改冻结的 `soxu-protocol` / `server.rs`。
+2. **M6-D 打包与发布核验**：`soxu-releases` 四平台构建已在 `cargo build` 前执行 `pnpm build`（Linux/Windows/macOS 均确认），并含活二进制校验与 `soxu`+`soxu-daemon` 双产物；正式发版前补一次 tag 级 dry-run。
+3. **调度节拍宿主驱动**：把 `DaemonState::tick_schedules` / `finish_schedule_run` 接入可执行入口的定时器与触发执行器（需改 `main.rs`，须独立派发）。
 4. **M3 剩余**：恢复执行与 journal（`execute.rs`/`journal.rs`）、Safety Snapshot 先行 Rewind、文件级结构化提交预检；按设计文档顺序，涉及协议变更先走独立契约 PR。
 5. **`direct` MCP 运行时挂载**与 Worktree 内写权限：需先冻结协议面，再接入 daemon。
 6. **非 Windows 宿主补测**：`#49`/`#51`/`#56`/`#69` 的真实注册、固定提交检出、宿主接入、路由重试与 Worktree 原生会话。
