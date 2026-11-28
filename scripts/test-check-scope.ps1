@@ -99,6 +99,10 @@ try {
   $docs = Invoke-Detect @("AGENTS.md", "docs/ops/LESSONS.md", "aoci.code.txt", ".aoci/baseline.json")
   Assert-Condition ($docs.governance -and (-not $docs.rust) -and $docs.rustScope -eq "none" -and (-not $docs.mobileWeb) -and (-not $docs.paseoOrchestration)) "纯文档与 AOCI 变更跳过 Rust 与 PWA 全仓检查"
 
+  # 1b. 只读运维采集脚本只跑治理与隐私门禁，不回退全量、不触发 Paseo 编排套件
+  $metricsScript = Invoke-Detect @("scripts/collect-runtime-metrics.ps1")
+  Assert-Condition ($metricsScript.governance -and (-not $metricsScript.rust) -and $metricsScript.rustScope -eq "none" -and (-not $metricsScript.mobileWeb) -and (-not $metricsScript.paseoOrchestration) -and ($metricsScript.fallbackReasons.Count -eq 0)) "运行时采集脚本变更只跑治理与隐私门禁且不回退全量"
+
   # 2. 单改 soxu-git 应展开反向依赖闭包至 soxu-daemon，且不触发 PWA
   $git = Invoke-Detect @("crates/soxu-git/src/diff.rs")
   Assert-Condition ($git.rust -and $git.rustScope -eq "crates" -and ($git.rustPackages -contains "soxu-git") -and ($git.rustPackages -contains "soxu-daemon") -and (-not $git.mobileWeb) -and ($git.rustPackageArgs -eq "-p soxu-daemon -p soxu-git")) "soxu-git 变更自动覆盖反向依赖 soxu-daemon 且跳过 PWA"
