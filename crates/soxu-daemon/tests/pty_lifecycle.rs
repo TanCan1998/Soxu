@@ -35,6 +35,7 @@ struct RecordingSink {
 }
 
 impl RecordingSink {
+    #[cfg(windows)]
     fn text(&self) -> String {
         self.events
             .lock()
@@ -575,14 +576,15 @@ fn process_tree_termination_reaps_grandchild() {
 
 #[cfg(windows)]
 fn wait_child_pid(sink: &Arc<RecordingSink>, marker: &str) -> u32 {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    // CI 上 ConPTY 输出经多层缓冲，20s 在多平台矩阵并发时会偶发超时；放宽到 60s。
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         if let Some(pid) = find_live_pid(&sink.text(), marker) {
             return pid;
         }
         assert!(
             Instant::now() < deadline,
-            "未在 20s 内拿到 `{marker}` 的存活 pid；终端尾部：{}",
+            "未在 60s 内拿到 `{marker}` 的存活 pid；终端尾部：{}",
             tail_of(&sink.text(), 400)
         );
         std::thread::sleep(Duration::from_millis(50));
