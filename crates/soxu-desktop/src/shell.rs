@@ -108,7 +108,8 @@ impl Render for WorkbenchShell {
                     .child(search::view::render_trigger_bar(
                         &palette,
                         cfg!(target_os = "macos"),
-                    )),
+                    ))
+                    .child(crate::schedules::view::render_trigger(&palette)),
             )
             .child(
                 // 主体：左栏 + 中栏 + 右栏，横向排布；中栏 flex-1 永远保留。
