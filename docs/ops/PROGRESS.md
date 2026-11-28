@@ -219,6 +219,27 @@ Soxu Paseo 项目为 `prj_24ffa03410264684`，主控工作区为 `wks_21203a9ef0
 
 实现切片：`main.rs` 经 `gpui_platform::application()` 挂载真实 GPUI App（窗口 `Soxu` / `1120×720` / 最小 `360×480`，几何常量由编译期 `const` 断言锚定令牌断点）；`theme/theme_state.rs` 全局主题状态（Dark/Light/System + `observe_window_appearance` 跟随系统）；`font.rs` 双 OFL 字体预设 + `effective_code_family()` 联动契约；`i18n.rs` key→文案骨架（zh-CN 默认、热注册、zh-CN 不可覆盖、缺失回落）；`focus.rs` 7 层焦点栈纯逻辑（单一激活层/模态锁定/Esc 消费）；`layout.rs` 400/640/1024 断点与四栏策略；`shell.rs` `WorkbenchShell` 四栏占位骨架（零 I/O 渲染）。40 项单测全绿；依赖边界：新增 `gpui-pre-platform =0.3.14` 为 gpui-pre 快照线官方入口 crate（`Cargo.lock` 净新增其传递依赖闭包，`cargo verify-project` 与 `--locked` 全链验证通过）。
 
+#### 进行中波次 `wave-m5b-20261128`（M5-B：760px 同步宽输入舱、权限/移交与统计圆环，`#130`）
+
+| Issue / 任务 | 分支 / Paseo 工作树 | Owned Paths |
+| :--- | :--- | :--- |
+| `#130` M5-B 同步宽输入舱、纯图标权限与 `@agent` 移交、三色圆环与 11 项遥测 | `feat/130-m5-composer` / `19r49pwc` | `crates/soxu-desktop/src/composer/**`（新增）、`shell.rs`（仅 import + 单行组件挂载）、`lib.rs`（仅 module 声明与导出）、`docs/ops/PROGRESS.md`、本分支 AOCI（禁改 `.aoci/config.json`） |
+
+设计权威为 `design-system/soxu/pages/02-composer-and-handoff.md` 与 `pages/07-settings-fonts-and-motion.md`；本单一字未改设计文件，未重新生成 `preview.html`（L-024）。
+
+实现切片（`crates/soxu-desktop/src/composer/`，全部为纯内存视图模型，渲染零 I/O、零子进程）：
+
+- `metrics.rs`：760px 同步宽几何。`synchronized_content_width` 是对话流与输入舱的**唯一取值入口**（`canvas_column_width − 2×16px` 后钳制到 `COMPOSER_MAX_WIDTH_PX`），只消费 `LayoutPlan` 的 `Docked/Drawer/Hidden` 形态与真实栏宽，不重算断点；编译期断言 `composerMaxWidth == transcriptMaxWidth == 760`。
+- `permission.rs`：6 档纯图标权限状态机（`plan / read-only / ask / auto-edit / full-access / turbo`），按 Agent 能力子集循环（`Alt+P`）、不支持档位回退到 `ask` 并报告 `Fallback`，非 Emoji 几何占位图标 + 中文 `aria`/`hint` 文案。
+- `handoff.rs`：`@agent` 移交胶囊与三枚范围微开关（3 轮摘要 / 未提交 Diff 路径计数 / 新建 Worktree），选型复用 `HandoffSelection` 与 `HandoffScopeOptions` 默认契约，产出 `ComposerChip{kind: Handoff}`。
+- `keys.rs`：Enter / Shift+Enter / `Ctrl+Enter` / `Ctrl+Shift+Enter` / `Alt+Enter` 与 IME 组合门控。裁决顺序固定为「IME → 非 Enter → Shift+Enter → Preparing 拦截 → 修饰键 → 裸 Enter」，IME 组合期任何 Enter 都不提交也不换行。
+- `stats.rs`：三色圆环（绿 `<65%` / 琥珀 `65–88%` / 绯红 `>=88%`，12 点钟顺时针弧线几何可单测）+ 11 项遥测（8 行主表 + 3 行「更多统计」）+ 零值空态；所有遥测文本禁止 `·` 分隔符。
+- `chips.rs`：上下文芯片集合（同类型同引用去重、按 id 移除）、`+` 菜单 8 项（5 上下文引用 + 3 快捷指令）、`/` 命令纯内存过滤（前缀优先、最多 8 行、无 I/O）。
+- `changes.rs`：变更摘要浮药丸 `[N 个文件已更改 +A -D]` 与进程内动作槽 `ActionSink`；点击映射到 `FocusLayer::ReviewDiff`。
+- `mod.rs`：`ComposerState` 组合模型 + `render`/`render_for_window` 落图（`surface.composer` `#212121`、`22px` 圆角、`1px` 常态描边、`44px` 最小输入高度、页脚 `1px` hairline + 圆环/费用/速率读数）。
+
+验证证据：`scripts/mise-doctor.ps1` 实测 rust `1.99.1` / node `26.13.1` / pnpm `12.21.0`、`CARGO_TARGET_DIR` 为工作树内 `target/`；`cargo check/clippy -p soxu-desktop --all-targets --locked`（`-D warnings`）通过；`cargo test -p soxu-desktop --all-targets --locked` `104 passed / 0 failed`（其中新增输入舱单测 33 项）；`cargo fmt --all -- --check` 通过；`pwsh -NoProfile -File scripts/check-all.ps1`（增量）7 步全部通过或按计划跳过。AOCI 完整认知链在本轮被宿主截断（chunk 1/6），按 `L-004` 停链后仅做 source-bound 工程与收尾维护。参考边界：本工作树未检出 `.refs/`，参考仅读取主检出可读根 `F:/workplace/Paseo/work/Soxu/.refs/padu`（`fbe97a38`）的输入舱/统计结构，未复制、未 `init`/`scan`/重建参考索引，也未照搬其依赖或 lint 压制。
+
 ### 3.2 已合入交付与验收证据边界
 
 - `#105` 只读探测夹具后台维护的本地验收边界（基线 `0950c34`；仅改 `soxu-git` 四个测试文件的夹具构造点 + `probe.rs` 回归，生产实现 / CI / 公共契约零改动）：
