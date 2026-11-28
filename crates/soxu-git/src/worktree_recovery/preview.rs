@@ -431,7 +431,7 @@ fn observe_target(target: Option<&Path>) -> Result<Option<TargetState>, Recovery
     Ok(Some(target_state_of(target)))
 }
 
-fn target_state_of(target: &Path) -> TargetState {
+pub(super) fn target_state_of(target: &Path) -> TargetState {
     match target.symlink_metadata() {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => TargetState::Absent,
         Err(_) => TargetState::Inaccessible,
@@ -730,7 +730,7 @@ async fn prune_preview(
 /// 实测格式（Git for Windows 2.56）：`Removing worktrees/<name>: <reason>`，
 /// 无候选时 stdout 为空。原生输出按行切分；无法解析前缀的行整体保留为理由原文，
 /// 避免静默丢失候选。
-fn parse_prune_candidates(stdout: &[u8]) -> Vec<PrunePreviewCandidate> {
+pub(super) fn parse_prune_candidates(stdout: &[u8]) -> Vec<PrunePreviewCandidate> {
     let mut candidates = Vec::new();
     for line in stdout.split(|byte| *byte == b'\n') {
         if line.is_empty() {

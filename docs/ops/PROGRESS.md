@@ -13,7 +13,7 @@
 | **M0.5** | Pure Black Design System & Dual Prototypes | ✅ 已完成 | 纯黑 7 级海拔 `tokens.json` + `shadcn/ui` 变量、MASTER + 7 份分页面规范、双端原型与 7 分区设置、`preview.html`、移动遥控 PWA 原型（PR `#4`） |
 | **M1** | Protocol v1, Domain Core & Daemon Spine | ✅ 已完成 | `soxu-protocol` RPC/WS `seq` 契约、`soxu-core` 状态桶/能力协商/红线/队列、`soxu-daemon` SQLite WAL + `afterSeq` 追平 + `#offer=`/6 位码鉴权、`soxu-cli` 闭环（`#5`/`#6`/`#7`） |
 | **M2** | Magpie Discovery & 7 Native CLI Drivers | 🟡 主体完成 | 双态发现、7 原生驱动、Codex/Pi/Claude/Qwen/Copilot/OpenCode 只读对话、Pi 原生 Queue/Steer/Stop、Antigravity 隔离快聊（PR `#55`）；**剩余**：Antigravity 项目目录入口、七代理全验收、Copilot 钩子/历史导入/遥测/移动投递 |
-| **M3** | Git Worktree Pool, Checkpoints & Commit Engine | 🟡 主体完成 | 只读身份/清单/Diff、受控注册/检出、宿主接入与 Worktree 原生只读会话、显式 Init/Clone、公开 Git 操作契约、Checkpoint 底座、只读恢复预览（`#121`）；**剩余**：恢复执行与 journal、Rewind、结构化提交、`direct` MCP 运行时挂载、Linux 真机端到端 |
+| **M3** | Git Worktree Pool, Checkpoints & Commit Engine | 🟡 主体完成 | 只读身份/清单/Diff、受控注册/检出、宿主接入与 Worktree 原生只读会话、显式 Init/Clone、公开 Git 操作契约、Checkpoint 底座、只读恢复预览（`#121`）、恢复执行与重启 journal（`#153`）；**剩余**：Safety Snapshot 先行 Rewind、结构化提交、`direct` MCP 运行时挂载、Linux 真机端到端 |
 | **M4** | Live Mobile PWA & GPUI Workbench Foundation | ✅ 已完成 | PWA 去 Mock 接真实 Daemon WS、`rust-embed` 伺服、`#offer=`/6 位码配对、13 组视口真实渲染验收（PR `#126`）；GPUI App/主题/字体/i18n/焦点栈/四栏壳层（PR `#125`）；令牌三产物零漂移（PR `#120`） |
 | **M5** | GPUI Core Views: Transcript, Composer & Inspector | ✅ 已完成 | 时间线（`<=8.3Hz` 合批、5 类工具卡/审批卡/提问卡、20px 导航轨，PR `#132`）；输入舱（760px 同步宽、6 档权限、移交、三色圆环 + 11 项统计，PR `#131`）；右栏 Diff/Files、7 分区设置、核心模态（PR `#134`） |
 | **M6** | Scripts, PTY Terminal, Search & Automation | 🟡 进行中 | 契约（PR `#137`）；脚本执行器 + 受控 PTY 宿主（PR `#142`）；`Cmd+K` 五分区检索 + Onboarding（PR `#141`）；调度执行器 + 桌面调度中心 + 50k Diff 压测（PR `#146`）；RpcCommand 传输契约（PR `#149`）；**进行中**：daemon 端到端接线（`#150`）；**剩余**：M6-D 发版级打包 dry-run |
@@ -24,10 +24,10 @@
 
 - **主线基线**：`main` = `08bd29f`（M6 传输契约 `#149` 合入）。
 - **最近合入**：M6 传输契约 `#149`（`08bd29f`，14 个 `RpcCommand` 变体 + `RpcDomainCommand` 折叠 + `Unsupported` 占位扩围）、M6-C `#146`（`0ddd041`）、看板重构 `#145`（`f360bec`）、M6-A `#142`（`8097f12`）、M6-B `#141`（`edbe47b`）、M6 契约 `#137`（`2debe53`）、M5-C/B/A、M4-W2A/B、构建目录治理 `#127`。
-- **进行中**：`#150` M6 daemon 端到端接线（分支 `feat/150-m6-daemon-wiring`，PR `#152`）——`state.rs` 用 `into_domain_command()` 把 14 个变体路由到 `ScriptService` / `ScheduleService` / `PtyHost`，按 `DaemonFeatureSet` 门控（`SOXU_DAEMON_FEATURES`，缺省全关；过渡期只允许 daemon 宿主进程环境开启，RPC 不提供开启入口）并把三类域事件经既有信封广播；新增 `tests/domain_wiring.rs` 与真实守护进程冒烟。
+- **进行中**：`#153` M3 恢复执行与重启复核（分支 `feat/153-m3-recovery-execute`）——新增 `worktree_recovery/execute.rs`（单次确认摘要绑定、有效期、协调域串行化、原生 `unlock`/`repair`/`prune`/`remove`、回读分类）与 `worktree_recovery/journal.rs`（`Prepared`→`Started`→`Completed`→`Observed`，`SOXURV1` 编码与原子写入）；`preview.rs` 仅放宽两个只读辅助可见性，`lib.rs` 新增导出。`#150` M6 daemon 端到端接线（分支 `feat/150-m6-daemon-wiring`，PR `#152`）——`state.rs` 用 `into_domain_command()` 把 14 个变体路由到 `ScriptService` / `ScheduleService` / `PtyHost`，按 `DaemonFeatureSet` 门控（`SOXU_DAEMON_FEATURES`，缺省全关；过渡期只允许 daemon 宿主进程环境开启，RPC 不提供开启入口）并把三类域事件经既有信封广播；新增 `tests/domain_wiring.rs` 与真实守护进程冒烟。
 - **已知缺口（真实）**：`ClientHello` 仍无能力字段（`soxu-protocol` 冻结），M6 门控目前是守护进程级而非按连接级；调度节拍（`tick_schedules`）需宿主驱动，独立可执行入口尚未起定时器。
 - **门禁**：三平台 Rust（windows/linux/macos-arm64）+ PWA + 格式 + 隐私 + `CI Gate`；合入统一 `--match-head-commit`，合并后归档工作树与分支。
-- **尚未交付**：Git 恢复执行/回退/结构化提交、`direct` MCP 运行时挂载、非 Windows 宿主真机补测、Antigravity 项目入口与全代理验收、正式发布（未核验原生测试）。
+- **尚未交付**：Safety Snapshot 先行 Rewind、结构化提交、`direct` MCP 运行时挂载、非 Windows 宿主真机补测、Antigravity 项目入口与全代理验收、正式发布（未核验原生测试）。
 
 ---
 
@@ -45,7 +45,7 @@
 1. **M6 daemon 接线收口**：审查/合入 `#150`（PR `#152`，分支 `feat/150-m6-daemon-wiring`）——14 个变体路由 + 能力门控 + 事件广播 + `tests/domain_wiring.rs` + 真实守护进程冒烟（脚本/PTY/调度各一条）；未改冻结的 `soxu-protocol` / `server.rs`。
 2. **M6-D 打包与发布核验**：`soxu-releases` 四平台构建已在 `cargo build` 前执行 `pnpm build`（Linux/Windows/macOS 均确认），并含活二进制校验与 `soxu`+`soxu-daemon` 双产物；正式发版前补一次 tag 级 dry-run。
 3. **调度节拍宿主驱动**：把 `DaemonState::tick_schedules` / `finish_schedule_run` 接入可执行入口的定时器与触发执行器（需改 `main.rs`，须独立派发）。
-4. **M3 剩余**：恢复执行与 journal（`execute.rs`/`journal.rs`）、Safety Snapshot 先行 Rewind、文件级结构化提交预检；按设计文档顺序，涉及协议变更先走独立契约 PR。
+4. **M3 剩余**：恢复执行与 journal 已由 `#153` 交付待审查（`execute.rs`/`journal.rs` + 冲突/漂移/取消/并发/失败足迹测试）；后续为 Safety Snapshot 先行 Rewind 与文件级结构化提交预检，按设计文档顺序，涉及协议变更先走独立契约 PR。
 5. **`direct` MCP 运行时挂载**与 Worktree 内写权限：需先冻结协议面，再接入 daemon。
 6. **非 Windows 宿主补测**：`#49`/`#51`/`#56`/`#69` 的真实注册、固定提交检出、宿主接入、路由重试与 Worktree 原生会话。
 7. **M2 收尾**：Antigravity 项目目录入口、七代理全验收；Copilot 钩子安全、历史导入、附件/移交/更高权限与移动端投递。

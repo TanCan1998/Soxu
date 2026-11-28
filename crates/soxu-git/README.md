@@ -1,6 +1,6 @@
 # soxu-git：本地项目身份、Git 探测与受控 Worktree
 
-M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控检出。M3d 提供已跟踪文件的四种只读 Diff，以及只接受已授权 Checkpoint 或完整本地提交的固定端点双端 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
+M3f 提供 Worktree 恢复执行（二次确认后的 `unlock`/`repair`/`prune`/移除注册/部分落盘清理）与重启只读 journal 复核。M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控检出。M3d 提供已跟踪文件的四种只读 Diff，以及只接受已授权 Checkpoint 或完整本地提交的固定端点双端 Diff。M3c 提供 Git Worktree 只读注册清单。M3b 提供打开本地目录的项目身份。M3a 提供 Git 工作树的 HEAD 与状态快照。原有 `CheckpointSummary` 字段及 serde 契约保持不变。
 
 ## Worktree 只读恢复预览（M3 #57-2）
 
@@ -14,6 +14,22 @@ M3e 提供显式 Worktree 新分支注册、只读诊断和固定提交的受控
 - **清理部分落盘预览**：绑定请求 ID，只读回查协调域意图与检出留痕；执行结果未定（`Prepared`/`Started`/`Unknown`）时禁止清理；目标缺失且无异议时才允许进入授权，目录存在或含其他内容时按归属无法证明拒绝。
 - **可见性最小扩围（主控裁决放行）**：`worktree_lifecycle::read_intents` 改为 `pub(crate)`、`worktree_checkout` 新增 `pub(crate) read_checkout_journal` 只读访问器，供预览复用既有持久日志解码；不改持久格式、行为或签名语义。
 - 验证：`tests/worktree_recovery_preview.rs` 在 Windows 以真实 Git 夹具覆盖有效保护锁、疑似孤立锁拒绝、prune 候选与锁定裁决拒绝、repair 范围拒绝、在线干净/失联移除分类、请求 ID 绑定与未知请求拒绝、相对路径/普通目录拒绝；每个预览前后对夹具整树快照断言零写入。Linux 专属 HEAD 损坏用例由 Unix 门控执行。
+
+## Worktree 恢复执行与 journal（M3 #57-3）
+
+`GitProbe::execute_recovery(&coordinator, &RecoveryConfirmation, Option<&RecoveryCancellation>)` 在只读预览之后执行一次已获二次确认的恢复写入；`GitProbe::diagnose_recovery` / `recovery_execution_records` 在重启后只读复核 journal，不重放、不清理、不访问仓库。
+
+- **单次确认绑定**：`RecoveryConfirmation` 携带执行 ID、操作、源仓库根与 `WorktreeIdentity`、显式授权目标、预览摘要（`recovery_preview_digest(&outcome, target)` 的 SHA-256，覆盖操作、目标、清单、观察状态、证据缺口与逐操作候选）、签发/过期时间与高风险二次确认位。有效期上限 10 分钟；过期、签发时间超前或字段与操作不匹配立即拒绝。
+- **零写入漂移拒绝**：取得协调域 `registration.lock` 后重算同参数预览，摘要不一致、仓库身份变化或目标与候选不符一律判 `PreviewDrift` / `IdentityChanged`；预览已拒绝时返回 `PreviewRejected(固定码)`。重放同一执行 ID 返回 `AlreadyAttempted(记录)`。这些路径都不写仓库、不写 journal。
+- **高风险二次确认**：`prune` 多候选与在线 `worktree remove` 必须显式 `risk_acknowledged`，否则 `ConfirmationRequired`；prune 的前后候补集合由摘要绑定，外部新增候选使确认作废。
+- **强制检查串行化**：所有执行共用协调域文件锁与 `registration.lock`；仍有 `Started` 或「停止未确认」记录的仓库/目标会以 `ExecutionStillUnknown` 阻断新执行，直到宿主按 journal 只读裁决。
+- **持久 journal**：`<协调域>/recovery/<执行 ID>.journal` 逐阶段推进 `Prepared` → `Started` → `Completed` → `Observed`，每次「独占创建临时文件 → fsync → 原子重命名 → 同步目录」；记录只含固定分类码（`RecoveryNote`：`NotStarted`/`Verified`/`PartialFootprint`/`CommandFailed`/`UnknownOutcome`/`Cancelled`/`NothingToClean`）、仓库与目标路径和时间，不保存 Git 原始输出、凭据或用户目录字符串。重命名前崩溃留下的 `.next` 残留会阻止继续写入，读取失败向上传播，绝不降级为「无记录」。
+- **只调用原生 Git**：`worktree unlock <目标>`、`worktree repair <目标>`、`worktree prune --verbose`（不使用 `--expire=now`）、`worktree remove <目标>`（不使用 `--force`）。参数经与注册同源的 `native_command_path` 归一，命令由 `GitProbe` 的统一守卫启动（禁用钩子、自动维护、按需 fetch 与交互），有界读取 16 MiB / 15 秒，超时或输出超限先释放管道再 `kill` 并等待回收直接子进程。不手改 Git 元数据，不做 best-effort prune。
+- **回读与分类**：命令结束后重新取清单（prune 另跑同源 `prune --dry-run --verbose`）并按操作比对预期终态：unlock 无锁、repair 映射指向授权目录且无 prunable、prune 候补清空、在线移除「注册消失且目录不存在」（删除后结果）、部分落盘清理目标仍缺失。命令成功但回读不符记 `PartialFootprint`，非零退出记 `CommandFailed`，启动失败/超时/输出超限/回读失败记 `UnknownOutcome`；这三类都置 `blocked = true` 供宿主禁止接入，明确结局仍可由新预览与新确认重试。
+- **清理部分落盘**：只有预览确认「目标缺失且无异议」时才会消费确认并持久化 `NothingToClean`（零写入）；目标仍存在或归属不可证明时以 `UnprovableFootprint` / `PreviewRejected("cleanup_target_unprovable")` 拒绝。
+- **取消**：`RecoveryCancellation` 只在命令启动前被观察；取消返回 `Cancelled` 且不消费确认（无 journal）。命令一旦启动，结局必须持久化。
+- **平台边界**：协调域需要平台原生目录身份与原子目录同步，Windows 在 `WorktreeRegistrationCoordinator::open` 即 `UnsupportedFilesystem` fail-closed（不建锁、不建 journal、不写仓库）；Linux/macOS 走同一 Unix 实现。
+- 验证：`tests/worktree_recovery_execute.rs` 在 WSL Ubuntu 26.04（Rust 1.99.1）以真实 Git 夹具通过 8 项——unlock 单次确认 + 重放/过期/漂移拒绝零写入、prune 多候选二次确认与候选扩张作废、在线移除二次确认与删除后回读、命令失败足迹保留并阻断接入、repair 单候选映射、部分落盘清理的两条结论、启动前取消不消费确认、并发确认只落一次写入；每个拒绝路径对夹具整树快照断言零写入。lib 单测覆盖 journal 编解码/崩溃残留/重放、摘要绑定、确认有效期与字段绑定、分类矩阵、原生运行器超时/输出上限/回收、以及「停止未确认」预约阻断。Windows 只执行 fail-closed 与纯逻辑用例。
 
 ## 轮次 Checkpoint
 

@@ -1,13 +1,21 @@
-//! Worktree 只读恢复预览契约（M3 #57-2）。
+//! Worktree 恢复契约：只读预览（M3 #57-2）与二次确认后的执行（M3 #57-3）。
 //!
-//! 本模块只产出候选身份、影响对象、证据缺口与不确定性，供宿主生成二次授权摘要；
-//! 不执行 `unlock`、`repair`、`prune`、移除注册或清理部分落盘的任何写入。
-//! 执行与持久日志属于后续工作包（`execute.rs` / `journal.rs`）。
+//! 预览只产出候选身份、影响对象、证据缺口与不确定性，供宿主生成二次授权摘要；
+//! 执行按单次确认绑定预览摘要与有效期，只调用原生 Git（`unlock`/`repair`/`prune`/
+//! `worktree remove`），并把意图、阶段与回读结果持久化到协调域 journal。
+//! 两者都不做推断性自愈：失败保留足迹并禁用后续接入，重启后只能只读诊断。
 
 use std::path::Path;
 
+mod execute;
+mod journal;
 mod preview;
 
+pub use execute::{
+    RecoveryCancellation, RecoveryConfirmation, RecoveryExecuteError, RecoveryExecutionOutcome,
+    RecoveryObservation, RecoveryPreviewDigest, recovery_preview_digest,
+};
+pub use journal::{RecoveryExecutionRecord, RecoveryNote};
 pub use preview::{
     EvidenceGap, ObservedWorktreeState, PartialCleanupPreview, PartialCleanupRejection,
     PartialCleanupScope, PreviewObservation, PreviewOutcome, PrunePreview, PrunePreviewCandidate,
