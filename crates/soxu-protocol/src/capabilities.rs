@@ -70,3 +70,106 @@ pub struct LostControlNotice {
     pub fallback_value: String,
     pub reason_zh: String,
 }
+
+/// 守护进程能力位目录（M6 新增三组契约的协商入口）。
+///
+/// 能力位一律**缺省关闭**：未在握手中显式声明的能力视为不可用，
+/// 服务端不得向未协商的客户端下发对应 RPC 结果与事件。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonFeature {
+    /// 受管脚本（`paseo.json` 清单与生命周期）。
+    ManagedScripts,
+    /// Schedules（cron / 固定周期调度）。
+    Schedules,
+    /// Heartbeats（空闲期主动心跳续跑）。
+    Heartbeats,
+    /// 受控 PTY（有界分片输出）。
+    ControlledPty,
+}
+
+impl DaemonFeature {
+    /// 全部已知能力位，用于生成声明快照与回归测试。
+    pub const ALL: [Self; 4] = [
+        Self::ManagedScripts,
+        Self::Schedules,
+        Self::Heartbeats,
+        Self::ControlledPty,
+    ];
+
+    /// 稳定线缆令牌，跨版本不得改名。
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::ManagedScripts => "managed_scripts",
+            Self::Schedules => "schedules",
+            Self::Heartbeats => "heartbeats",
+            Self::ControlledPty => "controlled_pty",
+        }
+    }
+
+    /// 由线缆令牌解析能力位；未知令牌返回 `None` 而不报错，
+    /// 从而保证旧客户端遇到新能力时只是忽略。
+    #[must_use]
+    pub fn from_token(token: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|feature| feature.token() == token)
+    }
+}
+
+/// 能力声明集合：保留未知令牌原文，实现旧客户端向前兼容。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DaemonFeatureSet {
+    /// 已声明的能力令牌；未知令牌原样保留，不参与能力判定，也不会被丢弃。
+    #[serde(default)]
+    pub declared: Vec<String>,
+}
+
+impl DaemonFeatureSet {
+    /// 全关状态：三组 M6 契约的默认协商结果。
+    #[must_use]
+    pub const fn disabled() -> Self {
+        Self {
+            declared: Vec::new(),
+        }
+    }
+
+    /// 按已知能力位构造声明集合。
+    #[must_use]
+    pub fn from_features(features: impl IntoIterator<Item = DaemonFeature>) -> Self {
+        Self {
+            declared: features.into_iter().map(|f| f.token().to_owned()).collect(),
+        }
+    }
+
+    /// 判能力位是否已声明；未声明即视为关闭。
+    #[must_use]
+    pub fn is_enabled(&self, feature: DaemonFeature) -> bool {
+        self.declared.iter().any(|token| token == feature.token())
+    }
+
+    /// 已识别能力位列表。
+    #[must_use]
+    pub fn enabled_features(&self) -> Vec<DaemonFeature> {
+        Self::declared_features(&self.declared)
+    }
+
+    /// 未被当前协议识别的令牌（前向兼容诊断用）。
+    #[must_use]
+    pub fn unknown_tokens(&self) -> Vec<&str> {
+        self.declared
+            .iter()
+            .map(String::as_str)
+            .filter(|token| DaemonFeature::from_token(token).is_none())
+            .collect()
+    }
+
+    fn declared_features(declared: &[String]) -> Vec<DaemonFeature> {
+        DaemonFeature::ALL
+            .into_iter()
+            .filter(|feature| declared.iter().any(|token| token == feature.token()))
+            .collect()
+    }
+}

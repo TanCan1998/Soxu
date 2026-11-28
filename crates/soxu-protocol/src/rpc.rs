@@ -22,6 +22,9 @@ use crate::pairing::{
     PairingOfferPayload, PairingTransportMode,
 };
 use crate::preferences::SoxuPreferences;
+use crate::pty::PtyCommandResult;
+use crate::schedules::ScheduleCommandResult;
+use crate::scripts::ScriptCommandResult;
 use serde::{Deserialize, Serialize};
 
 /// 守护进程健康状态快照。
@@ -206,6 +209,12 @@ pub enum RpcResultData {
     StructuredCommitPreviewed(CommitPlanPreview),
     StructuredCommitExecuted(GitOperationRecord),
     GitOperationStatus(GitOperationRecord),
+    /// 脚本域结果；需客户端已协商 `managed_scripts` 能力。
+    ManagedScript(ScriptCommandResult),
+    /// 调度域结果；需客户端已协商 `schedules` 或 `heartbeats` 能力。
+    Schedule(ScheduleCommandResult),
+    /// 受控 PTY 域结果；需客户端已协商 `controlled_pty` 能力。
+    ControlledPty(PtyCommandResult),
 }
 
 /// RPC 响应信封。
