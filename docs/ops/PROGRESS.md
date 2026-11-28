@@ -24,7 +24,8 @@
 
 - **主线基线**：`main` = `5e36a49`（`#157` 资源治理方案）。
 - **最近合入**：资源治理方案 `#157`（`5e36a49`，P0/P1 分级 + t3code/Paseo/Padu 对照 + 阶段 0–4 计划）、M3 恢复执行 `#156`（`d6b2aad`，原生身份绑定、受控解锁、journal 与未知结局留痕；整仓 `prune`/`repair`/在线移除仍只读）、M6 接线 `#152`（`7084de7`）、M6 传输契约 `#149`、M6-C `#146`、看板重构 `#145`。
-- **进行中**：`#158` 运行时资源采集脚本（资源治理阶段 0，分支 `feat/158-runtime-metrics`，工作树 `wks_3d7e4e5cb88ee379`）；只新增 `scripts/collect-runtime-metrics.ps1`，用于后续阶段统一的进程/库/WAL 口径。
+- **阶段 0 已完成**：采集脚本 `#158`（`80f5206`）与门禁归因 `#163`（`2f3b7e3`）合入；首批实测见 [`runtime-baseline-2026-11-28.md`](../dev/runtime-baseline-2026-11-28.md)：空载 daemon 10.1 MB 工作集、1 万条 16 KB 事件 148 MB、删空后仍占 148 MB（36,104 空闲页）。
+- **进行中**：`#160` 追平分页与游标一致性（PR `#164`，服务端分页 + 客户端游标 + reducer 修复）；`#161` PTY/脚本生命周期与优雅关停（`feat/161-pty-lifecycle`）。两路文件不重叠，均限 `CARGO_BUILD_JOBS=2`。
 - **已知缺口（真实）**：`ClientHello` 无能力字段，M6 门控是守护进程级（`SOXU_DAEMON_FEATURES`，缺省全关）而非按连接级；调度节拍需宿主驱动，独立入口尚未起定时器。
 - **资源治理缺口（据 `docs/dev/resource-lifecycle-and-retention.md`）**：P0 追平分页 1000 条后仍报完成、PTY 生命周期未闭环、容量 check-then-act；P1 `event_log` 只增、UI 模型无上限、调度无 tick、关停未证明。均未修复，按阶段 1–4 推进。
 - **门禁**：三平台 Rust（windows/linux/macos-arm64）+ PWA + 格式 + 隐私 + `CI Gate`；合入统一 `--match-head-commit`，合并后归档工作树与分支。
