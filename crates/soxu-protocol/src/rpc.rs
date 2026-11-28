@@ -71,6 +71,13 @@ pub struct ServerHello {
     pub daemon_fingerprint: String,
     pub protocol_version: u32,
     pub magpie_detected: bool,
+    /// 本次快照对应的固定事件头部 `H`（快照读取完成后确定）。
+    ///
+    /// 客户端必须以此为基线：只应用 `seq > H` 的帧，且不得先用 `latest_seq` 抢跑游标。
+    /// 旧版守护进程不下发该字段（`None`），新版客户端据此回退到 `latest_seq`
+    /// 并提示追平状态可能不完整。新增可选字段，保持协议 v1 线缆兼容。
+    #[serde(default)]
+    pub snapshot_seq: Option<u64>,
     pub latest_seq: u64,
     pub snapshot: StateSnapshot,
 }

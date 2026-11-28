@@ -257,6 +257,8 @@ export interface ServerHello {
   daemon_fingerprint: string;
   protocol_version: number;
   magpie_detected: boolean;
+  /** 本次快照对应的固定事件头部 `H`；旧守护进程不下发（缺省 → 回退 `latest_seq`）。 */
+  snapshot_seq?: number | null;
   latest_seq: number;
   snapshot: StateSnapshot;
 }
@@ -318,7 +320,8 @@ export type ErrorCode =
   | "policy_denied"
   | "safety_incomplete"
   | "partial_needs_recovery"
-  | "ref_published_index_pending";
+  | "ref_published_index_pending"
+  | "catch_up_failed";
 
 export interface ActionableError {
   code: ErrorCode;

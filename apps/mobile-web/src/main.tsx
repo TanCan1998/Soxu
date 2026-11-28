@@ -91,7 +91,7 @@ import {
   type StoredPairing,
 } from "@/lib/daemon-client";
 import {
-  applyEventToPatch,
+  eventToViewUpdaters,
   mapSnapshot,
   pickDefaultSession,
   upsertMappedTurn,
@@ -323,6 +323,39 @@ function MobileAppInner({
   const [sessionsState, setSessionsState] = useState<import("@/lib/daemon-protocol").SessionSummary[]>([]);
   const sessionsStateRef = useRef<import("@/lib/daemon-protocol").SessionSummary[]>([]);
   sessionsStateRef.current = sessionsState;
+  // 当前选中的目标（工作区/快速对话）：WS 回调只创建一次，必须经 ref 读取最新选择
+  const selectedTargetRef = useRef<{ kind: "workspace" | "quick"; id: string }>({
+    kind: "workspace",
+    id: "",
+  });
+  selectedTargetRef.current =
+    targetKind === "workspace"
+      ? { kind: "workspace", id: selectedWorkspaceId }
+      : { kind: "quick", id: selectedQuickChatId };
+
+  /**
+   * 把单条事件应用到视图：只更新事件真正影响的切片，未受影响的列表（如待审批
+   * 卡、提问卡、其它工作区）保持原样；游标在事件应用之后才推进。
+   */
+  function applyIncomingEvent(env: EventEnvelope) {
+    const updaters = eventToViewUpdaters(env);
+    if (updaters.workspaces) setWorkspaces(updaters.workspaces);
+    if (updaters.quickChats) setQuickChats(updaters.quickChats);
+    if (updaters.approvals) setApprovals(updaters.approvals);
+    if (updaters.askQuestion) setAskQuestion(updaters.askQuestion);
+    if (updaters.sessionMessage) {
+      const { session_id, message } = updaters.sessionMessage;
+      const target = selectedTargetRef.current;
+      const session = sessionsStateRef.current.find((s) => s.session_id === session_id);
+      const isCurrent = session
+        ? session.target.kind === "workspace"
+          ? target.kind === "workspace" && session.target.workspace_id === target.id
+          : target.kind === "quick" && session.target.chat_id === target.id
+        : false;
+      if (isCurrent) setTurns((cur) => upsertMappedTurn(cur, message));
+    }
+    setSeqCursor((prev) => Math.max(prev, env.seq));
+  }
   // 6 位码配对目标端点：默认当前页面来源（经 rust-embed 伺服时即 daemon 本身），可手动改写
   const [daemonEndpoint, setDaemonEndpoint] = useState<string>(() => window.location.origin);
 
@@ -403,7 +436,8 @@ function MobileAppInner({
           setAskQuestion(mapped.askQuestion);
           setSessionsState(hello.snapshot.sessions);
           setMagpieMode(hello.magpie_detected ? "magpie_managed" : "standalone_native");
-          setSeqCursor((prev) => Math.max(prev, hello.latest_seq));
+          // 以守护进程下发的快照头部为基线；旧版守护进程缺字段时回退 latest_seq
+          setSeqCursor(hello.snapshot_seq ?? hello.latest_seq);
           const first = pickDefaultSession(hello.snapshot.sessions);
           if (first) {
             setTargetKind(first.target.kind === "workspace" ? "workspace" : "quick");
@@ -413,22 +447,7 @@ function MobileAppInner({
         },
         onCatchUpEvents: () => {},
         onLiveEvent: (env: EventEnvelope) => {
-          setSeqCursor((prev) => Math.max(prev, env.seq));
-          const patch = applyEventToPatch(env, {});
-          if (patch.workspaces) setWorkspaces(patch.workspaces);
-          if (patch.quickChats) setQuickChats(patch.quickChats);
-          if (patch.approvals) setApprovals(patch.approvals);
-          if (patch.askQuestion) setAskQuestion(patch.askQuestion);
-          if (patch.sessionMessage) {
-            const { session_id, message } = patch.sessionMessage;
-            const sess = sessionsStateRef.current.find((s) => s.session_id === session_id);
-            const isCurrent = sess
-              ? sess.target.kind === "workspace"
-                ? sess.target.workspace_id === selectedWorkspaceId
-                : sess.target.chat_id === selectedQuickChatId
-              : false;
-            if (isCurrent) setTurns((cur) => upsertMappedTurn(cur, message));
-          }
+          applyIncomingEvent(env);
         },
       },
       0,
@@ -563,12 +582,7 @@ function MobileAppInner({
         }
         const { events, latest_seq } = resp.result.data;
         for (const env of events) {
-          const patch = applyEventToPatch(env, {});
-          if (patch.workspaces) setWorkspaces(patch.workspaces);
-          if (patch.quickChats) setQuickChats(patch.quickChats);
-          if (patch.approvals) setApprovals(patch.approvals);
-          if (patch.askQuestion) setAskQuestion(patch.askQuestion);
-          setSeqCursor((prev) => Math.max(prev, env.seq));
+          applyIncomingEvent(env);
         }
         setSeqCursor((prev) => Math.max(prev, latest_seq));
         flashToast(`事件流增量追平完成：#${from} → #${latest_seq}（${events.length} 条）`);

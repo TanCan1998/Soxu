@@ -1,6 +1,6 @@
 //! Axum HTTP 与 WebSocket 双向 RPC / `afterSeq` 增量追平服务端。
 
-use crate::state::DaemonState;
+use crate::state::{CATCH_UP_PAGE_SIZE, DaemonState};
 use crate::web_assets::build_web_assets_router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
@@ -209,6 +209,110 @@ async fn send_json<T: serde::Serialize>(socket: &mut WebSocket, val: &T) -> bool
     socket.send(Message::Text(raw.into())).await.is_ok()
 }
 
+/// 单轮追平页预算：一轮最多取这么多页，轮与轮之间让出执行权。
+///
+/// 预算用尽并不是截断：`catch_up_to_head` 从最后已发送序号续读，
+/// 直到覆盖固定头部 `H` 才返回完成。
+const CATCH_UP_PAGES_PER_ROUND: u32 = 8;
+
+/// 追平结果：只有覆盖固定头部 `H` 才算完成。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CatchUpOutcome {
+    Completed { to_seq: u64, count: u64 },
+    Aborted,
+}
+
+fn catch_up_failure(
+    stage: &str,
+    after_seq: u64,
+    head_seq: u64,
+    cause: Option<&ActionableError>,
+) -> ActionableError {
+    let error = ActionableError::new(
+        ErrorCode::CatchUpFailed,
+        format!("追平事件读取失败（阶段 {stage}，after_seq={after_seq}，head_seq={head_seq}）"),
+        "本次追平已中止，客户端将收不到 CatchUpCompleted，事件流存在缺口",
+        "请重新连接；守护进程会重新握手取快照并重新分页追平",
+    );
+    match cause {
+        Some(cause) => error.with_diagnostic(format!(
+            "{}；{}",
+            cause.summary_zh,
+            cause.diagnostic_detail.as_deref().unwrap_or("无底层细节")
+        )),
+        None => error,
+    }
+}
+
+async fn send_catch_up_error(socket: &mut WebSocket, seq: u64, error: ActionableError) -> bool {
+    let envelope = EventEnvelope::new(
+        seq,
+        DaemonEvent::ErrorRaised {
+            session_id: None,
+            error,
+        },
+    );
+    send_json(socket, &envelope).await
+}
+
+/// 从 `after_seq` 分页追平到固定头部 `head_seq`，逐页读取、逐页发送。
+///
+/// 语义对照 t3code `OrchestrationEventStore.catchUpApplicationEvents`：分页以固定的
+/// `throughSequence` 为上界，到达上界即终止；每次只驻留一页事件，因此内存开销只与
+/// 单页大小相关，而与积压总量无关。与本仓差异：页读取失败或出现空洞时发出可诊断
+/// 错误并中止，而不是像参考实现那样由上层重取快照。
+async fn catch_up_to_head(
+    state: &DaemonState,
+    socket: &mut WebSocket,
+    after_seq: u64,
+    head_seq: u64,
+) -> CatchUpOutcome {
+    let mut last_sent_seq = after_seq;
+    let mut sent: u64 = 0;
+    loop {
+        if last_sent_seq >= head_seq {
+            return CatchUpOutcome::Completed {
+                to_seq: head_seq,
+                count: sent,
+            };
+        }
+        let mut pages_this_round = 0;
+        while pages_this_round < CATCH_UP_PAGES_PER_ROUND && last_sent_seq < head_seq {
+            pages_this_round += 1;
+            let page = match state.events_page(last_sent_seq, CATCH_UP_PAGE_SIZE) {
+                Ok(page) => page,
+                Err(cause) => {
+                    let error =
+                        catch_up_failure("page_query", last_sent_seq, head_seq, Some(&cause));
+                    let _ = send_catch_up_error(socket, last_sent_seq, error).await;
+                    return CatchUpOutcome::Aborted;
+                }
+            };
+            let mut consumed = 0usize;
+            for env in page {
+                if env.seq > head_seq {
+                    break;
+                }
+                last_sent_seq = env.seq;
+                sent += 1;
+                consumed += 1;
+                if !send_json(socket, &env).await {
+                    return CatchUpOutcome::Aborted;
+                }
+            }
+            if consumed == 0 {
+                // 头部之前出现空洞（日志被裁切或已不连续）：绝不静默当作追平完成，
+                // 也绝不拿同一游标反复重读而空转。
+                let error = catch_up_failure("page_gap", last_sent_seq, head_seq, None);
+                let _ = send_catch_up_error(socket, last_sent_seq, error).await;
+                return CatchUpOutcome::Aborted;
+            }
+        }
+        // 单轮页预算用尽仍未覆盖头部：让出执行权后从最后已发送序号续读。
+        tokio::task::yield_now().await;
+    }
+}
+
 async fn handle_ws_socket(
     state: Arc<DaemonState>,
     mut socket: WebSocket,
@@ -253,11 +357,25 @@ async fn handle_ws_socket(
 
     // 2. 先订阅广播通道，避免快照与追平窗口内漏事件
     let mut rx = state.subscribe_events();
-    let Ok(snapshot) = state.snapshot() else {
-        return;
-    };
-    let Ok(latest_seq) = state.latest_seq() else {
-        return;
+    // 快照与头部在同一次握手内固定：先读快照、后取头部，保证 `seq <= H` 的写入
+    // 要么已在快照内、要么由 `[after_seq, H]` 的追平重放覆盖。
+    let (snapshot, head_seq) = match state.snapshot_with_head() {
+        Ok(pair) => pair,
+        Err(cause) => {
+            let mut error = ActionableError::new(
+                ErrorCode::CatchUpFailed,
+                "握手快照读取失败",
+                "实时同步连接即将关闭",
+                "请稍后重新连接；若持续失败请检查守护进程数据目录",
+            );
+            if let Some(detail) = cause.diagnostic_detail {
+                error = error.with_diagnostic(detail);
+            } else {
+                error = error.with_diagnostic(cause.summary_zh);
+            }
+            let _ = send_json(&mut socket, &RpcResponse::err("hello", error)).await;
+            return;
+        }
     };
 
     let server_hello = ServerHello {
@@ -265,36 +383,36 @@ async fn handle_ws_socket(
         daemon_fingerprint: state.daemon_fingerprint().to_owned(),
         protocol_version: PROTOCOL_VERSION,
         magpie_detected: state.magpie_detected(),
-        latest_seq,
+        snapshot_seq: Some(head_seq),
+        latest_seq: head_seq,
         snapshot,
     };
     if !send_json(&mut socket, &server_hello).await {
         return;
     }
 
-    // 3. 按 after_seq 增量追平并下发 CatchUpCompleted 摘要事件
-    let mut last_sent_seq = latest_seq;
+    // 3. 按 after_seq 分页追平到固定头部 H，只有覆盖 H 才下发 CatchUpCompleted
+    let mut last_sent_seq = head_seq;
     if let Some(after_seq) = hello.after_seq {
-        last_sent_seq = after_seq;
-        if let Ok((missed, _)) = state.events_after(after_seq, 1000) {
-            let count = u64::try_from(missed.len()).unwrap_or(0);
-            for env in missed {
-                last_sent_seq = env.seq;
-                if !send_json(&mut socket, &env).await {
+        // 游标超前（事件库被重置或换了库）时按 t3code `afterSequence > highWater` 的处理
+        // 重取快照语义：从头重放全部事件，而不是让客户端停在无效游标上。
+        let replay_from = if after_seq > head_seq { 0 } else { after_seq };
+        match catch_up_to_head(&state, &mut socket, replay_from, head_seq).await {
+            CatchUpOutcome::Completed { to_seq, count } => {
+                last_sent_seq = to_seq;
+                let catchup_evt = EventEnvelope::new(
+                    to_seq,
+                    DaemonEvent::CatchUpCompleted {
+                        from_seq: replay_from,
+                        to_seq,
+                        count,
+                    },
+                );
+                if !send_json(&mut socket, &catchup_evt).await {
                     return;
                 }
             }
-            let catchup_evt = EventEnvelope::new(
-                last_sent_seq,
-                DaemonEvent::CatchUpCompleted {
-                    from_seq: after_seq,
-                    to_seq: last_sent_seq,
-                    count,
-                },
-            );
-            if !send_json(&mut socket, &catchup_evt).await {
-                return;
-            }
+            CatchUpOutcome::Aborted => return,
         }
     }
 
@@ -345,16 +463,42 @@ async fn handle_ws_socket(
                             }
                         }
                     }
-                    Err(RecvError::Lagged(_)) => {
-                        if let Ok((missed, _)) = state.events_after(last_sent_seq, 500) {
-                            for env in missed {
-                                if env.seq > last_sent_seq {
-                                    last_sent_seq = env.seq;
-                                    if !send_json(&mut socket, &env).await {
-                                        return;
+                    Err(RecvError::Lagged(skipped)) => {
+                        // 广播环落后（`Lagged(n)`：接收器已被移到环内最老项）：
+                        // 复用同一分页函数从最后已发送序号追到当前头部，再恢复广播流转。
+                        let head_seq = match state.latest_seq() {
+                            Ok(head_seq) => head_seq,
+                            Err(cause) => {
+                                let error = catch_up_failure(
+                                    "lagged_head_query",
+                                    last_sent_seq,
+                                    last_sent_seq,
+                                    Some(&cause),
+                                );
+                                let _ = send_catch_up_error(&mut socket, last_sent_seq, error).await;
+                                break;
+                            }
+                        };
+                        if head_seq > last_sent_seq {
+                            let from_seq = last_sent_seq;
+                            match catch_up_to_head(&state, &mut socket, from_seq, head_seq).await {
+                                CatchUpOutcome::Completed { to_seq, count } => {
+                                    last_sent_seq = to_seq;
+                                    let catchup_evt = EventEnvelope::new(
+                                        to_seq,
+                                        DaemonEvent::CatchUpCompleted {
+                                            from_seq,
+                                            to_seq,
+                                            count,
+                                        },
+                                    );
+                                    if !send_json(&mut socket, &catchup_evt).await {
+                                        break;
                                     }
                                 }
+                                CatchUpOutcome::Aborted => break,
                             }
+                            tracing::debug!(skipped, "广播环落后已按分页追平到当前头部");
                         }
                     }
                     Err(RecvError::Closed) => break,

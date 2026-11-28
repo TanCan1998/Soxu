@@ -34,6 +34,55 @@ export interface StoredPairing {
 
 const PAIRING_STORAGE_KEY = "{{SECRET_3x1qj9f2}}";
 
+/** 已应用事件游标的持久化键前缀（按守护进程端点隔离，值内再绑定守护进程指纹）。 */
+const CURSOR_STORAGE_PREFIX = "soxu.mobile.cursor.v1:";
+/** 游标落盘防抖间隔：追平期间逐条落盘会放大 IO。 */
+const CURSOR_SAVE_DEBOUNCE_MS = 500;
+
+interface StoredCursor {
+  daemon_fingerprint: string;
+  seq: number;
+}
+
+function cursorStorageKey(endpointUrl: string): string {
+  return `${CURSOR_STORAGE_PREFIX}${endpointUrl}`;
+}
+
+/** 读取本机持久化的最后已应用序号；守护进程指纹不匹配时视为无效。 */
+export function loadStoredCursor(pairing: StoredPairing): StoredCursor | null {
+  try {
+    const raw = window.localStorage.getItem(cursorStorageKey(pairing.endpoint_url));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredCursor>;
+    if (typeof parsed.seq !== "number" || !Number.isFinite(parsed.seq)) return null;
+    const fingerprint = parsed.daemon_fingerprint ?? "";
+    if (pairing.daemon_fingerprint && fingerprint && fingerprint !== pairing.daemon_fingerprint) {
+      // 守护进程已更换：旧游标不再能代表本地已应用状态
+      return null;
+    }
+    return { daemon_fingerprint: fingerprint, seq: parsed.seq };
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredCursor(pairing: StoredPairing, fingerprint: string, seq: number): void {
+  try {
+    const value: StoredCursor = { daemon_fingerprint: fingerprint, seq };
+    window.localStorage.setItem(cursorStorageKey(pairing.endpoint_url), JSON.stringify(value));
+  } catch {
+    // 隐私模式等场景下忽略持久化异常；本次会话内仍按内存游标追平
+  }
+}
+
+export function clearStoredCursor(pairing: StoredPairing): void {
+  try {
+    window.localStorage.removeItem(cursorStorageKey(pairing.endpoint_url));
+  } catch {
+    // 忽略清除失败
+  }
+}
+
 export function loadStoredPairing(): StoredPairing | null {
   try {
     const raw = window.localStorage.getItem(PAIRING_STORAGE_KEY);
@@ -105,7 +154,12 @@ export class DaemonClient {
   private ws: WebSocket | null = null;
   private readonly callbacks: DaemonClientCallbacks;
   private readonly pairing: StoredPairing;
+  /** 只在事件真正交给视图应用后才推进的游标。 */
   private lastAppliedSeq: number;
+  private fingerprint: string;
+  /** 本次握手实际发送的 after_seq（null 表示首次连接，无补读）。 */
+  private sentAfterSeq: number | null = null;
+  private cursorSaveTimer: number | null = null;
   private reconnectAttempt = 0;
   private reconnectTimer: number | null = null;
   private connectedAt = 0;
@@ -115,7 +169,9 @@ export class DaemonClient {
   constructor(pairing: StoredPairing, callbacks: DaemonClientCallbacks, initialSeq = 0) {
     this.pairing = pairing;
     this.callbacks = callbacks;
-    this.lastAppliedSeq = initialSeq;
+    const stored = loadStoredCursor(pairing);
+    this.lastAppliedSeq = Math.max(initialSeq, stored?.seq ?? 0);
+    this.fingerprint = pairing.daemon_fingerprint;
   }
 
   get endpoint(): string {
@@ -132,11 +188,12 @@ export class DaemonClient {
     const ws = new WebSocket(url);
     this.ws = ws;
     ws.onopen = () => {
+      this.sentAfterSeq = this.lastAppliedSeq > 0 ? this.lastAppliedSeq : null;
       const hello: ClientHello = {
         client_kind: "mobile_pwa",
         client_version: CLIENT_VERSION,
         protocol_version: PROTOCOL_VERSION,
-        after_seq: this.lastAppliedSeq > 0 ? this.lastAppliedSeq : null,
+        after_seq: this.sentAfterSeq,
         device_id: this.pairing.device_id,
       };
       ws.send(JSON.stringify(hello));
@@ -155,24 +212,53 @@ export class DaemonClient {
     }
     for (const pending of this.pending.values()) window.clearTimeout(pending.timer);
     this.pending.clear();
+    this.flushCursor();
     this.ws?.close();
     this.ws = null;
     this.callbacks.onPhase("offline");
+  }
+
+  /** 把已应用游标落盘（带防抖；连接断开或关闭时立即冲刷）。 */
+  private persistCursor(): void {
+    if (this.cursorSaveTimer !== null) return;
+    this.cursorSaveTimer = window.setTimeout(() => {
+      this.cursorSaveTimer = null;
+      saveStoredCursor(this.pairing, this.fingerprint, this.lastAppliedSeq);
+    }, CURSOR_SAVE_DEBOUNCE_MS);
+  }
+
+  private flushCursor(): void {
+    if (this.cursorSaveTimer !== null) {
+      window.clearTimeout(this.cursorSaveTimer);
+      this.cursorSaveTimer = null;
+    }
+    saveStoredCursor(this.pairing, this.fingerprint, this.lastAppliedSeq);
   }
 
   private handleMessage(raw: string): void {
     // 1. RPC 响应：分发给等待者后即结束
     if (this.dispatchRpcResponse(raw)) return;
 
-    // 2. ServerHello：全量快照
+    // 2. ServerHello：全量快照 + 固定事件头部
     if (!this.helloReceived) {
-      let hello: ServerHello;
+      let parsed: ServerHello & Partial<RpcResponse>;
       try {
-        hello = JSON.parse(raw) as ServerHello;
+        parsed = JSON.parse(raw) as ServerHello & Partial<RpcResponse>;
       } catch {
         this.scheduleReconnect();
         return;
       }
+      // 握手阶段的可诊断错误（如快照读取失败）而不是 ServerHello
+      if (typeof parsed.protocol_version !== "number" && parsed.error) {
+        this.helloReceived = true;
+        this.callbacks.onPhase(
+          "offline",
+          `${parsed.error.summary_zh}（${parsed.error.remediation_zh}）`,
+        );
+        this.ws?.close();
+        return;
+      }
+      const hello = parsed as ServerHello;
       if (hello.protocol_version !== PROTOCOL_VERSION) {
         this.callbacks.onPhase(
           "offline",
@@ -185,17 +271,47 @@ export class DaemonClient {
       this.helloReceived = true;
       this.connectedAt = Date.now();
       this.reconnectAttempt = 0;
+      this.fingerprint = hello.daemon_fingerprint || this.fingerprint;
+      const baseline = typeof hello.snapshot_seq === "number" ? hello.snapshot_seq : null;
+      if (baseline !== null && this.lastAppliedSeq > baseline) {
+        // 游标超前固定头部：事件库被重置或换了库，守护进程会从头重放，本地游标一并回退
+        this.lastAppliedSeq = 0;
+        this.persistCursor();
+      }
       this.callbacks.onServerHello(hello);
-      this.lastAppliedSeq = Math.max(this.lastAppliedSeq, hello.latest_seq);
-      this.callbacks.onPhase("online");
+      const awaitingCatchUp = this.sentAfterSeq !== null;
+      if (baseline === null) {
+        this.callbacks.onPhase(
+          awaitingCatchUp ? "catching_up" : "online",
+          "守护进程未提供快照游标（旧版本），追平结果可能不完整",
+        );
+      } else {
+        this.callbacks.onPhase(awaitingCatchUp ? "catching_up" : "online");
+      }
       return;
     }
 
-    // 2. 追平重放事件与 CatchUpCompleted 收尾
+    // 3. 追平重放帧与实时帧：一律按到达顺序应用
     const env = decodeEventEnvelope(raw);
     if (!env) return;
-    this.lastAppliedSeq = Math.max(this.lastAppliedSeq, env.seq);
+    if (env.payload.event === "catch_up_completed") {
+      this.lastAppliedSeq = Math.max(this.lastAppliedSeq, env.payload.data.to_seq);
+      this.persistCursor();
+      this.callbacks.onPhase("online");
+      return;
+    }
+    if (env.payload.event === "error_raised" && env.payload.data.error.code === "catch_up_failed") {
+      // 追平已中止：不推进游标、不假装完成，交给重连重新握手取快照
+      const error = env.payload.data.error;
+      this.callbacks.onPhase("offline", `${error.summary_zh}（${error.remediation_zh}）`);
+      return;
+    }
     this.callbacks.onLiveEvent(env);
+    // 游标只在事件真正应用之后推进
+    if (env.seq > this.lastAppliedSeq) {
+      this.lastAppliedSeq = env.seq;
+      this.persistCursor();
+    }
   }
 
   private helloReceived = false;
@@ -204,6 +320,7 @@ export class DaemonClient {
     this.helloReceived = false;
     for (const pending of this.pending.values()) window.clearTimeout(pending.timer);
     this.pending.clear();
+    this.flushCursor();
     if (this.closedByUser) return;
     this.reconnectAttempt += 1;
     const delay = Math.min(
