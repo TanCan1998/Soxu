@@ -90,7 +90,7 @@ import {
   INITIAL_SCRIPTS,
   INITIAL_TURNS,
   INITIAL_WORKSPACES,
-} from "@/mock-data";
+} from "./preview-data";
 import type {
   ApprovalItem,
   ArtifactItem,

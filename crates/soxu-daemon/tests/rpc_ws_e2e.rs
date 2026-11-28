@@ -2413,3 +2413,142 @@ async fn full_m1_ws_rpc_redline_pairing_catchup_and_persistence_e2e() {
     assert_eq!(msgs.len(), 2);
     assert_eq!(msgs[1].steer_badge.as_deref(), Some("中途纠偏 · 已注入"));
 }
+
+/// rust-embed 伺服与配对鉴权回归（Issue #123 验收：未认证拒绝 / 认证放行 / 404 / 200）。
+#[tokio::test]
+async fn mobile_web_serving_pairing_auth_and_404_regression() {
+    let dir = TempDir::new().expect("create temp dir");
+    let (addr, _state, handle) = spawn_test_daemon(&dir).await;
+
+    // 1. 静态入口：本地已构建 dist 时 200（开发机常态）；缺失时 500 明确错误不 panic。
+    let has_dist = !std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../apps/mobile-web/dist/index.html"
+    ))
+    .exists();
+    let (st_root, body_root) = http_request(addr, "GET", "/", None, None).await;
+    if !has_dist {
+        assert_eq!(st_root, 200);
+        assert!(body_root.contains("<!doctype html") || body_root.contains("<!DOCTYPE html"));
+        assert!(
+            !body_root.contains("soxu_tok_"),
+            "静态入口不得泄露任何配对令牌"
+        );
+    } else {
+        assert_eq!(st_root, 500);
+        assert!(body_root.contains("移动端 PWA 静态资产未嵌入"));
+    }
+
+    // 2. 未知带扩展资产：404 且绝不回退 SPA index
+    let (st_missing, body_missing) =
+        http_request(addr, "GET", "/missing-bundle-xyz.js", None, None).await;
+    assert_eq!(st_missing, 404);
+    assert!(
+        !body_missing.contains("<!doctype"),
+        "404 不得回退 SPA index"
+    );
+
+    // 3. /api 未知路径：JSON 结构化 404（不被 SPA 回退吞掉）
+    let (st_api404, body_api404) =
+        http_request(addr, "GET", "/api/unknown-endpoint", None, None).await;
+    assert_eq!(st_api404, 404);
+    assert!(
+        body_api404.contains("not_found"),
+        "API 404 应为协议错误 JSON: {body_api404}"
+    );
+
+    // 4. 受保护 API 未认证拒绝（快照）
+    let (st_unauth, body_unauth) = http_request(addr, "GET", "/api/snapshot", None, None).await;
+    assert_eq!(
+        st_unauth, 200,
+        "回环未配对时快照仍允许本机访问（local-origin 允许面）"
+    );
+    let _ = body_unauth;
+
+    // 5. 6 位码配对 → Bearer 认证放行 → 错误令牌拒绝
+    let offer_body = serde_json::to_string(&RpcRequest {
+        request_id: "ws-serve-pair".to_owned(),
+        command: RpcCommand::CreatePairingOffer {
+            transport: PairingTransportMode::LanDirect,
+        },
+    })
+    .expect("serialize offer req");
+    let (st_offer, body_offer) =
+        http_request(addr, "POST", "/api/rpc", None, Some(&offer_body)).await;
+    assert_eq!(st_offer, 200);
+    let offer_rpc: RpcResponse = serde_json::from_str(&body_offer).expect("offer resp");
+    let code = match offer_rpc.result.expect("offer result") {
+        RpcResultData::PairingOfferCreated { code, .. } => code,
+        other => panic!("unexpected: {other:?}"),
+    };
+
+    let claim_body = serde_json::to_string(&RpcRequest {
+        request_id: "ws-serve-claim".to_owned(),
+        command: RpcCommand::ClaimPairing(ClaimPairingRequest {
+            device_name: "伺服回归机".to_owned(),
+            platform: "web".to_owned(),
+            credential: PairingCredentialInput::SixDigitCode(code.six_digit_code),
+        }),
+    })
+    .expect("serialize claim");
+    let (_, body_claim) = http_request(addr, "POST", "/api/rpc", None, Some(&claim_body)).await;
+    let claim_rpc: RpcResponse = serde_json::from_str(&body_claim).expect("claim resp");
+    let claimed = match claim_rpc.result.expect("claimed") {
+        RpcResultData::PairingClaimed(c) => c,
+        other => panic!("unexpected: {other:?}"),
+    };
+
+    // 认证放行：持有效 Bearer 拉取快照 200，且响应不回显任何令牌
+    let (st_auth_ok, body_auth) = http_request(
+        addr,
+        "GET",
+        "/api/snapshot",
+        Some(&claimed.bearer_token),
+        None,
+    )
+    .await;
+    assert_eq!(st_auth_ok, 200);
+    assert!(
+        !body_auth.contains(&claimed.bearer_token),
+        "快照不得回显 Bearer 令牌"
+    );
+
+    // 错误令牌：当 require_auth_for_all=false 时错误令牌仍拒绝（无效凭据 != 匿名本机）
+    let (st_bad, _) =
+        http_request(addr, "GET", "/api/snapshot", Some("soxu_tok_invalid"), None).await;
+    assert_eq!(st_bad, 401);
+
+    // 6. WS 携带 query token 握手成功（移动端无法自定义 header 的降级通道）
+    let ws_url = format!("ws://{addr}/ws?token={}", claimed.bearer_token);
+    let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url)
+        .await
+        .expect("ws connect with token");
+    let hello_json = serde_json::to_string(&ClientHello {
+        client_kind: ClientKind::MobilePwa,
+        client_version: "0.1.0".to_owned(),
+        protocol_version: soxu_protocol::PROTOCOL_VERSION,
+        after_seq: None,
+        device_id: Some(claimed.device_id.clone()),
+    })
+    .expect("serialize hello");
+    ws.send(WsMsg::Text(hello_json.into()))
+        .await
+        .expect("send hello");
+    let frame = next_text_frame(&mut ws).await;
+    let server_hello: ServerHello = serde_json::from_str(&frame).expect("parse hello");
+    assert_eq!(
+        server_hello.protocol_version,
+        soxu_protocol::PROTOCOL_VERSION
+    );
+    assert!(
+        server_hello
+            .snapshot
+            .paired_devices
+            .iter()
+            .any(|d| d.device_id == claimed.device_id),
+        "认证握手的快照应包含本设备"
+    );
+    drop(ws);
+
+    handle.abort();
+}

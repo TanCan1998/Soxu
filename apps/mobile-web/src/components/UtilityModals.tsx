@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useI18n } from "@/lib/i18n";
 import { formatShortcut, isImeComposing } from "@/lib/useAdaptiveViewport";
-import { NATIVE_HISTORY } from "@/mock-data";
 import type { ScheduleItem } from "@/types";
 
 export type WorkbenchModalKind = null | "cmdk" | "pair" | "rewind" | "commit" | "schedules" | "history" | "onboarding";
@@ -42,6 +41,8 @@ export function UtilityModals({
   const { t } = useI18n();
   const [cmdkQuery, setCmdkQuery] = useState("");
   const [onboardingStep, setOnboardingStep] = useState(1);
+  // 历史导入面板占位：真实原生历史扫描属 M2 后续交付，接通前展示空态。
+  const nativeHistory: { id: string; cli: string; title: string; turns: number; updatedAt: string }[] = [];
 
   const cmdItems = [
     { sec: "工作区与会话", title: "feat/12-native-drivers · codex", sub: "2 项权限待确认", run: () => onClose() },
@@ -264,28 +265,34 @@ export function UtilityModals({
             <DialogDescription>支持原位续接原始编号或分叉注入全新隔离工作树上下文。</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2">
-            {NATIVE_HISTORY.map((h) => (
-              <button
-                key={h.id}
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onFlashToast(`已加载 ${h.cli} 历史会话：${h.title}`);
-                }}
-                className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] p-3 text-left hover:border-[var(--soxu-border-strong)] hover:bg-[var(--soxu-interaction-selected)] cursor-pointer transition-colors"
-              >
-                <div className="flex items-center justify-between text-[11px] text-[var(--soxu-text-tertiary)]">
-                  <span className="inline-flex items-center gap-1.5 soxu-mono font-semibold text-[var(--soxu-text-primary)]">
-                    <AgentIcon agent={h.cli} className="h-3.5 w-3.5 shrink-0" />
-                    <span>{h.cli}</span>
-                  </span>
-                  <span>
-                    {h.turns} 轮 · {h.updatedAt}
-                  </span>
-                </div>
-                <div className="text-xs font-medium mt-1">{h.title}</div>
-              </button>
-            ))}
+            {nativeHistory.length === 0 ? (
+              <div className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] p-6 text-center text-xs text-[var(--soxu-text-tertiary)]">
+                原生会话历史扫描尚未接入：待守护进程历史导入能力交付后在此展示。
+              </div>
+            ) : (
+              nativeHistory.map((h) => (
+                <button
+                  key={h.id}
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onFlashToast(`已加载 ${h.cli} 历史会话：${h.title}`);
+                  }}
+                  className="rounded-xl border border-[var(--soxu-border-subtle)] bg-[var(--soxu-surface-card-muted)] p-3 text-left hover:border-[var(--soxu-border-strong)] hover:bg-[var(--soxu-interaction-selected)] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center justify-between text-[11px] text-[var(--soxu-text-tertiary)]">
+                    <span className="inline-flex items-center gap-1.5 soxu-mono font-semibold text-[var(--soxu-text-primary)]">
+                      <AgentIcon agent={h.cli} className="h-3.5 w-3.5 shrink-0" />
+                      <span>{h.cli}</span>
+                    </span>
+                    <span>
+                      {h.turns} 轮 · {h.updatedAt}
+                    </span>
+                  </div>
+                  <div className="text-xs font-medium mt-1">{h.title}</div>
+                </button>
+              ))
+            )}
           </div>
         </DialogContent>
       </Dialog>

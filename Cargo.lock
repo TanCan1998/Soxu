@@ -6017,6 +6017,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.30.0",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "uuid",
