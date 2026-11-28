@@ -24,6 +24,7 @@ use crate::focus::FocusStack;
 use crate::i18n::I18n;
 use crate::layout::{LayoutPlan, PanelVisibility};
 use crate::right_panel;
+use crate::search;
 use crate::theme::theme_state;
 use crate::timeline::TimelineView;
 use crate::tokens::{layout, sizing};
@@ -103,7 +104,11 @@ impl Render for WorkbenchShell {
                             .text_size(px(13.5))
                             .text_color(palette.text_primary)
                             .child(i18n.t("app.name").to_string()),
-                    ),
+                    )
+                    .child(search::view::render_trigger_bar(
+                        &palette,
+                        cfg!(target_os = "macos"),
+                    )),
             )
             .child(
                 // 主体：左栏 + 中栏 + 右栏，横向排布；中栏 flex-1 永远保留。
