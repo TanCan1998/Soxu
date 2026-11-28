@@ -3,12 +3,22 @@
 pub mod antigravity;
 pub mod native_assets;
 pub mod pairing;
+pub mod pty;
+pub mod scripts;
 pub mod server;
 pub mod state;
 pub mod store;
 pub mod web_assets;
 
 pub use native_assets::{NativeAssetError, NativeAssetGuard};
+pub use pty::{
+    NullPtyEventSink, PortablePtyBackend, PtyBackend, PtyChild, PtyControl, PtyEventSink, PtyHost,
+    PtySpawnSpec,
+};
+pub use scripts::{
+    FeatureGate, NullScriptEventSink, ReapOutcome, RunOutput, RunScriptOptions, ScriptEventSink,
+    ScriptManifest, ScriptRun, ScriptRunner, ScriptService,
+};
 pub use server::build_router;
 pub use state::DaemonState;
 pub use store::SqliteStore;
