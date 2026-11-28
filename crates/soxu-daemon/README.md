@@ -11,6 +11,9 @@ cargo run -p soxu-daemon
 - 默认监听 `127.0.0.1:7698`（`SOXU_LISTEN` 覆写）。
 - 数据目录默认 `~/.soxu`（`SOXU_DATA_DIR` 覆写）；目录级文件锁防止双实例。
 - 非回环监听地址自动要求全部请求携带设备 Bearer 令牌（`require_auth_for_all`）。
+- M6 能力位（受管脚本 / 调度 / 心跳 / 受控终端）**默认全关**，**只能由 daemon 宿主进程环境**
+  `SOXU_DAEMON_FEATURES`（逗号分隔令牌）开启；客户端无法通过 RPC 开启任何能力位，
+  安全边界与过渡期说明见下文「M6 端到端接线」。
 
 ## 移动端 PWA 伺服（rust-embed）
 
@@ -112,9 +115,17 @@ cargo run -p soxu-daemon
 | `ListSchedules` / `CreateSchedule` / `UpdateSchedule` / `DisableSchedule` / `DeleteSchedule` / `TriggerSchedule` | `ScheduleService::handle` | `schedules` 或 `heartbeats` 已声明 |
 | `OpenPty` / `WritePty` / `ResizePty` / `ClosePty` | `PtyHost::handle` | `controlled_pty` 已声明 |
 
-- **能力位来源**：`SOXU_DAEMON_FEATURES`（逗号分隔令牌，未设置即全关）；也可由宿主/测试用
-  `DaemonState::with_feature_gate` 注入。线缆级 `ClientHello` 尚无能力字段（`soxu-protocol` 冻结），
-  因此门控当前是**守护进程级**的：将来握手携带能力集合时只需灌入同一个 `FeatureGate`，判定逻辑不变。
+- **能力位来源：只有 daemon 宿主进程能开启**。令牌来自 `SOXU_DAEMON_FEATURES`（逗号分隔；
+  未设置、空串与纯空白一律解析为全关）或宿主在装配阶段调用 `DaemonState::with_feature_gate`。
+  **RPC 面没有任何开启入口**：`RpcCommand` 不提供能力声明/灰度命令，客户端既不能自报能力、
+  也不能修改门控——`DaemonFeatureSet` 只用于**判定**请求是否放行，绝不接受客户端主张。
+  改变门控的唯一路径是重启 daemon 并给它不同的宿主环境（或宿主代码改用 builder），
+  因此“声明后执行”永远不会变成客户端可自行提权的开关。
+- **安全边界（过渡期门控）**：`ClientHello` 尚无能力字段（`soxu-protocol` 冻结），因此门控是
+  **守护进程级**而非按连接级——一次开启对连到该 daemon 的所有客户端生效，M6 事件也经同一订阅
+  通道下发给所有订阅者。这是协议缺能力字段期间的过渡方案：将来握手携带能力集合时只需灌入同一个
+  `FeatureGate`，即可收敛为按连接级而判定逻辑不变。部署方应按最小权限原则，只给确实需要
+  脚本/终端/调度能力的 daemon 实例开启对应令牌（默认配置不需要也不应该开启）。
 - **顺序红线**：先判能力位、再解析工作区根、最后才调域服务。能力位关闭时即便是未知
   `workspace_id` / `schedule_id` 也返回 `Unsupported`（而非 `NotFound`），且零事件下发。
 - **工作区根解析**：`Local` 工作区取项目登记的 `root_path`（绝不使用 `~` 脱敏展示路径），
