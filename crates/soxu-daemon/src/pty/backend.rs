@@ -142,28 +142,27 @@ impl PtyControl for PortablePtyControl {
 /// ConPTY 的 `CreateProcessW` 要求环境块是「以 NUL 结尾的字符串块 + 结尾 NUL」；
 /// 白名单为空时整块退化为单个 NUL，会被 Windows 判为参数错误（`os error 87`）。
 /// 因此 Windows 上固定注入 `SystemRoot`/`WINDIR`（机器级、不涉用户凭据）作为最小基线，
-/// 除此之外不会注入任何用户环境。
+/// 除此之外不会注入任何用户环境。Unix `openpty` 对空环境块没有这个约束，保持原样。
+#[cfg(windows)]
 fn platform_environment(allowlisted: &[(String, String)]) -> Vec<(String, String)> {
     let mut environment = allowlisted.to_vec();
-    #[cfg(windows)]
-    {
-        for key in ["SystemRoot", "WINDIR"] {
-            let present = environment
-                .iter()
-                .any(|(existing, _)| existing.eq_ignore_ascii_case(key));
-            if present {
-                continue;
-            }
-            if let Ok(value) = std::env::var(key) {
-                environment.push((key.to_owned(), value));
-            }
+    for key in ["SystemRoot", "WINDIR"] {
+        let present = environment
+            .iter()
+            .any(|(existing, _)| existing.eq_ignore_ascii_case(key));
+        if present {
+            continue;
+        }
+        if let Ok(value) = std::env::var(key) {
+            environment.push((key.to_owned(), value));
         }
     }
-    #[cfg(not(windows))]
-    {
-        let _ = allowlisted;
-    }
     environment
+}
+
+#[cfg(not(windows))]
+fn platform_environment(allowlisted: &[(String, String)]) -> Vec<(String, String)> {
+    allowlisted.to_vec()
 }
 
 fn raw_size(size: PtySize) -> RawPtySize {
