@@ -11,7 +11,10 @@ use crate::error::ActionableError;
 use crate::git_ops::{CheckpointRecordSummary, GitOperationRecord};
 use crate::pairing::PairedDeviceSummary;
 use crate::preferences::SoxuPreferences;
+use crate::pty::PtyEvent;
 use crate::rpc::StateSnapshot;
+use crate::schedules::ScheduleEvent;
+use crate::scripts::ScriptLifecycleEvent;
 use crate::telemetry::SessionTelemetryStats;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -93,4 +96,10 @@ pub enum DaemonEvent {
         operation: GitOperationRecord,
         error: Option<ActionableError>,
     },
+    /// 受管脚本生命周期事件；仅在客户端已协商 `managed_scripts` 能力后下发。
+    ScriptLifecycleChanged(ScriptLifecycleEvent),
+    /// 调度与心跳事件；仅在客户端已协商 `schedules` 或 `heartbeats` 能力后下发。
+    ScheduleActivity(ScheduleEvent),
+    /// 受控 PTY 输出/尺寸/退出/关闭事件；仅在客户端已协商 `controlled_pty` 能力后下发。
+    PtyActivity(PtyEvent),
 }

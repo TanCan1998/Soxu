@@ -7,15 +7,19 @@ pub mod events;
 pub mod git_ops;
 pub mod pairing;
 pub mod preferences;
+pub mod primitives;
+pub mod pty;
 pub mod rpc;
+pub mod schedules;
+pub mod scripts;
 pub mod telemetry;
 
 /// 当前通信协议版本号，客户端连接 Daemon 时用于握手兼容性检查。
 pub const PROTOCOL_VERSION: u32 = 1;
 
 pub use capabilities::{
-    AgentCapabilityDescriptor, LostControlNotice, ModelDescriptor, PermissionOptionMeta,
-    PermissionTone, ThinkingEffort,
+    AgentCapabilityDescriptor, DaemonFeature, DaemonFeatureSet, LostControlNotice, ModelDescriptor,
+    PermissionOptionMeta, PermissionTone, ThinkingEffort,
 };
 pub use domain::{
     ActiveTurnBehavior, ApprovalAuditRecord, ApprovalItemSnapshot, ApprovalResolutionKind,
@@ -52,9 +56,32 @@ pub use preferences::{
     AccentPresetId, CodeFontPresetId, DensityMode, LineHeightMode, SoxuPreferences, ThemeMode,
     TimestampFormatMode, UiFontPresetId, WorktreeLocationMode,
 };
+pub use primitives::{EnvKey, IdempotencyKey, WorkspaceRelativePath};
+pub use pty::{
+    ClosePtyRequest, ClosePtyResponse, OpenPtyRequest, OpenPtyResponse, PTY_INPUT_CHUNK_MAX_BYTES,
+    PTY_OUTPUT_CHUNK_MAX_BYTES, PtyCloseReason, PtyCommand, PtyCommandResult, PtyEnvPolicy,
+    PtyEvent, PtyExitStatus, PtyInputData, PtyOutputChunk, PtyOutputData, PtySessionId,
+    PtySessionSnapshot, PtySessionState, PtySize, PtyWorkdirPolicy, ResizePtyRequest,
+    ResizePtyResponse, WritePtyRequest, WritePtyResponse,
+};
 pub use rpc::{
     ClientHello, ClientKind, HealthSnapshot, RpcCommand, RpcRequest, RpcResponse, RpcResultData,
     ServerHello, StateSnapshot,
+};
+pub use schedules::{
+    CreateScheduleRequest, CronExpression, DeleteScheduleRequest, ListSchedulesRequest,
+    PauseScheduleRequest, ScheduleCadence, ScheduleCommand, ScheduleCommandResult, ScheduleEvent,
+    ScheduleId, ScheduleListResult, ScheduleName, ScheduleRetryPolicy, ScheduleRunOutcome,
+    ScheduleRunResult, ScheduleRunTrigger, ScheduleState, ScheduleSummary, ScheduleTimezone,
+    ScheduleTrigger, ScheduleTriggeredEvent, ScheduleValidityWindow, TriggerScheduleRequest,
+    UpdateScheduleRequest,
+};
+pub use scripts::{
+    InspectScriptRequest, ListScriptsRequest, ManagedScriptEntry, RunScriptRequest, ScriptArgument,
+    ScriptArgumentPolicy, ScriptCommand, ScriptCommandResult, ScriptEnvPolicy,
+    ScriptFixedArguments, ScriptId, ScriptLifecycleEvent, ScriptLifecyclePhase,
+    ScriptManifestListing, ScriptProgram, ScriptRiskLevel, ScriptRunSnapshot, ScriptRunState,
+    ScriptUserArguments, ScriptWorkdirPolicy, StopScriptRequest,
 };
 pub use telemetry::{ContextUsageBand, SessionTelemetryStats};
 
