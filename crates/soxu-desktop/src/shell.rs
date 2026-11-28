@@ -19,6 +19,7 @@ use gpui::{
     Window, div, px,
 };
 
+use crate::composer::render_for_window;
 use crate::focus::FocusStack;
 use crate::i18n::I18n;
 use crate::layout::{LayoutPlan, PanelVisibility};
@@ -119,7 +120,8 @@ impl Render for WorkbenchShell {
                         ))
                     })
                     .child(
-                        // 中栏：Pure Black 画布 + M5-A 虚拟时间线（对话流/工具卡/导航轨）。
+                        // 中栏：Pure Black 画布——上方 M5-A 虚拟时间线（对话流/工具卡/导航轨），
+                        // 下方 M5-B 760px 同步宽输入舱（时间线占剩余高度，输入舱保留自身高度）。
                         div()
                             .flex()
                             .flex_col()
@@ -127,7 +129,12 @@ impl Render for WorkbenchShell {
                             .min_w_0()
                             .min_h_0()
                             .bg(palette.surface_canvas)
-                            .child(self.timeline.clone()),
+                            .child(self.timeline.clone())
+                            .child(render_for_window(
+                                &plan,
+                                &palette,
+                                _window.viewport_size().width.as_f32(),
+                            )),
                     )
                     .when(rendered(plan.inspector), |row| {
                         row.child(placeholder_panel(
