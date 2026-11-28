@@ -5,19 +5,19 @@
 //! 平台语义按 L-013 逐平台显式门控；子进程等待一律「有界 + 非管道收集」
 //! （L-016），失败不靠无界 `output()` 收集。
 
-use soxu_daemon::pty::{NullPtyEventSink, PtyHost};
+use soxu_daemon::pty::PtyHost;
 use soxu_daemon::pty::{
-    PTY_CLOSE_GRACE, PTY_IDLE_TIMEOUT, PTY_MAX_SESSIONS, PtyBackend, PtyChild, PtyControl,
-    PtyEventSink, PtySpawnSpec,
+    PTY_IDLE_TIMEOUT, PTY_MAX_SESSIONS, PtyBackend, PtyChild, PtyControl, PtyEventSink,
+    PtySpawnSpec,
 };
 use soxu_daemon::scripts::{
     FeatureGate, ReapOutcome, SCRIPT_OUTPUT_LIMIT_BYTES, ScriptEventSink, ScriptService,
 };
 use soxu_protocol::{
     ActionableError, DaemonFeature, ErrorCode, ManagedScriptEntry, OpenPtyRequest, PtyCloseReason,
-    PtyCommand, PtyEvent, PtyExitStatus, PtyInputData, PtySessionId, PtySessionState, PtySize,
-    PtyWorkdirPolicy, RunScriptRequest, ScriptCommand, ScriptCommandResult, ScriptEnvPolicy,
-    ScriptId, ScriptRunState, ScriptUserArguments, ScriptWorkdirPolicy,
+    PtyCommand, PtyEvent, PtyExitStatus, PtyInputData, PtySessionState, PtySize, PtyWorkdirPolicy,
+    RunScriptRequest, ScriptCommand, ScriptCommandResult, ScriptEnvPolicy, ScriptId,
+    ScriptRunState, ScriptUserArguments, ScriptWorkdirPolicy,
 };
 use std::io::{Cursor, Write};
 use std::path::Path;
@@ -93,14 +93,19 @@ impl PtyEventSink for RecordingPtySink {
     }
 }
 
-/// 构造一条受管脚本条目；`script_id` 与固定参数由调用方给出。
-fn script_entry(script_id: &str, arguments: &[&str]) -> ManagedScriptEntry {
+/// 构造一条受管脚本条目：程序固定为**受控子进程桩**（当前测试二进制自执行），
+/// 固定参数负责选中具体桩测试。
+///
+/// 只依赖 Rust 工具链产物，不依赖宿主预装的 node/python 或任何第三方 CLI：
+/// CI Runner 上的 Node 会因运行时自检（`Assertion failed: ncrypto::CSPRNG`）直接崩溃，
+/// 属 L-017 同类「测试依赖开发机预装工具」陷阱。
+fn script_entry(script_id: &str, helper: &str) -> ManagedScriptEntry {
     let raw = serde_json::json!({
         "script_id": script_id,
         "display_name": "回归脚本",
-        "program": node_program(),
+        "program": stub_program(),
         "argument_policy": {
-            "fixed_arguments": arguments,
+            "fixed_arguments": stub_arguments(helper),
             "accepts_user_arguments": false,
             "max_user_arguments": 0,
             "max_user_argument_bytes": 4096
@@ -111,9 +116,44 @@ fn script_entry(script_id: &str, arguments: &[&str]) -> ManagedScriptEntry {
     serde_json::from_value(raw).expect("脚本条目应合法")
 }
 
-/// 用裸程序名 `node`：解析走 PATH，不绑定本机绝对路径。
-fn node_program() -> &'static str {
-    "node"
+/// 选中桩测试的固定参数：libtest 只运行那一个被忽略的桩用例。
+fn stub_arguments(helper: &str) -> Vec<String> {
+    vec![
+        "--exact".to_owned(),
+        helper.to_owned(),
+        "--ignored".to_owned(),
+        "--nocapture".to_owned(),
+    ]
+}
+
+/// 当前测试二进制路径（作为受控子进程桩）。
+///
+/// 协议要求 `program` 不得含空白与 shell 元字符；若测试二进制路径本身不满足
+/// （例如工作树或用户名含空格），就复制一份到无空白的临时目录再执行。
+fn stub_program() -> String {
+    let current = std::env::current_exe().expect("当前测试二进制路径");
+    if program_is_acceptable(&current) {
+        return current.to_string_lossy().into_owned();
+    }
+    let fallback_dir = std::env::temp_dir().join("soxu-m6a-stub");
+    std::fs::create_dir_all(&fallback_dir).expect("创建桩目录");
+    let target = fallback_dir.join(if cfg!(windows) {
+        "soxu-m6a-stub.exe"
+    } else {
+        "soxu-m6a-stub"
+    });
+    std::fs::copy(&current, &target).expect("复制桩二进制");
+    assert!(
+        program_is_acceptable(&target),
+        "受控桩路径仍不满足协议对 program 的约束：{}",
+        target.display()
+    );
+    target.to_string_lossy().into_owned()
+}
+
+fn program_is_acceptable(path: &Path) -> bool {
+    path.is_file()
+        && soxu_protocol::ScriptProgram::try_from(path.to_string_lossy().into_owned()).is_ok()
 }
 
 fn write_manifest(root: &Path, entries: &[&ManagedScriptEntry]) {
@@ -257,7 +297,7 @@ async fn manifest_rejects_injection_surfaces_before_any_spawn() {
     assert_eq!(sink.len(), 0);
 
     // 2. 越界工作目录
-    let mut escaping = script_entry("escape", &[]);
+    let mut escaping = script_entry("escape", "stub_child_exits_cleanly");
     escaping.workdir = ScriptWorkdirPolicy::Subdirectory {
         relative_path: soxu_protocol::WorkspaceRelativePath::try_from("nope".to_owned())
             .expect("词法合法但目录不存在"),
@@ -270,7 +310,7 @@ async fn manifest_rejects_injection_surfaces_before_any_spawn() {
     assert_eq!(sink.len(), 0);
 
     // 3. 透传参数越权（条目声明不接受透传参数）
-    let strict = script_entry("strict", &["-e", "process.exit(0)"]);
+    let strict = script_entry("strict", "stub_child_exits_cleanly");
     write_manifest(root.path(), &[&strict]);
     let error = service
         .handle(
@@ -297,9 +337,9 @@ async fn high_risk_entry_requires_approval_marker() {
     let raw = serde_json::json!({
         "script_id": "risky",
         "display_name": "高风险脚本",
-        "program": node_program(),
+        "program": stub_program(),
         "argument_policy": {
-            "fixed_arguments": ["-e", "process.exit(0)"],
+            "fixed_arguments": stub_arguments("stub_child_exits_cleanly"),
             "accepts_user_arguments": false,
             "max_user_arguments": 0,
             "max_user_argument_bytes": 4096
@@ -334,9 +374,8 @@ async fn high_risk_entry_requires_approval_marker() {
 
 #[tokio::test]
 async fn script_runs_without_shell_and_reports_lifecycle() {
-    assert_node_available();
     let root = tempfile::tempdir().expect("临时工作区");
-    let entry = script_entry("echo", &["-e", "process.exit(0)"]);
+    let entry = script_entry("echo", "stub_child_exits_cleanly");
     write_manifest(root.path(), &[&entry]);
     let sink = Arc::new(RecordingScriptSink::default());
     let service = ScriptService::new(enabled_scripts(), sink.clone());
@@ -375,12 +414,8 @@ async fn script_runs_without_shell_and_reports_lifecycle() {
 
 #[tokio::test]
 async fn output_budget_truncates_instead_of_unbounded_buffering() {
-    assert_node_available();
     let root = tempfile::tempdir().expect("临时工作区");
-    let entry = script_entry(
-        "chatter",
-        &["-e", "process.stdout.write('x'.repeat(1024 * 1024))"],
-    );
+    let entry = script_entry("chatter", "stub_child_floods_stdout");
     write_manifest(root.path(), &[&entry]);
     let sink = Arc::new(RecordingScriptSink::default());
     let service = ScriptService::new(enabled_scripts(), sink);
@@ -403,9 +438,8 @@ async fn output_budget_truncates_instead_of_unbounded_buffering() {
 
 #[tokio::test]
 async fn timeout_stops_run_and_reclaims_process_tree_within_bounds() {
-    assert_node_available();
     let root = tempfile::tempdir().expect("临时工作区");
-    let mut entry = script_entry("sleeper", &["-e", "setTimeout(() => {}, 60000)"]);
+    let mut entry = script_entry("sleeper", "stub_child_idles");
     entry.timeout_seconds = Some(1);
     write_manifest(root.path(), &[&entry]);
     let sink = Arc::new(RecordingScriptSink::default());
@@ -441,10 +475,8 @@ async fn timeout_stops_run_and_reclaims_process_tree_within_bounds() {
 
 #[tokio::test]
 async fn environment_is_cleared_unless_allowlisted() {
-    assert_node_available();
     let root = tempfile::tempdir().expect("临时工作区");
-    let probe = "process.stdout.write(process.env.PATH ? 'has-path' : 'no-path')";
-    let mut isolated = script_entry("env-isolated", &["-e", probe]);
+    let mut isolated = script_entry("env-isolated", "stub_child_reports_environment");
     isolated.env_policy = ScriptEnvPolicy::default();
     write_manifest(root.path(), &[&isolated]);
     let sink = Arc::new(RecordingScriptSink::default());
@@ -457,13 +489,17 @@ async fn environment_is_cleared_unless_allowlisted() {
     );
     wait_terminal(&service, &accepted.run_id).await;
     let output = service.runner().output(&accepted.run_id).expect("输出");
-    assert_eq!(
-        String::from_utf8_lossy(output.as_bytes()),
-        "no-path",
-        "默认不继承父进程环境"
+    let text = String::from_utf8_lossy(output.as_bytes()).into_owned();
+    assert!(
+        text.contains("SOXU-STUB-ENV-COUNT=0"),
+        "默认必须清空环境，桩实际看到：{text}"
+    );
+    assert!(
+        text.contains("SOXU-STUB-PATH=absent"),
+        "未放行的 PATH 不得泄漏给子进程：{text}"
     );
 
-    let mut allowed = script_entry("env-allowed", &["-e", probe]);
+    let mut allowed = script_entry("env-allowed", "stub_child_reports_environment");
     allowed.env_policy = ScriptEnvPolicy {
         allow_keys: vec![soxu_protocol::EnvKey::try_from("PATH".to_owned()).expect("环境名")],
         inherits_parent_env: false,
@@ -476,18 +512,21 @@ async fn environment_is_cleared_unless_allowlisted() {
     );
     wait_terminal(&service, &accepted.run_id).await;
     let output = service.runner().output(&accepted.run_id).expect("输出");
-    assert_eq!(
-        String::from_utf8_lossy(output.as_bytes()),
-        "has-path",
-        "白名单内的变量必须按名注入"
+    let text = String::from_utf8_lossy(output.as_bytes()).into_owned();
+    assert!(
+        text.contains("SOXU-STUB-PATH=present"),
+        "白名单内的变量必须按名注入：{text}"
+    );
+    assert!(
+        text.contains("SOXU-STUB-ENV-COUNT=1"),
+        "除白名单外不得有任何其他环境项：{text}"
     );
 }
 
 #[tokio::test]
 async fn identical_idempotency_key_never_runs_twice() {
-    assert_node_available();
     let root = tempfile::tempdir().expect("临时工作区");
-    let entry = script_entry("idem", &["-e", "setTimeout(() => {}, 400)"]);
+    let entry = script_entry("idem", "stub_child_sleeps_briefly");
     write_manifest(root.path(), &[&entry]);
     let sink = Arc::new(RecordingScriptSink::default());
     let service = ScriptService::new(enabled_scripts(), sink);
@@ -710,7 +749,7 @@ fn real_backend_opens_a_terminal_and_reports_exit() {
         closed.state,
         PtySessionState::Closed | PtySessionState::Failed
     ));
-    let deadline = Instant::now() + PTY_CLOSE_GRACE + Duration::from_secs(5);
+    let deadline = Instant::now() + soxu_daemon::pty::PTY_CLOSE_GRACE + Duration::from_secs(5);
     while sink.count_of(|event| matches!(event, PtyEvent::Closed(_))) == 0 {
         assert!(
             Instant::now() < deadline,
@@ -804,29 +843,55 @@ fn wait_for_events(sink: &Arc<RecordingPtySink>, done: impl Fn(&RecordingPtySink
     }
 }
 
-fn assert_node_available() {
-    let found = std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path)
-            .filter(|dir| dir.is_absolute())
-            .any(|dir| dir.join("node").is_file() || dir.join("node.exe").is_file())
-    });
-    assert!(
-        found,
-        "受管脚本回归需要 PATH 中存在 node（按项目 mise 工具链提供）"
-    );
+// ---------------------------------------------------------------------------
+// 受控子进程桩（由父测试经 current_exe 重新执行，不依赖宿主任何第三方工具）
+// ---------------------------------------------------------------------------
+
+/// 受控子进程桩：正常退出。
+#[test]
+#[ignore = "受控子进程桩：仅由父测试经当前二进制重新执行"]
+fn stub_child_exits_cleanly() {}
+
+/// 受控子进程桩：刷出远超输出预算的字节，用于验证截断而不是无界缓冲。
+#[test]
+#[ignore = "受控子进程桩：仅由父测试经当前二进制重新执行"]
+fn stub_child_floods_stdout() {
+    const TOTAL_BYTES: usize = 1024 * 1024;
+    let chunk = [b'x'; 8192];
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    let mut written = 0;
+    while written < TOTAL_BYTES {
+        out.write_all(&chunk).expect("桩输出");
+        written += chunk.len();
+    }
+    out.flush().expect("桩刷新");
 }
 
-#[allow(dead_code)]
-fn assert_no_events(sink: &RecordingScriptSink) {
-    assert_eq!(sink.len(), 0, "拒绝路径不得下发任何生命周期事件");
+/// 受控子进程桩：长时间挂起，用于验证超时后的进程树回收。
+#[test]
+#[ignore = "受控子进程桩：仅由父测试经当前二进制重新执行"]
+fn stub_child_idles() {
+    std::thread::sleep(Duration::from_secs(60));
 }
 
-#[allow(dead_code)]
-fn open_session_id(snapshot: &soxu_protocol::PtySessionSnapshot) -> PtySessionId {
-    snapshot.pty_id.clone()
+/// 受控子进程桩：只报告自身可见的环境变量数量与 PATH 存在性。
+#[test]
+#[ignore = "受控子进程桩：仅由父测试经当前二进制重新执行"]
+fn stub_child_reports_environment() {
+    let count = std::env::vars_os().count();
+    let path = if std::env::var_os("PATH").is_some() {
+        "present"
+    } else {
+        "absent"
+    };
+    println!("SOXU-STUB-ENV-COUNT={count}");
+    println!("SOXU-STUB-PATH={path}");
 }
 
-#[allow(dead_code)]
-fn unused_null_sink() -> Arc<NullPtyEventSink> {
-    Arc::new(NullPtyEventSink)
+/// 受控子进程桩：短暂存活，用于验证幂等键不重复派生。
+#[test]
+#[ignore = "受控子进程桩：仅由父测试经当前二进制重新执行"]
+fn stub_child_sleeps_briefly() {
+    std::thread::sleep(Duration::from_millis(400));
 }
