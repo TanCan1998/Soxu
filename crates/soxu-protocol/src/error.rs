@@ -23,6 +23,8 @@ pub enum ErrorCode {
     SafetyIncomplete,
     PartialNeedsRecovery,
     RefPublishedIndexPending,
+    /// 断线追平过程中读取事件日志失败：本次追平已中止，缺口必须重新握手重取快照。
+    CatchUpFailed,
 }
 
 /// 面向客户端渲染的三要素可执行错误负载。

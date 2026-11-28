@@ -2552,3 +2552,221 @@ async fn mobile_web_serving_pairing_auth_and_404_regression() {
 
     handle.abort();
 }
+
+// ---------- #160 追平分页与快照游标一致性 ----------
+
+fn bulk_project(index: u32) -> ProjectSummary {
+    ProjectSummary {
+        project_id: format!("bulk-{index}"),
+        name: format!("bulk-{index}"),
+        display_path: format!("~/bulk/{index}"),
+        root_path: format!("~/bulk/{index}"),
+        is_git_repo: true,
+        default_branch: Some("main".to_owned()),
+        aggregated_bucket: WorkspaceBucket::Done,
+        workspace_count: 1,
+    }
+}
+
+/// 逐条追加 `count` 次 `ProjectUpdated`，返回追加后的固定头部。
+fn append_project_events(state: &DaemonState, count: u32) -> u64 {
+    for index in 0..count {
+        state
+            .upsert_project(bulk_project(index))
+            .expect("append project event");
+    }
+    state.latest_seq().expect("read event head")
+}
+
+fn catch_up_hello(after_seq: u64) -> ClientHello {
+    ClientHello {
+        client_kind: ClientKind::MobilePwa,
+        client_version: "0.1.0".to_owned(),
+        protocol_version: soxu_protocol::PROTOCOL_VERSION,
+        after_seq: Some(after_seq),
+        device_id: None,
+    }
+}
+
+#[tokio::test]
+async fn ws_catch_up_pages_1200_events_in_order_without_gaps() {
+    let dir = TempDir::new().expect("temp dir");
+    let (addr, state, handle) = spawn_test_daemon(&dir).await;
+    let base = state.latest_seq().expect("base seq");
+    let head = append_project_events(&state, 1200);
+    assert_eq!(head, base + 1200);
+    state.reset_catch_up_pages_fetched();
+
+    let (mut ws, hello) = connect_ws(addr, catch_up_hello(base)).await;
+    assert_eq!(
+        hello.snapshot_seq,
+        Some(head),
+        "握手必须上报与快照一致的固定头部 H"
+    );
+    assert_eq!(hello.latest_seq, head);
+
+    let mut expected = base + 1;
+    let mut completed = None;
+    while completed.is_none() {
+        let raw = next_text_frame(&mut ws).await;
+        let env: EventEnvelope<DaemonEvent> =
+            serde_json::from_str(&raw).expect("decode catch-up envelope");
+        match env.payload {
+            DaemonEvent::CatchUpCompleted {
+                from_seq,
+                to_seq,
+                count,
+            } => {
+                assert_eq!(from_seq, base, "完成帧必须回报请求的 after_seq");
+                assert_eq!(to_seq, head, "完成帧的 to_seq 必须等于固定头部 H");
+                assert_eq!(count, 1200, "完成帧的 count 必须是实际发送条数");
+                completed = Some(env.seq);
+            }
+            DaemonEvent::ProjectUpdated(_) => {
+                assert_eq!(env.seq, expected, "追平事件必须按序、无重复、无缺口");
+                expected += 1;
+            }
+            other => panic!("追平期间出现非预期事件: {other:?}"),
+        }
+    }
+    assert_eq!(expected, head + 1, "头部之前的每一条事件都必须送达");
+    assert_eq!(completed, Some(head), "完成帧游标等于固定头部");
+
+    // 分页有界：1200 条积压必须逐页读取，绝不能一次性加载
+    let page_size = u64::from(soxu_daemon::state::CATCH_UP_PAGE_SIZE);
+    let pages = state.catch_up_pages_fetched();
+    assert!(
+        pages >= 1200_u64.div_ceil(page_size),
+        "1200 条积压至少需要 3 页，实际 {pages} 页"
+    );
+    assert_eq!(pages, 3, "页大小 500 时 1200 条应恰好取 3 页，实际 {pages}");
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn ws_catch_up_handles_zero_exact_page_and_advanced_cursor() {
+    let dir = TempDir::new().expect("temp dir");
+    let (addr, state, handle) = spawn_test_daemon(&dir).await;
+    let base = state.latest_seq().expect("base seq");
+
+    // 边界 1：恰好 1000 条（页大小的整数倍）应恰好取 2 页，且逐条送达
+    let head = append_project_events(&state, 1000);
+    assert_eq!(head, base + 1000);
+    state.reset_catch_up_pages_fetched();
+    let (mut ws_exact, hello_exact) = connect_ws(addr, catch_up_hello(base)).await;
+    assert_eq!(hello_exact.snapshot_seq, Some(head));
+    let mut delivered = 0u64;
+    loop {
+        let raw = next_text_frame(&mut ws_exact).await;
+        let env: EventEnvelope<DaemonEvent> =
+            serde_json::from_str(&raw).expect("decode catch-up envelope");
+        if let DaemonEvent::CatchUpCompleted {
+            from_seq,
+            to_seq,
+            count,
+        } = env.payload
+        {
+            assert_eq!(from_seq, base);
+            assert_eq!(to_seq, head);
+            assert_eq!(count, 1000);
+            break;
+        }
+        delivered += 1;
+    }
+    assert_eq!(delivered, 1000);
+    let page_size = u64::from(soxu_daemon::state::CATCH_UP_PAGE_SIZE);
+    let pages = state.catch_up_pages_fetched();
+    assert_eq!(
+        pages,
+        1000_u64.div_ceil(page_size),
+        "恰好 1000 条应取 2 页，实际 {pages}"
+    );
+    drop(ws_exact);
+
+    // 边界 2：零补读——after_seq 恰等于头部，仍必须收到完成帧
+    let (mut ws_zero, hello_zero) = connect_ws(addr, catch_up_hello(head)).await;
+    assert_eq!(hello_zero.snapshot_seq, Some(head));
+    let raw = next_text_frame(&mut ws_zero).await;
+    let env: EventEnvelope<DaemonEvent> = serde_json::from_str(&raw).expect("decode completion");
+    assert_eq!(
+        env.payload,
+        DaemonEvent::CatchUpCompleted {
+            from_seq: head,
+            to_seq: head,
+            count: 0,
+        },
+        "零补读也必须收到 count=0 的完成帧"
+    );
+    drop(ws_zero);
+
+    // 边界 3：游标超前头部（事件库被重置/换库）→ 从头重放全部事件
+    let (mut ws_ahead, hello_ahead) = connect_ws(addr, catch_up_hello(head + 50)).await;
+    assert_eq!(hello_ahead.snapshot_seq, Some(head));
+    let mut replayed = 0u64;
+    loop {
+        let raw = next_text_frame(&mut ws_ahead).await;
+        let env: EventEnvelope<DaemonEvent> =
+            serde_json::from_str(&raw).expect("decode replays envelope");
+        if let DaemonEvent::CatchUpCompleted {
+            from_seq,
+            to_seq,
+            count,
+        } = env.payload
+        {
+            assert_eq!(from_seq, 0, "超前游标必须按「重取快照」语义从 0 重放");
+            assert_eq!(to_seq, head);
+            assert_eq!(count, head);
+            break;
+        }
+        replayed += 1;
+    }
+    assert_eq!(replayed, head);
+    drop(ws_ahead);
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn ws_catch_up_reports_storage_failure_without_completion() {
+    let dir = TempDir::new().expect("temp dir");
+    let (addr, state, handle) = spawn_test_daemon(&dir).await;
+    let base = state.latest_seq().expect("base seq");
+    let head = append_project_events(&state, 40);
+    state.inject_catch_up_page_failure(true);
+
+    let (mut ws, hello) = connect_ws(addr, catch_up_hello(base)).await;
+    assert_eq!(hello.snapshot_seq, Some(head));
+
+    let raw = next_text_frame(&mut ws).await;
+    let env: EventEnvelope<DaemonEvent> = serde_json::from_str(&raw).expect("decode failure frame");
+    match env.payload {
+        DaemonEvent::ErrorRaised { session_id, error } => {
+            assert_eq!(session_id, None);
+            assert_eq!(error.code, ErrorCode::CatchUpFailed);
+            assert!(
+                error.summary_zh.contains(&format!("after_seq={base}")),
+                "错误摘要必须包含阶段与 after_seq：{}",
+                error.summary_zh
+            );
+        }
+        other => panic!("存储失败必须以可诊断错误上报，实际: {other:?}"),
+    }
+
+    // 追平中止：绝不出现 CatchUpCompleted，连接随后结束
+    let mut saw_completion = false;
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(10), ws.next()).await;
+        let Ok(Some(Ok(WsMsg::Text(text)))) = frame else {
+            break;
+        };
+        let env: EventEnvelope<DaemonEvent> =
+            serde_json::from_str(&text).expect("decode trailing frame");
+        if matches!(env.payload, DaemonEvent::CatchUpCompleted { .. }) {
+            saw_completion = true;
+        }
+    }
+    assert!(!saw_completion, "存储失败后不得下发 CatchUpCompleted");
+
+    handle.abort();
+}

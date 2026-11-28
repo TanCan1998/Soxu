@@ -20,6 +20,7 @@ use soxu_protocol::{
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -158,6 +159,21 @@ fn host_feature_gate() -> FeatureGate {
     gate
 }
 
+/// 追平分页单页读取条数（与 t3code `READ_PAGE_SIZE = 500` 同源）。
+///
+/// 页面大小决定任何时刻只驻留一页事件，避免一次把全部积压载入内存。
+pub const CATCH_UP_PAGE_SIZE: u32 = 500;
+
+/// 追平可观测性与故障注入探针。
+///
+/// `pages_fetched` 记录真实取页次数（用于证明逐页而非一次性加载）；
+/// `fail_page_query` 只在集成测试中注入存储读取失败，生产路径恒为 `false`。
+#[derive(Debug, Default)]
+struct CatchUpProbe {
+    pages_fetched: AtomicU64,
+    fail_page_query: AtomicBool,
+}
+
 /// 守护进程共享运行时核心。
 pub struct DaemonState {
     store: Arc<SqliteStore>,
@@ -176,6 +192,7 @@ pub struct DaemonState {
     domain: DomainServices,
     pty_backend: Arc<dyn PtyBackend>,
     data_dir: Option<PathBuf>,
+    catch_up_probe: Arc<CatchUpProbe>,
 }
 
 impl DaemonState {
@@ -244,6 +261,7 @@ impl DaemonState {
             domain,
             pty_backend,
             data_dir: data_dir.map(Path::to_path_buf),
+            catch_up_probe: Arc::new(CatchUpProbe::default()),
         })
     }
 
@@ -325,6 +343,61 @@ impl DaemonState {
             .map_err(internal_err)?;
         let latest = self.store.latest_seq().map_err(internal_err)?;
         Ok((events, latest))
+    }
+
+    /// 单页追平读取：只返回一页事件，不再附带头部（头部由握手时固定的 `H` 决定）。
+    ///
+    /// 追平循环必须逐页调用它，从而保证进程内任何时刻只持有一页事件。
+    pub fn events_page(
+        &self,
+        after_seq: u64,
+        limit: u32,
+    ) -> Result<Vec<EventEnvelope<DaemonEvent>>, ActionableError> {
+        self.catch_up_probe
+            .pages_fetched
+            .fetch_add(1, Ordering::Relaxed);
+        if self.catch_up_probe.fail_page_query.load(Ordering::Relaxed) {
+            return Err(ActionableError::new(
+                ErrorCode::CatchUpFailed,
+                "事件日志读取失败（注入的测试故障）",
+                "本次追平已中止",
+                "请重新连接以重新握手取快照",
+            ));
+        }
+        self.store
+            .query_events_after(after_seq, limit)
+            .map_err(internal_err)
+    }
+
+    /// 握手时一次性确定「快照 + 固定头部 `H`」。
+    ///
+    /// 顺序固定为「先读快照、后取头部」：所有 `seq <= H` 的状态写入都发生在快照读取之前
+    /// 或与之并发，因此要么已在快照中、要么会被 `[after_seq, H]` 的追平重放覆盖；
+    /// `seq > H` 的写入则交由广播补发。两个值绝不反过来读（否则快照可能滞后于 `H`）。
+    pub fn snapshot_with_head(&self) -> Result<(StateSnapshot, u64), ActionableError> {
+        let snapshot = self.snapshot()?;
+        let head_seq = self.latest_seq()?;
+        Ok((snapshot, head_seq))
+    }
+
+    /// 测试与诊断用：注入/解除「追平页读取必定失败」。
+    #[doc(hidden)]
+    pub fn inject_catch_up_page_failure(&self, fail: bool) {
+        self.catch_up_probe
+            .fail_page_query
+            .store(fail, Ordering::Relaxed);
+    }
+
+    /// 测试与诊断用：返回累计取页次数。
+    #[doc(hidden)]
+    pub fn catch_up_pages_fetched(&self) -> u64 {
+        self.catch_up_probe.pages_fetched.load(Ordering::Relaxed)
+    }
+
+    /// 测试与诊断用：清零并返回此前的累计取页次数。
+    #[doc(hidden)]
+    pub fn reset_catch_up_pages_fetched(&self) -> u64 {
+        self.catch_up_probe.pages_fetched.swap(0, Ordering::Relaxed)
     }
 
     pub fn snapshot(&self) -> Result<StateSnapshot, ActionableError> {

@@ -6,6 +6,7 @@
  */
 
 import type {
+  ApprovalAuditRecord,
   ApprovalItemSnapshot,
   DaemonEvent,
   EventEnvelope,
@@ -175,69 +176,140 @@ export function mergeTurnMessage(
   return [...turns, mapped];
 }
 
-export interface ViewPatch {
-  workspaces?: WorkspaceItem[];
-  quickChats?: QuickChatItem[];
-  approvals?: ApprovalItem[];
-  askQuestion?: AskQuestionState;
-  /** 已提交答案的提问卡 request_id（供调用方把对应卡片标记为 submitted）。 */
-  askQuestionSubmitted?: string;
+/**
+ * 单个事件影响的视图切片更新器集合。
+ *
+ * 关键不变量：事件只产出它真正影响的切片；未受影响的列表（如 `approvals`、
+ * `askQuestion`、其它工作区/快速对话）保持为原来的数组引用，绝不会被清空或替换为单项。
+ */
+export interface ViewUpdaters {
+  workspaces?: (current: WorkspaceItem[]) => WorkspaceItem[];
+  quickChats?: (current: QuickChatItem[]) => QuickChatItem[];
+  approvals?: (current: ApprovalItem[]) => ApprovalItem[];
+  askQuestion?: (current: AskQuestionState) => AskQuestionState;
   /** 新消息归属的会话 id（供调用方定位当前会话是否受影响）。 */
   sessionMessage?: { session_id: string; message: TurnMessage };
 }
 
-/** 把单条事件增量应用到视图补丁；未知事件返回空补丁。 */
-export function applyEventToPatch(env: EventEnvelope, patch: ViewPatch): ViewPatch {
+/** 可清空的完整视图状态（快照初始化后的四个切片）。 */
+export interface ViewState {
+  workspaces: WorkspaceItem[];
+  quickChats: QuickChatItem[];
+  approvals: ApprovalItem[];
+  askQuestion: AskQuestionState;
+}
+
+/** 空视图（未连接或未收到快照时的初值）。 */
+export function emptyViewState(): ViewState {
+  return { workspaces: [], quickChats: [], approvals: [], askQuestion: mapPendingInput(null) };
+}
+
+/** 按 id 替换工作区项；保持其余项与其顺序不变（不重排、不清空）。 */
+export function upsertWorkspaceItem(
+  list: WorkspaceItem[],
+  workspace: WorkspaceSummary,
+): WorkspaceItem[] {
+  const next = mapWorkspace(workspace);
+  const index = list.findIndex((item) => item.id === next.id);
+  if (index < 0) return [next, ...list];
+  const copy = [...list];
+  copy[index] = next;
+  return copy;
+}
+
+/** 按 id 替换快速对话项；其余项与顺序保持不变。 */
+export function upsertQuickChatItem(
+  list: QuickChatItem[],
+  chat: QuickChatSummary,
+): QuickChatItem[] {
+  const next = mapQuickChat(chat);
+  const index = list.findIndex((item) => item.id === next.id);
+  if (index < 0) return [next, ...list];
+  const copy = [...list];
+  copy[index] = next;
+  return copy;
+}
+
+/** 新增/替换待审批卡；其余待审批卡保持不变。 */
+export function upsertApprovalItem(
+  list: ApprovalItem[],
+  approval: ApprovalItemSnapshot,
+): ApprovalItem[] {
+  const next = mapApproval(approval);
+  const index = list.findIndex((item) => item.id === next.id);
+  if (index < 0) return [next, ...list];
+  const copy = [...list];
+  copy[index] = next;
+  return copy;
+}
+
+/** 就地解析某张审批卡；无关审批卡保持不变。 */
+export function resolveApprovalItem(
+  list: ApprovalItem[],
+  approvalId: string,
+  audit: ApprovalAuditRecord,
+): ApprovalItem[] {
+  let changed = false;
+  const next = list.map((item) => {
+    if (item.id !== approvalId) return item;
+    changed = true;
+    return {
+      ...item,
+      resolution:
+        audit.resolution === "approve_once"
+          ? ("approved" as const)
+          : audit.resolution === "allow_session"
+            ? ("session" as const)
+            : ("rejected" as const),
+      note: audit.guidance_note ?? undefined,
+    };
+  });
+  return changed ? next : list;
+}
+
+/** 把单条事件翻译为只需要更新的视图切片。 */
+export function eventToViewUpdaters(env: EventEnvelope): ViewUpdaters {
   const payload: DaemonEvent = env.payload;
   switch (payload.event) {
-    case "workspace_updated": {
-      const list = (patch.workspaces ?? []).filter((w) => w.id !== payload.data.workspace_id);
-      list.unshift(mapWorkspace(payload.data));
-      return { ...patch, workspaces: list };
-    }
-    case "quick_chat_updated": {
-      const list = (patch.quickChats ?? []).filter((q) => q.id !== payload.data.chat_id);
-      list.unshift(mapQuickChat(payload.data));
-      return { ...patch, quickChats: list };
-    }
-    case "approval_requested": {
-      const list = (patch.approvals ?? []).filter((a) => a.id !== payload.data.approval_id);
-      list.push(mapApproval(payload.data));
-      return { ...patch, approvals: list };
-    }
-    case "approval_resolved": {
-      const list = (patch.approvals ?? []).map((a) =>
-        a.id === payload.data.approval_id
-          ? {
-              ...a,
-              resolution:
-                payload.data.audit.resolution === "approve_once"
-                  ? ("approved" as const)
-                  : payload.data.audit.resolution === "allow_session"
-                    ? ("session" as const)
-                    : ("rejected" as const),
-              note: payload.data.audit.guidance_note ?? undefined,
-            }
-          : a,
-      );
-      return { ...patch, approvals: list };
-    }
+    case "workspace_updated":
+      return { workspaces: (current) => upsertWorkspaceItem(current, payload.data) };
+    case "quick_chat_updated":
+      return { quickChats: (current) => upsertQuickChatItem(current, payload.data) };
+    case "approval_requested":
+      return { approvals: (current) => upsertApprovalItem(current, payload.data) };
+    case "approval_resolved":
+      return {
+        approvals: (current) => resolveApprovalItem(current, payload.data.approval_id, payload.data.audit),
+      };
     case "user_input_requested":
-      return { ...patch, askQuestion: mapPendingInput(payload.data) };
+      return { askQuestion: () => mapPendingInput(payload.data) };
     case "user_input_submitted":
-      // 提交后保持本地已答状态（真实 selectedId 由发起提交的本地交互已知）
-      return { ...patch, askQuestionSubmitted: payload.data.request_id };
+      // 只把对应提问卡标记为已提交，不重建整张卡，也不影响其它视图切片
+      return {
+        askQuestion: (current) =>
+          current.id === payload.data.request_id ? { ...current, submitted: true } : current,
+      };
     case "turn_message_upserted":
       return {
-        ...patch,
         sessionMessage: {
           session_id: payload.data.session_id,
           message: mapTurnMessage(payload.data),
         },
       };
     default:
-      return patch;
+      return {};
   }
+}
+
+/** 纯函数：把单条事件应用到完整视图状态（供批量回放与单元测试使用）。 */
+export function applyEventToView(view: ViewState, env: EventEnvelope): ViewState {
+  const updaters = eventToViewUpdaters(env);
+  const next: ViewState = { ...view };
+  if (updaters.workspaces) next.workspaces = updaters.workspaces(view.workspaces);
+  if (updaters.quickChats) next.quickChats = updaters.quickChats(view.quickChats);
+  if (updaters.approvals) next.approvals = updaters.approvals(view.approvals);
+  if (updaters.askQuestion) next.askQuestion = updaters.askQuestion(view.askQuestion);
+  return next;
 }
 
 /** 会话消息聚合：把已映射的回合消息按 id upsert 进回合列表。 */
