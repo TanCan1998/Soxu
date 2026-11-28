@@ -14,7 +14,7 @@ pub mod web_assets;
 pub use native_assets::{NativeAssetError, NativeAssetGuard};
 pub use pty::{
     NullPtyEventSink, PortablePtyBackend, PtyBackend, PtyChild, PtyControl, PtyEventSink, PtyHost,
-    PtySpawnSpec,
+    PtySpawnSpec, UnavailablePtyBackend, discover_or_unavailable,
 };
 pub use schedules::{
     Clock as ScheduleClock, FinishOutcome, ManualClock, NullScheduleEventSink, ScheduleEventSink,
@@ -25,6 +25,6 @@ pub use scripts::{
     ScriptManifest, ScriptRun, ScriptRunner, ScriptService,
 };
 pub use server::build_router;
-pub use state::DaemonState;
+pub use state::{DAEMON_FEATURES_ENV, DaemonState, SCHEDULES_STORE_FILE};
 pub use store::SqliteStore;
 pub use web_assets::build_web_assets_router;

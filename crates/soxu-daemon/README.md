@@ -72,10 +72,7 @@ cargo run -p soxu-daemon
   （`TickReport::gated` 如实记录被压制的条数）。
 - **事件出口**：`ScheduleEventSink` 由宿主注入，事件只在持久化成功之后下发；
   `NullScheduleEventSink` 供只读宿主与回归使用。
-
-> 传输层现状：`RpcCommand` 同样尚无调度请求变体（与脚本 / PTY 域一致，见下节“传输层现状”）。
-> 本单交付 `ScheduleService::handle`（1:1 对应 `ScheduleCommand`）、`tick` / `tick_with_idle`
-> 与 `finish_run`，`RpcCommand` 转发需独立契约 PR 补齐后直接接线，未改动冻结的 `soxu-protocol`。
+- **传输层**：`RpcCommand` 的 6 个调度变体已由守护进程接线（见下节「M6 端到端接线」）。
 
 ## 受控 PTY 宿主（M6-A）
 
@@ -93,6 +90,9 @@ cargo run -p soxu-daemon
   不可按路径启动，已排除），Unix 用 `$SHELL` 或 `/bin/sh`。终端必须派生交互 shell，与脚本域「严禁解释器」的红线互不冲突。
 - 环境白名单之外，Windows 固定补 `SystemRoot`/`WINDIR`（机器级、不涉凭据）：ConPTY 的环境块为空时
   `CreateProcessW` 返回 `os error 87`，该基线是启动前提而非能力放宽。
+- 宿主装配不会因为本机没有可用 shell 而启动失败：`pty::discover_or_unavailable` 在发现失败时
+  返回 `UnavailablePtyBackend`，只在真正 `Open` 时回 `DriverUnavailable` 三要素错误。
+- **传输层**：`RpcCommand` 的 4 个 PTY 变体已由守护进程接线（见下节）。
 
 ## 能力门控（M6-A）
 
@@ -101,10 +101,41 @@ cargo run -p soxu-daemon
 `ErrorCode::Unsupported` 的三要素错误，且不下发任何 `ScriptLifecycleChanged` / `PtyActivity` / `ScheduleActivity` 事件。
 `FeatureGate::from_csv("managed_scripts,controlled_pty,schedules,heartbeats")` 供宿主按配置装配。
 
-> 传输层现状：`soxu-protocol` 的 `RpcCommand` 尚无脚本/PTY 请求变体（契约 PR #137 只交付了结果与事件变体，
-> 见 `docs/ops/PROGRESS.md` §4.14 衔接红线）。本单交付的是执行器与宿主的完整实现、门控与命令处理入口
-> （`ScriptService::handle` / `PtyHost::handle`），1:1 对应 `ScriptCommand` / `PtyCommand`；
-> `RpcCommand` 转发与 `ClientHello` 能力字段需独立契约 PR 补齐后直接接线，本单未改动冻结的 `soxu-protocol`。
+## M6 端到端接线（#150）
+
+`crates/soxu-daemon/src/state.rs` 把 `soxu-protocol` 的 14 个 M6 `RpcCommand` 变体从占位 `Unsupported`
+移出，经 `RpcCommand::into_domain_command` 折叠为 `RpcDomainCommand` 后 1:1 转发到三域服务：
+
+| 变体 | 域服务 | 前置条件 |
+|---|---|---|
+| `ListScripts` / `RunScript` / `StopScript` / `InspectScript` | `ScriptService::handle` | `managed_scripts` 已声明 |
+| `ListSchedules` / `CreateSchedule` / `UpdateSchedule` / `DisableSchedule` / `DeleteSchedule` / `TriggerSchedule` | `ScheduleService::handle` | `schedules` 或 `heartbeats` 已声明 |
+| `OpenPty` / `WritePty` / `ResizePty` / `ClosePty` | `PtyHost::handle` | `controlled_pty` 已声明 |
+
+- **能力位来源**：`SOXU_DAEMON_FEATURES`（逗号分隔令牌，未设置即全关）；也可由宿主/测试用
+  `DaemonState::with_feature_gate` 注入。线缆级 `ClientHello` 尚无能力字段（`soxu-protocol` 冻结），
+  因此门控当前是**守护进程级**的：将来握手携带能力集合时只需灌入同一个 `FeatureGate`，判定逻辑不变。
+- **顺序红线**：先判能力位、再解析工作区根、最后才调域服务。能力位关闭时即便是未知
+  `workspace_id` / `schedule_id` 也返回 `Unsupported`（而非 `NotFound`），且零事件下发。
+- **工作区根解析**：`Local` 工作区取项目登记的 `root_path`（绝不使用 `~` 脱敏展示路径），
+  `Worktree` 复用宿主接入复核（`resolve_ready_worktree_dir`）；归档或待恢复的工作区一律拒绝。
+- **停得动优先**：`StopScript` / `InspectScript` / `WritePty` / `ResizePty` / `ClosePty` 以域内标识定位，
+  **不**解析工作区根——停掉一个已经失去工作区的失控进程树或关闭失效终端会话不能被路径复核挡住。
+  为此 `ScriptService::handle` 与 `PtyHost::handle` 的工作区根参数为 `Option<&Path>`。
+- **事件广播**：三域事件经 `DaemonEvent::ScriptLifecycleChanged` / `ScheduleActivity` / `PtyActivity`
+  走与其余事件完全相同的落盘 + 广播管线（同一把顺序锁、同一 `seq` 序列），因此 `seq` 严格单调、
+  断线可用 `after_seq` 追平；事件只经订阅通道下发，未订阅的客户端不收到、也不回放历史。
+- **审批与注入面**：RPC 层原样透传 `approval_id` 与全部参数，不重写、不预校验；高风险审批门、
+  清单注入面校验、输出上限、进程树回收、会话上限全部沿用域服务，接线层不新增旁路。
+- **运行归属**：`RunScriptRequest.workspace_id` 原样写入运行快照与生命周期事件（不再由工作区根末段猜标识），
+  客户端可直接把事件回挂到具体工作区。
+- **调度持久化**：有数据目录时 `ScheduleService` 绑定 `<data_dir>/schedules.json`（fail-closed 加载）。
+- **宿主驱动口**：`DaemonState::tick_schedules(agent_idle)` 推进一次调度（cron / 周期 / 心跳），
+  `DaemonState::finish_schedule_run(result)` 收敛宿主执行完的触发结果。二者由宿主按自身节拍调用
+  （独立可执行入口的节拍驱动不在本 PR 的 Owned Paths 内）。
+
+> 传输层现状：`server.rs` 无需改动——HTTP `/api/rpc` 与 WS 上行都经 `handle_transport_rpc` →
+> `dispatch_command` 落到本接线，事件沿用既有广播信封自动下发。
 
 ## 测试
 
@@ -117,4 +148,7 @@ cargo test -p soxu-daemon
 超时后进程树有界回收、环境白名单隔离、幂等键去重、PTY 分片序号与终结片、关闭幂等、
 会话上限与空闲回收、真实 ConPTY/openpty 冒烟），以及 M6-C 专项 `tests/schedules.rs`
 （门控缺省关闭与事件零下发、创建/手动触发幂等、注入时钟下的周期推进与跳过补发、
-失败重试沿用同一次运行、停用/删除收敛、有效期过期、定义持久化恢复、非 UTC 时区拒绝）。
+失败重试沿用同一次运行、停用/删除收敛、有效期过期、定义持久化恢复、非 UTC 时区拒绝），
+以及 M6 端到端接线专项 `tests/domain_wiring.rs`（能力关闭时 14 个变体拒绝且零事件、
+部分声明只放行自身域、声明后 14 个变体全部真实路由、脚本生命周期事件与 `seq` 严格单调、
+PTY 分片序号与终结片、调度触发/结果事件、WS 订阅者收到事件而后连客户端不回放）。

@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-pub use backend::PortablePtyBackend;
+pub use backend::{PortablePtyBackend, UnavailablePtyBackend, discover_or_unavailable};
 pub use session::PtySession;
 
 /// 同时存活的 PTY 会话上限。
@@ -135,14 +135,26 @@ impl PtyHost {
     }
 
     /// 处理一条 PTY 域命令。
+    ///
+    /// 只有 `Open` 需要工作区根（用于复核起点目录）；`Write` / `Resize` / `Close`
+    /// 以 `pty_id` 定位会话，传 `None` 即可——关闭一个已经失去工作区的终端会话
+    /// 不能被路径复核挡住。
     pub fn handle(
         &self,
-        workspace_root: &Path,
+        workspace_root: Option<&Path>,
         command: PtyCommand,
     ) -> Result<PtyCommandResult, ActionableError> {
         self.gate.require(DaemonFeature::ControlledPty)?;
         match command {
             PtyCommand::Open(request) => {
+                let workspace_root = workspace_root.ok_or_else(|| {
+                    ActionableError::new(
+                        ErrorCode::ValidationFailed,
+                        "打开终端会话必须绑定工作区根目录",
+                        "该请求未打开会话，未派生任何进程",
+                        "请由守护进程按 workspace_id 解析受控目录后重试",
+                    )
+                })?;
                 Ok(PtyCommandResult::Opened(soxu_protocol::OpenPtyResponse {
                     session: self.open(workspace_root, request)?,
                 }))
