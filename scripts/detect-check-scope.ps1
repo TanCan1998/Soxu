@@ -70,7 +70,8 @@ $DocsOrGovernancePaths = @(
   "aoci.txt", "aoci.meta.txt", "aoci.code.txt", "aoci.database.txt",
   ".editorconfig", ".gitattributes", ".gitignore", ".gitleaks.toml",
   ".github/workflows/release.yml",
-  "paseo.json", "scripts/mise-doctor.ps1", "scripts/setup-hooks.ps1", "scripts/setup-worktree.ps1"
+  "paseo.json", "scripts/mise-doctor.ps1", "scripts/setup-hooks.ps1", "scripts/setup-worktree.ps1",
+  "scripts/collect-runtime-metrics.ps1"
 )
 
 $reasons = [System.Collections.Generic.List[string]]::new()
