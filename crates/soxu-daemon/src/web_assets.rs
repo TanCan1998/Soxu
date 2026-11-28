@@ -1,6 +1,6 @@
 //! `apps/mobile-web` 构建产物的 `rust-embed` 内嵌伺服：静态资产路由、MIME 映射与 SPA 回退。
 
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -87,13 +87,32 @@ async fn serve_index() -> Response {
     }
 }
 
-async fn serve_asset(uri: axum::http::Uri) -> Response {
+async fn serve_asset(uri: axum::http::Uri, headers: HeaderMap) -> Response {
     // API 与 WS 前缀的未知路径返回 JSON 404，不被 SPA 回退吞掉；
     // 其余带扩展名的路径必须真实命中嵌入资产，未知资产返回 404；
     // 无扩展路径视为前端路由，回 index.html。
     let raw_path = uri.path();
     if raw_path.starts_with("/api/") || raw_path.starts_with("/ws") {
         return api_not_found();
+    }
+    // 声明 JSON 的请求不是浏览器导航：返回 JSON 400 明确拒绝，
+    // 绝不把 axum extractor 拒绝（如无效枚举取值）静默成 200 HTML，
+    // 否则客户端会把协议错误误读为成功。
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/json"))
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ActionableError::new(
+                ErrorCode::ValidationFailed,
+                "请求负载无法按协议解析",
+                "该请求未被执行",
+                "请核对命令名称与参数取值（枚举字段仅接受协议定义的族形取值）",
+            )),
+        )
+            .into_response();
     }
     let path = raw_path.trim_start_matches('/');
     let has_extension = path.rsplit('.').next().is_some_and(|ext| {

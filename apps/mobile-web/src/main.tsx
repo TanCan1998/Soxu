@@ -493,7 +493,9 @@ function MobileAppInner({
   const activeQuickChat = quickChats.find((q) => q.id === selectedQuickChatId) ?? quickChats[0];
   const pendingApprovals = approvals.filter((a) => !a.resolution);
   const resolvedApprovals = approvals.filter((a) => Boolean(a.resolution));
-  const isRunning = targetKind === "workspace" && activeWorkspace.bucket === "running";
+  const isRunning = targetKind === "workspace" && activeWorkspace?.bucket === "running";
+  // 真实快照可能为空（新 daemon 无任何项目/对话）：渲染零会话引导态而非崩溃
+  const hasNoTargets = !activeWorkspace && !activeQuickChat;
 
   const activeWorkspaces = workspaces.filter((w) => !w.archived);
   const pinnedWorkspaces = activeWorkspaces.filter((w) => w.pinned);
@@ -674,6 +676,7 @@ function MobileAppInner({
   }
 
   function handleBranchFromTurn(turn: TurnMessage) {
+    if (!activeWorkspace) return;
     const id = `wks-fork-${Date.now().toString().slice(-4)}`;
     const branch = `feat/fork-${turn.id.replace(/[^a-z0-9]/gi, "").slice(-6)}`;
     const forked: WorkspaceItem = {
@@ -842,7 +845,7 @@ function MobileAppInner({
         flashToast("已加入指令队列，当前回合结束时顺延发送");
         return;
       }
-      if (isRunning && activeBehavior === "interrupt") {
+      if (isRunning && activeBehavior === "interrupt" && activeWorkspace) {
         setWorkspaces((prev) => prev.map((w) => (w.id === activeWorkspace.id ? { ...w, bucket: "done" } : w)));
       }
     }
@@ -1704,7 +1707,7 @@ function MobileAppInner({
 
                 <div className="flex flex-col gap-1">
                   {filteredDiffFiles.map((file) => {
-                    const selected = file.path === activeDiffFile.path;
+                    const selected = file.path === activeDiffFile?.path;
                     return (
                       <button
                         key={file.path}
@@ -1732,16 +1735,24 @@ function MobileAppInner({
               </div>
 
               <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] truncate">
-                {activeDiffFile.path} · {t("inspector.baseBranchLabel", { branch: diffBase === "main" ? "origin/main" : diffBase === "checkpoint" ? "#04" : prefs.defaultBranch })}
+                {activeDiffFile ? (
+                  <>
+                    {activeDiffFile.path} · {t("inspector.baseBranchLabel", { branch: diffBase === "main" ? "origin/main" : diffBase === "checkpoint" ? "#04" : prefs.defaultBranch })}
+                  </>
+                ) : (
+                  <span>协议 v1 尚未提供会话 Diff 事件，暂无变更可展示</span>
+                )}
               </div>
-              <CodeDiffView
-                filePath={activeDiffFile.path}
-                rows={activeDiffFile.rows}
-                layout="unified"
-                showLineNumbers={prefs.showLineNumbers}
-                wrap={prefs.codeWordWrap}
-                onSubmitLineComment={handleSubmitDiffLineComment}
-              />
+              {activeDiffFile && (
+                <CodeDiffView
+                  filePath={activeDiffFile.path}
+                  rows={activeDiffFile.rows}
+                  layout="unified"
+                  showLineNumbers={prefs.showLineNumbers}
+                  wrap={prefs.codeWordWrap}
+                  onSubmitLineComment={handleSubmitDiffLineComment}
+                />
+              )}
             </>
           )}
 
@@ -1790,10 +1801,11 @@ function MobileAppInner({
     );
   }
 
-  const activeScopeTitle =
-    targetKind === "quick"
-      ? activeQuickChat.title
-      : `${activeWorkspace.project} / ${activeWorkspace.branch}`;
+  const activeScopeTitle = targetKind === "quick"
+    ? activeQuickChat?.title ?? t("tabs.newQuick")
+    : activeWorkspace
+      ? `${activeWorkspace.project} / ${activeWorkspace.branch}`
+      : t("tabs.emptyTitle");
 
   const isFloatingHeader = sizeClass !== "wide";
   const isWideComposerRow = !isFoldDualH && vp.width >= 680;
@@ -2249,7 +2261,7 @@ function MobileAppInner({
                   )
                 )}
               </div>
-            ) : (
+            ) : activeWorkspace ? (
               <>
                 {/* 会话信息微条 */}
                 <div className="flex items-center justify-between gap-2 text-xs text-[var(--soxu-text-tertiary)] pb-1 border-b border-[var(--soxu-border-hairline)]">
@@ -2511,6 +2523,11 @@ function MobileAppInner({
                   onCopyText={() => flashToast("已复制选中内容")}
                 />
               </>
+            ) : (
+              /* workspace 会话但 activeWorkspace 暂缺（会话列表尚未同步）：中性空态 */
+              <div className="py-16 px-4 flex flex-col items-center justify-center gap-2 text-center">
+                <div className="text-xs text-[var(--soxu-text-tertiary)]">会话列表同步中，请稍候…</div>
+              </div>
             )}
           </>
         )}
@@ -2767,6 +2784,7 @@ function MobileAppInner({
                       variant="destructive"
                       size="icon"
                       onClick={() => {
+                        if (!activeWorkspace) return;
                         setWorkspaces((prev) =>
                           prev.map((w) => (w.id === activeWorkspace.id ? { ...w, bucket: "done" } : w)),
                         );
@@ -3035,7 +3053,21 @@ function MobileAppInner({
         className="h-dvh flex flex-col bg-[var(--soxu-surface-canvas)] text-[var(--soxu-text-primary)] overflow-hidden"
         style={{ "--soxu-kb-inset": `${vp.keyboardInset}px` } as React.CSSProperties}
       >
-        {isFoldDualH ? (
+        {hasNoTargets ? (
+          /* 零会话引导态：daemon 快照尚无任何项目工作树或快速对话（不伪造数据） */
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center soxu-safe-top soxu-safe-bottom">
+            <div className="h-12 w-12 rounded-2xl bg-[var(--soxu-surface-card)] border border-[var(--soxu-border-subtle)] flex items-center justify-center">
+              <Inbox className="h-5 w-5 text-[var(--soxu-text-tertiary)]" strokeWidth={1.5} />
+            </div>
+            <div className="text-sm font-semibold">守护服务已连接，暂无会话</div>
+            <div className="text-xs text-[var(--soxu-text-tertiary)] max-w-[300px] leading-relaxed">
+              当前守护进程还没有项目工作树或快速对话。在桌面端创建后，这里会实时同步出现。
+            </div>
+            <div className="text-[11px] soxu-mono text-[var(--soxu-text-tertiary)] mt-1">
+              {t("mobile.cursorPrefix", { seq: seqCursor })}
+            </div>
+          </div>
+        ) : isFoldDualH ? (
           /* 折叠屏展开 / 左右双屏分栏（跨铰链零控件跨缝） */
           <div className="flex-1 min-h-0 flex w-full overflow-hidden">
             <section
