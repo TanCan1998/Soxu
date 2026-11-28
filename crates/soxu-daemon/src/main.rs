@@ -330,6 +330,57 @@ async fn main() -> anyhow::Result<()> {
         "Soxu daemon started"
     );
 
-    axum::serve(listener, build_router(state)).await?;
+    axum::serve(listener, build_router(Arc::clone(&state)))
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+    // 关停顺序：先停止接受新请求（上一步），再释放 `DaemonState`。其 `Drop` 会关闭
+    // 全部 PTY 会话、有界等待输出泵与脚本任务收敛，未确认的回收会写「回收未确认」日志。
+    drop(state);
+    info!("Soxu daemon stopped");
     Ok(())
+}
+
+/// 等待关停信号：Ctrl-C（全平台）、Unix `SIGTERM` 与 Windows `CTRL_BREAK`。
+///
+/// 信号监听失败时不得把守护进程变成「无法关停」：打警告后继续等待另一个信号源。
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            tracing::warn!(%error, "无法监听 Ctrl-C 关停信号");
+            std::future::pending::<()>().await;
+        }
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "无法监听 SIGTERM 关停信号");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    // Windows 无法向指定进程组发送 CTRL_C（只能 CTRL_BREAK），两者都要接住，
+    // 否则服务/脚本只能靠强杀退出，PTY 与脚本就得不到有界回收。
+    #[cfg(windows)]
+    let terminate = async {
+        match tokio::signal::windows::ctrl_break() {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "无法监听 CTRL_BREAK 关停信号");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(any(unix, windows)))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {}
+        () = terminate => {}
+    }
+    info!("收到关停信号，开始优雅关停");
 }

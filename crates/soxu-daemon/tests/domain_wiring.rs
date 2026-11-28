@@ -868,7 +868,9 @@ async fn controlled_pty_rpc_streams_sequenced_output_chunks() {
         other => panic!("期望退出事件，实际 {other:?}"),
     }
 
-    let written = expect_ok(rpc(
+    // 语义变更（资源治理阶段 2，P0-2）：自然退出后会话进入终态并退出容量计数，
+    // 后续写入必须是明确的冲突错误，而不是像旧实现那样写进已死 shell 被静默接受。
+    let written = error_of(rpc(
         &state,
         "pty-write",
         RpcCommand::WritePty(WritePtyRequest {
@@ -876,14 +878,15 @@ async fn controlled_pty_rpc_streams_sequenced_output_chunks() {
             data: PtyInputData::try_from("echo hi".to_owned()).expect("输入"),
         }),
     ));
-    match written {
-        RpcResultData::ControlledPty(PtyCommandResult::Written(response)) => {
-            assert_eq!(response.accepted_bytes, 7);
-        }
-        other => panic!("期望写入回执，实际 {other:?}"),
-    }
+    assert_eq!(written.code, ErrorCode::Conflict, "已结束会话必须拒绝写入");
+    assert!(
+        written.summary_zh.contains("已结束"),
+        "拒绝原因需说明会话已结束，实际：{}",
+        written.summary_zh
+    );
 
-    let resized = expect_ok(rpc(
+    // 同上：终态会话不再接受尺寸变更。
+    let resized = error_of(rpc(
         &state,
         "pty-resize",
         RpcCommand::ResizePty(ResizePtyRequest {
@@ -891,12 +894,11 @@ async fn controlled_pty_rpc_streams_sequenced_output_chunks() {
             size: PtySize::new(120, 40).expect("合法尺寸"),
         }),
     ));
-    match resized {
-        RpcResultData::ControlledPty(PtyCommandResult::Resized(response)) => {
-            assert_eq!(response.session.size, PtySize::new(120, 40).expect("尺寸"));
-        }
-        other => panic!("期望尺寸回执，实际 {other:?}"),
-    }
+    assert_eq!(
+        resized.code,
+        ErrorCode::Conflict,
+        "已结束会话必须拒绝调整尺寸"
+    );
 
     let closed = expect_ok(rpc(
         &state,
@@ -908,17 +910,18 @@ async fn controlled_pty_rpc_streams_sequenced_output_chunks() {
     ));
     match closed {
         RpcResultData::ControlledPty(PtyCommandResult::Closed(response)) => {
-            assert_eq!(response.session.state, PtySessionState::Closed);
+            // 自然退出的会话已进入终态，close 走幂等分支返回既有快照（Exited），
+            // 不会把终态改写成 Closed，也不会重复广播 Closed 事件。
+            assert!(
+                matches!(
+                    response.session.state,
+                    PtySessionState::Exited | PtySessionState::Closed
+                ),
+                "关闭回执必须是终态，实际：{:?}",
+                response.session.state
+            );
         }
         other => panic!("期望关闭回执，实际 {other:?}"),
-    }
-    let closed_event = next_event(&mut rx, |payload| {
-        pty_event_of(payload).is_some_and(|event| matches!(event, PtyEvent::Closed(_)))
-    })
-    .await;
-    match pty_event_of(&closed_event.payload) {
-        Some(PtyEvent::Closed(snapshot)) => assert_eq!(snapshot.pty_id, session.pty_id),
-        other => panic!("期望关闭事件，实际 {other:?}"),
     }
 }
 
