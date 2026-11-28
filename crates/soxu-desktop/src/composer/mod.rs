@@ -724,6 +724,7 @@ mod tests {
     /// 有变更时点击药丸记录聚焦 Diff 动作，并映射到 `ReviewDiff` 焦点层。
     #[test]
     fn change_pill_records_focus_diff_action() {
+        let _guard = crate::composer::changes::sink_test_lock();
         ActionSink::clear();
         let mut state = ComposerState::placeholder();
         state.changes = ChangeSummary::new(3, 47, 4);
@@ -742,6 +743,7 @@ mod tests {
     /// 权限按钮循环：6 档按顺序推进并逐次记录动作。
     #[test]
     fn permission_button_cycles_and_records() {
+        let _guard = crate::composer::changes::sink_test_lock();
         ActionSink::clear();
         let mut state = ComposerState::placeholder();
         assert_eq!(
@@ -794,6 +796,7 @@ mod tests {
     /// 芯片移除记录动作；不存在时返回 false 且不记录。
     #[test]
     fn removing_chip_records_action() {
+        let _guard = crate::composer::changes::sink_test_lock();
         ActionSink::clear();
         let mut state = ComposerState::placeholder();
         state
@@ -812,6 +815,7 @@ mod tests {
     /// 移交范围微开关翻转记录动作并改变范围契约。
     #[test]
     fn handoff_scope_toggle_records_action() {
+        let _guard = crate::composer::changes::sink_test_lock();
         ActionSink::clear();
         let mut state = ComposerState::placeholder();
         state.handoff.select(soxu_protocol::HandoffSelection {
@@ -871,6 +875,7 @@ mod tests {
     /// 斜杠命令过滤在状态层可用（纯内存，不触发 I/O 动作）。
     #[test]
     fn slash_command_filter_available_without_actions() {
+        let _guard = crate::composer::changes::sink_test_lock();
         ActionSink::clear();
         let hits = filter_slash_commands("/pl");
         assert_eq!(hits.first().map(|c| c.name), Some("/plan"));

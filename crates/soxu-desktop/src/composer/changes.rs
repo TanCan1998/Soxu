@@ -153,6 +153,16 @@ impl ActionSink {
     }
 }
 
+/// 动作槽的测试串行锁：`ActionSink` 是进程级全局队列，多个单测并发访问会互相清空。
+///
+/// 仅在 `#[cfg(test)]` 下编译，生产路径不引入任何锁开销。
+#[cfg(test)]
+pub(crate) fn sink_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    // 被毒化的锁只意味着某个测试已经失败，继续串行而不是二次 panic。
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +205,7 @@ mod tests {
     /// 动作槽先进先出，`drain` 后清空。
     #[test]
     fn action_sink_is_fifo_and_drains() {
+        let _guard = sink_test_lock();
         ActionSink::clear();
         ActionSink::push(ComposerAction::FocusDiff);
         ActionSink::push(ComposerAction::CyclePermission);

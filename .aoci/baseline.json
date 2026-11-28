@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-28T01:17:10Z",
+  "updated_at": "2026-11-28T01:19:57Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "3c4cdad71108031976292688519b14da3e243e4b7cbee0c606b5b1bdf7aba656",
-      "size": 118162,
-      "normalized_sha256": "3c4cdad71108031976292688519b14da3e243e4b7cbee0c606b5b1bdf7aba656"
+      "sha256": "7d63b50094217f57791b376ca54d37408ff75c243dfcca2ae927ff4da728f5df",
+      "size": 118189,
+      "normalized_sha256": "7d63b50094217f57791b376ca54d37408ff75c243dfcca2ae927ff4da728f5df"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -635,9 +635,9 @@
     },
     "crates/soxu-desktop/src/composer/changes.rs": {
       "role": "index",
-      "sha256": "6ea6b115b7f26d73e3f6660324b6990f7c6499c830ab64f5fa8cb2fee926ad1b",
-      "size": 8916,
-      "normalized_sha256": "6ea6b115b7f26d73e3f6660324b6990f7c6499c830ab64f5fa8cb2fee926ad1b"
+      "sha256": "fdd693942f3e2c3e50e63163b4b820507002247e50f57b3a6735f5dd25f5f928",
+      "size": 9449,
+      "normalized_sha256": "fdd693942f3e2c3e50e63163b4b820507002247e50f57b3a6735f5dd25f5f928"
     },
     "crates/soxu-desktop/src/composer/chips.rs": {
       "role": "index",
@@ -665,9 +665,9 @@
     },
     "crates/soxu-desktop/src/composer/mod.rs": {
       "role": "index",
-      "sha256": "f0169f324a2dbf6908f3676a1f0ce706a1863d971c9cc33edd1bf8d0c6727c38",
-      "size": 31151,
-      "normalized_sha256": "f0169f324a2dbf6908f3676a1f0ce706a1863d971c9cc33edd1bf8d0c6727c38"
+      "sha256": "1ca128525254a6912558d873f8cd04a0ee21b891bb3dce4228847f23b592ea5a",
+      "size": 31476,
+      "normalized_sha256": "1ca128525254a6912558d873f8cd04a0ee21b891bb3dce4228847f23b592ea5a"
     },
     "crates/soxu-desktop/src/composer/permission.rs": {
       "role": "index",
