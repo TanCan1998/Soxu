@@ -8,6 +8,9 @@
 //! - [`focus`]：7 层焦点上下文栈枚举与切换规则（纯逻辑）。
 //! - [`layout`]：400/640/1024 窗口断点与四栏布局策略（纯逻辑）。
 //! - [`composer`]：760px 同步宽输入舱（权限/移交/圆环遥测/芯片补全，纯内存视图模型）。
+//! - [`right_panel`]：右栏上下文与审阅检视器（`Diff`/`Files` 页签、行号槽与 400 行截断，纯内存视图模型）。
+//! - [`settings`]：7 分区设置弹窗（分区导航、几何降级与焦点捕获/还原）。
+//! - [`modals`]：核心业务模态宿主（提交/配对/回退/透视，含焦点锁定与脱敏契约）。
 //! - [`shell`]：四栏自适应工作台骨架视图（占位面板）。
 //!
 //! 二进制入口见 `main.rs`。
@@ -17,6 +20,9 @@ pub mod focus;
 pub mod font;
 pub mod i18n;
 pub mod layout;
+pub mod modals;
+pub mod right_panel;
+pub mod settings;
 pub mod shell;
 pub mod theme;
 
