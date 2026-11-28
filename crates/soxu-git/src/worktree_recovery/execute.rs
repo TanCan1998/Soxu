@@ -1,33 +1,31 @@
 //! 恢复执行：单次确认绑定、持久 journal、原生 Git 写入与重启只读复核（M3 #57-3）。
 //!
-//! 本模块只调用原生 Git（`worktree unlock` / `repair` / `prune` / `remove`），
-//! 不手改 Git 元数据、不做 best-effort 清理。每次执行都绑定一次预览摘要与短期有效期：
-//! 协调域持锁后重算预览并与确认逐项比对，任何漂移都作废该确认且零写入。
-//! 写入前先持久化意图与阶段，命令结束后回读结果；无法确认结局时保留足迹并
-//! 阻止同仓新执行，直到宿主按 journal 做只读裁决。
+//! 原生目录身份随审批预览绑定，在协调域持锁后及启动前复验。
+//! 当前只有解锁可执行 Git 写入。范围或数据保全证据不足的操作仅交付只读预览。
 
 use std::fmt;
-use std::path::{Component, Path, PathBuf};
-use std::process::Stdio;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
+
+use sha2::{Digest, Sha256};
+use tokio::sync::watch;
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
-use crate::probe::{COMMAND_TIMEOUT, OUTPUT_LIMIT};
+use crate::probe::{COMMAND_TIMEOUT, OUTPUT_LIMIT, native_path};
+use crate::worktree_lifecycle::identity::{AuthorizedDirectory, checked_directory};
 use crate::worktree_lifecycle::{
-    ExecutionResult, ExecutionStage, TargetState, WorktreeLifecycleError, state,
+    ExecutionResult, ExecutionStage, TargetState, WorktreeLifecycleError, read_intents, state,
 };
 use crate::{
-    GitError, GitProbe, LocalProject, ProjectOpenError, RecoveryOperation, WorktreeEntry,
-    WorktreeHead, WorktreeIdentity, WorktreeInventory, WorktreeInventoryError, WorktreeKind,
+    GitError, GitProbe, LocalProject, ProjectOpenError, RecoveryOperation, WorktreeHead,
+    WorktreeIdentity, WorktreeInventory, WorktreeInventoryError, WorktreeKind,
     WorktreeRegistrationCoordinator,
 };
 
 use super::journal::{self, JournalRecord, RecoveryExecutionRecord, RecoveryNote};
-use super::preview::{self, parse_prune_candidates, target_state_of};
+use super::preview::{self, target_state_of};
 use super::{
     EvidenceGap, ObservedWorktreeState, PartialCleanupRejection, PartialCleanupScope,
     PreviewObservation, PreviewOutcome, PruneRejection, RecoveryPreviewError,
@@ -37,8 +35,6 @@ use super::{
 
 /// 单次确认的最长有效期；宿主必须另取一次本机用户二次确认。
 const MAX_CONFIRMATION_WINDOW: Duration = Duration::from_secs(600);
-/// 允许的签发时钟偏移，防止用未来时间戳无限延长有效期。
-const MAX_ISSUED_SKEW: Duration = Duration::from_secs(60);
 
 /// 预览摘要：把一次预览的可确认事实压成固定 32 字节，供单次确认绑定。
 ///
@@ -74,7 +70,7 @@ impl fmt::Display for RecoveryPreviewDigest {
     }
 }
 
-/// 计算一次预览的摘要。宿主应把该值与预览一起展示，并由用户二次确认。
+/// 计算只读预览内容的摘要。写入授权使用 `RecoveryExecutionPreview::digest`。
 pub fn recovery_preview_digest(
     outcome: &PreviewOutcome,
     target_authorization: Option<&Path>,
@@ -89,37 +85,123 @@ pub fn recovery_preview_digest(
         }
     }
     encode_preview(outcome, &mut bytes);
-    RecoveryPreviewDigest(sha256(&bytes))
+    RecoveryPreviewDigest(Sha256::digest(bytes).into())
 }
 
-/// 单次执行确认。
-///
-/// 字段全部来自宿主已展示并获用户二次确认的预览；执行时不接受额外参数。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 供宿主展示后取得单次确认的预览，含无法由路径字符串重建的原生身份。
+#[derive(Debug)]
+pub struct RecoveryExecutionPreview {
+    outcome: PreviewOutcome,
+    binding: RecoveryBinding,
+    digest: RecoveryPreviewDigest,
+}
+
+impl RecoveryExecutionPreview {
+    pub fn outcome(&self) -> &PreviewOutcome {
+        &self.outcome
+    }
+
+    pub fn digest(&self) -> RecoveryPreviewDigest {
+        self.digest
+    }
+
+    /// 宿主应展示拒绝原因，并在有拒绝时保留只读候选以供复核。
+    pub fn execution_blocker(&self) -> Option<&'static str> {
+        execution_blocker(self.binding.operation).or_else(|| rejection_code(&self.outcome))
+    }
+
+    /// 仅在本机用户确认已展示的预览后调用，保留同一执行 ID。
+    pub fn confirm(self, expires_at: SystemTime) -> RecoveryConfirmation {
+        RecoveryConfirmation {
+            binding: self.binding,
+            preview_digest: self.digest,
+            issued_at: SystemTime::now(),
+            expires_at,
+        }
+    }
+}
+
+/// 单次确认，绑定审批预览生成时的仓库、目标和协调域。
+#[derive(Debug, Clone)]
 pub struct RecoveryConfirmation {
-    /// 单次执行的持久身份；同 ID 重放一律拒绝。
-    pub execution_id: String,
-    pub operation: RecoveryOperation,
-    pub preview_digest: RecoveryPreviewDigest,
-    /// 预览使用的源仓库根（绝对路径）。
-    pub source_root: PathBuf,
-    /// 预览时记录的仓库身份；执行前重新打开必须一致。
-    pub repository: WorktreeIdentity,
-    /// 显式授权并已核对的单一目标；`prune` 与 `PartialCleanup` 的语义见文档。
-    pub target: Option<PathBuf>,
-    pub issued_at: SystemTime,
-    pub expires_at: SystemTime,
-    /// 高风险操作的独立二次确认：`prune` 多候选与在线移除必须为 `true`。
-    pub risk_acknowledged: bool,
-    /// 清理部分落盘时绑定的注册请求 ID。
-    pub partial_cleanup_request_id: Option<String>,
+    binding: RecoveryBinding,
+    preview_digest: RecoveryPreviewDigest,
+    issued_at: SystemTime,
+    expires_at: SystemTime,
 }
 
-/// 启动前的协作式取消标记。
-///
-/// 取消只在命令启动前被观察：一旦原生 Git 写入开始，结局仍会持久化到 journal。
-#[derive(Debug, Clone, Default)]
-pub struct RecoveryCancellation(Arc<AtomicBool>);
+#[derive(Debug, Clone)]
+struct RecoveryBinding {
+    execution_id: String,
+    operation: RecoveryOperation,
+    repository: WorktreeIdentity,
+    state_root: AuthorizedDirectory,
+    common_dir: AuthorizedDirectory,
+    target: Option<PathBuf>,
+    partial_cleanup_request_id: Option<String>,
+    directories: Vec<AuthorizedDirectory>,
+    target_admin: Option<AuthorizedDirectory>,
+    git_program: PathBuf,
+    git_version: Vec<u8>,
+    observed_at: SystemTime,
+}
+
+impl RecoveryBinding {
+    fn request(&self) -> RecoveryPreviewRequest<'_> {
+        RecoveryPreviewRequest {
+            source_root: &self.repository.root,
+            coordinator_state_root: Some(self.state_root.path()),
+            target_authorization: self.target.as_deref(),
+            operation: self.operation,
+            partial_cleanup_request_id: self.partial_cleanup_request_id.as_deref(),
+        }
+    }
+
+    fn digest(&self, outcome: &PreviewOutcome) -> RecoveryPreviewDigest {
+        let mut bytes = b"SOXURP2\0".to_vec();
+        push_field(&mut bytes, self.execution_id.as_bytes());
+        push_field(&mut bytes, self.git_program.as_os_str().as_encoded_bytes());
+        push_field(&mut bytes, &self.git_version);
+        for directory in [&self.state_root, &self.common_dir]
+            .into_iter()
+            .chain(&self.directories)
+            .chain(&self.target_admin)
+        {
+            push_field(&mut bytes, directory.path().as_os_str().as_encoded_bytes());
+            bytes.extend_from_slice(&directory.identity().to_bytes());
+        }
+        bytes
+            .extend_from_slice(recovery_preview_digest(outcome, self.target.as_deref()).as_bytes());
+        RecoveryPreviewDigest(Sha256::digest(bytes).into())
+    }
+
+    fn refresh(&self) -> Result<(), RecoveryExecuteError> {
+        self.state_root.refresh()?;
+        for directory in std::iter::once(&self.common_dir).chain(&self.directories) {
+            directory
+                .refresh()
+                .map_err(|_| RecoveryExecuteError::IdentityChanged)?;
+        }
+        if let Some(admin) = &self.target_admin {
+            let (observed, marker) = linked_admin(&self.repository, required_target(self)?)?;
+            if observed.identity() != admin.identity() || observed.path() != admin.path() {
+                return Err(RecoveryExecuteError::IdentityChanged);
+            }
+            verify_backlink(admin, &marker)?;
+        }
+        Ok(())
+    }
+}
+
+/// 协作式取消。命令已启动时尝试回收直接进程，并持久化未知结局。
+#[derive(Debug, Clone)]
+pub struct RecoveryCancellation(watch::Sender<bool>);
+
+impl Default for RecoveryCancellation {
+    fn default() -> Self {
+        Self(watch::channel(false).0)
+    }
+}
 
 impl RecoveryCancellation {
     pub fn new() -> Self {
@@ -127,11 +209,11 @@ impl RecoveryCancellation {
     }
 
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.0.send_replace(true);
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        *self.0.borrow()
     }
 }
 
@@ -142,10 +224,8 @@ pub struct RecoveryObservation {
     pub inventory: WorktreeInventory,
     /// 绑定目标是否仍在清单中。
     pub target_registered: bool,
-    /// 绑定目标的目录状态；无目标操作（`prune`）为 `NotExamined`。
+    /// 通过原生目录身份复核后的目标状态。
     pub target_state: TargetState,
-    /// `prune` 后仍报告的候补管理目录；其他操作恒为空。
-    pub remaining_candidates: Vec<Vec<u8>>,
 }
 
 /// 一次执行的结果分类。
@@ -207,11 +287,13 @@ pub enum RecoveryExecuteError {
     AlreadyAttempted(Box<RecoveryExecutionRecord>),
     #[error("同一仓库或目标仍有未裁决的执行：{0}")]
     ExecutionStillUnknown(String),
-    #[error("高风险操作缺少独立二次确认")]
-    ConfirmationRequired,
+    #[error("当前执行入口缺少所需证据：{0}")]
+    EvidenceUnavailable(&'static str),
+    #[error("执行任务未返回结论，请检查持久记录")]
+    OwnerLost,
     #[error("清理部分落盘的范围无法证明，必须保留并报告")]
     UnprovableFootprint,
-    #[error("执行已取消，确认未被消费")]
+    #[error("恢复执行在启动 Git 前已取消")]
     Cancelled,
     #[error("仓库身份在执行与预览之间发生变化")]
     IdentityChanged,
@@ -228,11 +310,28 @@ pub enum RecoveryExecuteError {
 }
 
 impl GitProbe {
-    /// 按单次确认执行一次恢复写入。
-    ///
-    /// 流程：校验有效期与字段 → 取协调域锁 → 拒绝重放与未裁决预约 → 重算预览并比对摘要
-    /// → 复核仓库身份 → 二次确认判定 → 持久化 `Prepared`/`Started` → 原生 Git
-    /// → 持久化命令结果 → 回读清单并分类 → 持久化 `Observed`。
+    /// 只读生成供本机用户审批的预览。调用方持续提供宿主独占的写入边界，
+    /// 并排除域外 Git、任务租约及其他进程对授权目录和路径链的并发变更。
+    /// `registration.lock` 只串行化共享协调域的 Soxu 进程。
+    pub async fn prepare_recovery(
+        &self,
+        coordinator: &WorktreeRegistrationCoordinator,
+        execution_id: &str,
+        request: RecoveryPreviewRequest<'_>,
+    ) -> Result<RecoveryExecutionPreview, RecoveryExecuteError> {
+        crate::worktree_lifecycle::validate_request_id(execution_id)?;
+        let binding = bind_identity(self, coordinator, execution_id, request).await?;
+        let outcome = preview::build(self, binding.request()).await?;
+        verify_repository_identity(self, &binding).await?;
+        let digest = binding.digest(&outcome);
+        Ok(RecoveryExecutionPreview {
+            outcome,
+            binding,
+            digest,
+        })
+    }
+
+    /// 执行已确认的恢复操作。命令与持久化任务持锁至结果落盘，即使调用方先返回。
     pub async fn execute_recovery(
         &self,
         coordinator: &WorktreeRegistrationCoordinator,
@@ -268,157 +367,227 @@ async fn execute(
     confirmation: &RecoveryConfirmation,
     cancellation: Option<&RecoveryCancellation>,
 ) -> Result<RecoveryExecutionOutcome, RecoveryExecuteError> {
-    validate_confirmation(confirmation)?;
+    let binding = &confirmation.binding;
+    if let Some(reason) = execution_blocker(binding.operation) {
+        return Err(RecoveryExecuteError::EvidenceUnavailable(reason));
+    }
+    check_start(confirmation, cancellation)?;
     let state_root = &coordinator.state_root;
+    if binding.state_root.path() != state_root.path()
+        || binding.state_root.identity() != state_root.identity()
+    {
+        return Err(RecoveryExecuteError::IdentityChanged);
+    }
     let lock = state::acquire_state_lock(state_root).await?;
-
-    if let Some(existing) = journal::read(state_root, &confirmation.execution_id)? {
+    check_start(confirmation, cancellation)?;
+    if let Some(existing) = journal::read(state_root, &binding.execution_id)? {
         return Err(RecoveryExecuteError::AlreadyAttempted(Box::new(
             existing.record,
         )));
     }
     for record in journal::read_all(state_root)? {
-        if record.record.reserves_scope() && same_scope(&record.record, confirmation) {
+        if record.record.reserves_scope()
+            && (same_scope(&record.record, binding)
+                || record
+                    .common_identity
+                    .is_none_or(|identity| identity == binding.common_dir.identity()))
+        {
             return Err(RecoveryExecuteError::ExecutionStillUnknown(
                 record.record.execution_id,
             ));
         }
     }
-
-    // 在同一协调域内重算预览：外部改动、授权复用或换目标都会命中摘要漂移。
-    lock.refresh(state_root)?;
-    let preview = recompute_preview(git, coordinator, confirmation).await?;
-    let digest = recovery_preview_digest(&preview, confirmation.target.as_deref());
-    if digest != confirmation.preview_digest {
+    verify_repository_identity(git, binding).await?;
+    let preview = preview::build(git, binding.request()).await?;
+    if binding.digest(&preview) != confirmation.preview_digest {
         return Err(RecoveryExecuteError::PreviewDrift);
     }
-    verify_repository_identity(git, confirmation).await?;
-    let binding = bind_evidence(&preview, confirmation)?;
-    if let Some(rejection) = binding.rejection {
-        return Err(RecoveryExecuteError::PreviewRejected(rejection));
+    if let Some(reason) = rejection_code(&preview) {
+        return Err(RecoveryExecuteError::PreviewRejected(reason));
     }
-    if binding.requires_second_confirmation && !confirmation.risk_acknowledged {
-        return Err(RecoveryExecuteError::ConfirmationRequired);
-    }
-    if confirmation.operation == RecoveryOperation::PartialCleanup && !binding.nothing_to_clean {
-        return Err(RecoveryExecuteError::UnprovableFootprint);
-    }
-    if cancellation.is_some_and(RecoveryCancellation::is_cancelled) {
-        return Err(RecoveryExecuteError::Cancelled);
-    }
-
-    let mut record = RecoveryExecutionRecord {
-        execution_id: confirmation.execution_id.clone(),
-        operation: confirmation.operation,
-        source: confirmation.repository.clone(),
-        target: confirmation.target.clone(),
-        stage: ExecutionStage::Prepared,
-        result: ExecutionResult::NotStarted,
-        recorded_at: SystemTime::now(),
-        started_at: None,
-        observed_at: None,
-        note: RecoveryNote::NotStarted,
-        blocked: false,
-    };
-    lock.refresh(state_root)?;
-    journal::begin(
-        state_root,
-        &JournalRecord {
-            record: record.clone(),
-            preview_digest: digest.0,
-        },
-    )?;
-
-    if confirmation.operation == RecoveryOperation::PartialCleanup {
-        // 预览已证明没有可清理的宿主资产：只持久化结论，不触碰任何路径。
-        record.stage = ExecutionStage::Observed;
-        record.result = ExecutionResult::Succeeded;
-        record.observed_at = Some(SystemTime::now());
-        record.note = RecoveryNote::NothingToClean;
-        lock.refresh(state_root)?;
-        rewrite_journal(state_root, &record, digest.0)?;
-        return Ok(RecoveryExecutionOutcome::NothingToClean { record });
-    }
-
-    let started_at = SystemTime::now();
-    let mut started = record.clone();
-    started.stage = ExecutionStage::Started;
-    started.started_at = Some(started_at);
-    started.result = ExecutionResult::Unknown {
-        stop_confirmed: false,
-        reason: "running".to_owned(),
-    };
-    lock.refresh(state_root)?;
-    rewrite_journal(state_root, &started, digest.0)?;
-
-    let command = match native_command(git, confirmation) {
-        Ok(command) => command,
-        Err(error) => {
-            // 参数在启动前就无法构造：命令未运行，留下可作为结论的记录。
-            let mut failed = started.clone();
-            failed.stage = ExecutionStage::Observed;
-            failed.started_at = None;
-            failed.result = ExecutionResult::SpawnFailed;
-            failed.observed_at = Some(SystemTime::now());
-            failed.note = RecoveryNote::UnknownOutcome;
-            failed.blocked = true;
-            lock.refresh(state_root)?;
-            rewrite_journal(state_root, &failed, digest.0)?;
-            return Err(error);
+    let command = match preview {
+        PreviewOutcome::Unlock(preview) => {
+            let target = required_target(binding)?;
+            if preview.candidate.path.to_path_buf().as_deref() != Ok(target) {
+                return Err(RecoveryExecuteError::PreviewDrift);
+            }
+            let target = crate::worktree_lifecycle::native_command_path(target)?;
+            let mut command = git.command(&binding.repository.root);
+            command.args(["worktree", "unlock", "--"]).arg(target);
+            Some(command)
         }
+        PreviewOutcome::PartialCleanup(preview)
+            if preview.scope == PartialCleanupScope::TargetAbsent =>
+        {
+            let intent = read_intents(state_root)?
+                .into_iter()
+                .find(|intent| {
+                    Some(intent.request_id.as_str())
+                        == binding.partial_cleanup_request_id.as_deref()
+                })
+                .ok_or(RecoveryExecuteError::UnprovableFootprint)?;
+            let target = required_target(binding)?;
+            if intent.source != binding.repository || intent.target != target {
+                return Err(RecoveryExecuteError::UnprovableFootprint);
+            }
+            let observation = git
+                .diagnose_registration_with_target(
+                    state_root.path(),
+                    &intent.request_id,
+                    &binding.repository.root,
+                    target,
+                )
+                .await?
+                .ok_or(RecoveryExecuteError::UnprovableFootprint)?;
+            if observation.target_state != TargetState::Absent
+                || observation.target_registered
+                || observation.ref_present
+            {
+                return Err(RecoveryExecuteError::UnprovableFootprint);
+            }
+            None
+        }
+        _ => return Err(RecoveryExecuteError::UnprovableFootprint),
     };
-    let result = match command {
-        Some(mut command) => run_native(&mut command, OUTPUT_LIMIT, COMMAND_TIMEOUT).await,
-        None => ExecutionResult::Succeeded,
+    lock.refresh(state_root)?;
+    binding.refresh()?;
+    check_start(confirmation, cancellation)?;
+    let record = JournalRecord {
+        record: RecoveryExecutionRecord {
+            execution_id: binding.execution_id.clone(),
+            operation: binding.operation,
+            source: binding.repository.clone(),
+            target: binding.target.clone(),
+            stage: ExecutionStage::Prepared,
+            result: ExecutionResult::NotStarted,
+            recorded_at: SystemTime::now(),
+            started_at: None,
+            observed_at: None,
+            note: RecoveryNote::NotStarted,
+            blocked: true,
+        },
+        preview_digest: confirmation.preview_digest.0,
+        common_identity: Some(binding.common_dir.identity()),
+    };
+    journal::begin(state_root, &record)?;
+    let git = git.clone();
+    let confirmation = confirmation.clone();
+    let cancellation = cancellation.cloned();
+    tokio::spawn(async move {
+        finish(
+            &git,
+            &confirmation,
+            cancellation.as_ref(),
+            lock,
+            record,
+            command,
+        )
+        .await
+    })
+    .await
+    .map_err(|_| RecoveryExecuteError::OwnerLost)?
+}
+
+async fn finish(
+    git: &GitProbe,
+    confirmation: &RecoveryConfirmation,
+    cancellation: Option<&RecoveryCancellation>,
+    lock: state::StateLock,
+    mut entry: JournalRecord,
+    command: Option<Command>,
+) -> Result<RecoveryExecutionOutcome, RecoveryExecuteError> {
+    let binding = &confirmation.binding;
+    let state_root = &binding.state_root;
+    if command.is_some() {
+        entry.record.stage = ExecutionStage::Started;
+        entry.record.started_at = Some(SystemTime::now());
+        entry.record.result = ExecutionResult::Unknown {
+            stop_confirmed: false,
+            reason: "running".to_owned(),
+        };
+        lock.refresh(state_root)?;
+        journal::rewrite(state_root, &entry)?;
+    }
+    // 持久化和目录复核都可能耗时。在任何原生写进程启动前最后核验时限与取消。
+    lock.refresh(state_root)?;
+    let final_check = binding.refresh().and_then(|()| {
+        if binding.operation == RecoveryOperation::PartialCleanup
+            && target_state_of(required_target(binding)?) != TargetState::Absent
+        {
+            return Err(RecoveryExecuteError::PreviewDrift);
+        }
+        check_start(confirmation, cancellation)
+    });
+    if let Err(error) = final_check {
+        entry.record.stage = ExecutionStage::Observed;
+        entry.record.result = ExecutionResult::NotStarted;
+        entry.record.started_at = None;
+        entry.record.observed_at = Some(SystemTime::now());
+        entry.record.note = if matches!(error, RecoveryExecuteError::Cancelled) {
+            RecoveryNote::Cancelled
+        } else {
+            RecoveryNote::NotStarted
+        };
+        entry.record.blocked = false;
+        lock.refresh(state_root)?;
+        journal::rewrite(state_root, &entry)?;
+        return Err(error);
+    }
+    let Some(mut command) = command else {
+        entry.record.stage = ExecutionStage::Observed;
+        entry.record.result = ExecutionResult::Succeeded;
+        entry.record.observed_at = Some(SystemTime::now());
+        entry.record.note = RecoveryNote::NothingToClean;
+        entry.record.blocked = false;
+        journal::rewrite(state_root, &entry)?;
+        return Ok(RecoveryExecutionOutcome::NothingToClean {
+            record: entry.record,
+        });
     };
 
-    let mut completed = started;
-    completed.stage = ExecutionStage::Completed;
-    completed.result = result.clone();
+    let result = run_native(&mut command, OUTPUT_LIMIT, COMMAND_TIMEOUT, cancellation).await;
+    entry.record.stage = ExecutionStage::Completed;
+    entry.record.result = result.clone();
     if result == ExecutionResult::SpawnFailed {
-        completed.started_at = None;
+        entry.record.started_at = None;
     }
     lock.refresh(state_root)?;
-    rewrite_journal(state_root, &completed, digest.0)?;
-
-    // 回读：命令成功也要与预期逐项比对；命令失败同样记录足迹，供宿主裁决。
-    let observation = observe_after(git, confirmation).await.ok();
-    let satisfied = observation
-        .as_ref()
-        .is_some_and(|observation| expectation_satisfied(confirmation, observation));
-    let (note, outcome_observation) = classify(&result, observation, satisfied);
-
-    let mut observed = completed;
-    observed.stage = ExecutionStage::Observed;
-    observed.observed_at = Some(SystemTime::now());
-    observed.note = note;
-    observed.blocked = matches!(
-        note,
-        RecoveryNote::PartialFootprint | RecoveryNote::CommandFailed | RecoveryNote::UnknownOutcome
-    );
+    journal::rewrite(state_root, &entry)?;
+    // 进程树结局不确定时，当前清单无法证明最终状态，保留预约待裁决。
+    let (observation, satisfied) = if matches!(result, ExecutionResult::Unknown { .. }) {
+        (None, false)
+    } else {
+        observe_unlock(git, binding)
+            .await
+            .map_or((None, false), |(value, satisfied)| (Some(value), satisfied))
+    };
+    let (note, observation) = classify(&result, observation, satisfied);
+    entry.record.stage = ExecutionStage::Observed;
+    entry.record.observed_at = Some(SystemTime::now());
+    entry.record.note = note;
+    entry.record.blocked = note != RecoveryNote::Verified;
     lock.refresh(state_root)?;
-    rewrite_journal(state_root, &observed, digest.0)?;
-    drop(lock);
-
-    Ok(match (note, outcome_observation) {
+    journal::rewrite(state_root, &entry)?;
+    let record = entry.record;
+    Ok(match (note, observation) {
         (RecoveryNote::Verified, Some(observation)) => RecoveryExecutionOutcome::Completed {
-            record: observed,
+            record,
             observation,
         },
         (RecoveryNote::PartialFootprint, Some(observation)) => {
             RecoveryExecutionOutcome::PartialFootprint {
-                record: observed,
+                record,
                 observation,
                 command: result,
             }
         }
         (RecoveryNote::CommandFailed, observation) => RecoveryExecutionOutcome::Failed {
-            record: observed,
+            record,
             observation,
             command: result,
         },
         (_, observation) => RecoveryExecutionOutcome::UnknownOutcome {
-            record: observed,
+            record,
             observation,
             reason: unknown_reason(&result),
             command: result,
@@ -426,207 +595,195 @@ async fn execute(
     })
 }
 
-fn rewrite_journal(
-    state_root: &crate::worktree_lifecycle::identity::AuthorizedDirectory,
-    record: &RecoveryExecutionRecord,
-    preview_digest: [u8; 32],
+fn check_start(
+    confirmation: &RecoveryConfirmation,
+    cancellation: Option<&RecoveryCancellation>,
 ) -> Result<(), RecoveryExecuteError> {
-    journal::rewrite(
-        state_root,
-        &JournalRecord {
-            record: record.clone(),
-            preview_digest,
-        },
-    )?;
-    Ok(())
-}
-
-fn validate_confirmation(confirmation: &RecoveryConfirmation) -> Result<(), RecoveryExecuteError> {
-    crate::worktree_lifecycle::validate_request_id(&confirmation.execution_id)?;
-    if !confirmation.source_root.is_absolute() {
-        return Err(RecoveryExecuteError::InvalidInput("源仓库根必须是绝对路径"));
-    }
-    if confirmation
-        .target
-        .as_ref()
-        .is_some_and(|target| !target.is_absolute())
-    {
-        return Err(RecoveryExecuteError::InvalidInput("目标必须是绝对路径"));
-    }
-    match confirmation.operation {
-        RecoveryOperation::Prune => {
-            if confirmation.target.is_some() || confirmation.partial_cleanup_request_id.is_some() {
-                return Err(RecoveryExecuteError::InvalidInput(
-                    "prune 不绑定单一目标或清理请求",
-                ));
-            }
-        }
-        RecoveryOperation::PartialCleanup => {
-            if confirmation.target.is_none() {
-                return Err(RecoveryExecuteError::InvalidInput(
-                    "清理部分落盘必须绑定目标目录",
-                ));
-            }
-            let Some(request_id) = confirmation.partial_cleanup_request_id.as_deref() else {
-                return Err(RecoveryExecuteError::InvalidInput(
-                    "清理部分落盘必须绑定请求 ID",
-                ));
-            };
-            crate::worktree_lifecycle::validate_request_id(request_id)?;
-        }
-        RecoveryOperation::Unlock
-        | RecoveryOperation::Repair
-        | RecoveryOperation::RemoveRegistration => {
-            if confirmation.target.is_none() {
-                return Err(RecoveryExecuteError::InvalidInput("该操作必须绑定单一目标"));
-            }
-            if confirmation.partial_cleanup_request_id.is_some() {
-                return Err(RecoveryExecuteError::InvalidInput(
-                    "该操作不接受清理请求 ID",
-                ));
-            }
-        }
-    }
-    let Some(window) = confirmation
-        .expires_at
-        .duration_since(confirmation.issued_at)
-        .ok()
-    else {
-        return Err(RecoveryExecuteError::InvalidInput(
-            "确认有效期必须晚于签发时间",
-        ));
-    };
     let now = SystemTime::now();
-    if now > confirmation.expires_at {
+    if now >= confirmation.expires_at
+        || now < confirmation.issued_at
+        || now < confirmation.binding.observed_at
+        || now
+            .duration_since(confirmation.binding.observed_at)
+            .is_ok_and(|age| age >= MAX_CONFIRMATION_WINDOW)
+    {
         return Err(RecoveryExecuteError::ConfirmationExpired);
     }
-    if window > MAX_CONFIRMATION_WINDOW {
+    if !confirmation
+        .expires_at
+        .duration_since(confirmation.issued_at)
+        .is_ok_and(|window| window <= MAX_CONFIRMATION_WINDOW)
+    {
         return Err(RecoveryExecuteError::InvalidInput("确认有效期超过上限"));
     }
-    if confirmation
-        .issued_at
-        .duration_since(now)
-        .is_ok_and(|ahead| ahead > MAX_ISSUED_SKEW)
-    {
-        return Err(RecoveryExecuteError::InvalidInput("确认签发时间超前"));
+    if cancellation.is_some_and(RecoveryCancellation::is_cancelled) {
+        return Err(RecoveryExecuteError::Cancelled);
     }
     Ok(())
 }
 
-async fn recompute_preview(
+fn execution_blocker(operation: RecoveryOperation) -> Option<&'static str> {
+    Some(match operation {
+        RecoveryOperation::Prune => "prune_candidate_evidence_and_external_exclusion_required",
+        RecoveryOperation::Repair => "repair_bidirectional_identity_and_full_scope_required",
+        RecoveryOperation::RemoveRegistration => {
+            "remove_target_cleanliness_and_recovery_evidence_required"
+        }
+        RecoveryOperation::Unlock | RecoveryOperation::PartialCleanup => return None,
+    })
+}
+
+async fn bind_identity(
     git: &GitProbe,
     coordinator: &WorktreeRegistrationCoordinator,
-    confirmation: &RecoveryConfirmation,
-) -> Result<PreviewOutcome, RecoveryExecuteError> {
-    Ok(preview::build(
-        git,
-        RecoveryPreviewRequest {
-            source_root: &confirmation.source_root,
-            coordinator_state_root: Some(coordinator.state_root.path()),
-            target_authorization: confirmation.target.as_deref(),
-            operation: confirmation.operation,
-            partial_cleanup_request_id: confirmation.partial_cleanup_request_id.as_deref(),
-        },
-    )
-    .await?)
+    execution_id: &str,
+    request: RecoveryPreviewRequest<'_>,
+) -> Result<RecoveryBinding, RecoveryExecuteError> {
+    let root = checked_directory(request.source_root)?;
+    let state_root = coordinator.state_root.clone();
+    if request
+        .coordinator_state_root
+        .is_some_and(|path| path != state_root.path())
+    {
+        return Err(RecoveryExecuteError::IdentityChanged);
+    }
+    state::require_private_root(&state_root)?;
+    let LocalProject::GitWorktree(repository) = git.open_local_project(root.path()).await? else {
+        return Err(RecoveryExecuteError::InvalidInput("源根不是 Git 工作树"));
+    };
+    if repository.root != root.path() {
+        return Err(RecoveryExecuteError::IdentityChanged);
+    }
+    let common_dir = checked_directory(&repository.common_dir)?;
+    let mut directories = vec![root, checked_directory(&repository.git_dir)?];
+    let mut target_admin = None;
+    if let Some(target) = request.target_authorization {
+        let parent = target
+            .parent()
+            .ok_or(RecoveryExecuteError::InvalidInput("目标缺少父目录"))?;
+        let parent = checked_directory(parent)?;
+        if target.parent() != Some(parent.path()) {
+            return Err(RecoveryExecuteError::IdentityChanged);
+        }
+        directories.push(parent);
+        if request.operation == RecoveryOperation::Unlock {
+            let (admin, marker) = linked_admin(&repository, target)?;
+            verify_backlink(&admin, &marker)?;
+            target_admin = Some(admin);
+            directories.push(checked_directory(target)?);
+        }
+    } else if matches!(
+        request.operation,
+        RecoveryOperation::Unlock | RecoveryOperation::PartialCleanup
+    ) {
+        return Err(RecoveryExecuteError::InvalidInput("操作需要授权单一目标"));
+    }
+    for directory in std::iter::once(&common_dir)
+        .chain(&directories)
+        .chain(&target_admin)
+    {
+        if directory.identity() == state_root.identity()
+            || state_root.path().starts_with(directory.path())
+            || directory.path().starts_with(state_root.path())
+        {
+            return Err(RecoveryExecuteError::InvalidInput(
+                "协调域须与源仓库和目标隔离",
+            ));
+        }
+    }
+    if request.operation == RecoveryOperation::Prune && request.target_authorization.is_some()
+        || request.operation != RecoveryOperation::PartialCleanup
+            && request.partial_cleanup_request_id.is_some()
+    {
+        return Err(RecoveryExecuteError::InvalidInput(
+            "确认参数与恢复操作不匹配",
+        ));
+    }
+    let git_version = read_git_version(git, &repository.root).await?;
+    Ok(RecoveryBinding {
+        execution_id: execution_id.to_owned(),
+        operation: request.operation,
+        repository,
+        state_root,
+        common_dir,
+        target: request.target_authorization.map(Path::to_owned),
+        partial_cleanup_request_id: request.partial_cleanup_request_id.map(str::to_owned),
+        directories,
+        target_admin,
+        git_program: git.program().to_owned(),
+        git_version,
+        observed_at: SystemTime::now(),
+    })
 }
 
 async fn verify_repository_identity(
     git: &GitProbe,
-    confirmation: &RecoveryConfirmation,
+    binding: &RecoveryBinding,
 ) -> Result<(), RecoveryExecuteError> {
-    let LocalProject::GitWorktree(identity) =
-        git.open_local_project(&confirmation.source_root).await?
-    else {
-        return Err(RecoveryExecuteError::InvalidInput("源根不是 Git 工作树"));
-    };
-    let expected = &confirmation.repository;
-    if !paths_equivalent(&identity.root, &confirmation.source_root)
-        || !paths_equivalent(&identity.root, &expected.root)
-        || !paths_equivalent(&identity.git_dir, &expected.git_dir)
-        || !paths_equivalent(&identity.common_dir, &expected.common_dir)
+    binding.refresh()?;
+    if git.program() != binding.git_program
+        || git.open_local_project(&binding.repository.root).await?
+            != LocalProject::GitWorktree(binding.repository.clone())
+        || read_git_version(git, &binding.repository.root).await? != binding.git_version
     {
         return Err(RecoveryExecuteError::IdentityChanged);
     }
-    Ok(())
+    binding.refresh()
 }
 
-/// 预览证据与本确认的显式绑定。
-struct OperationBinding {
-    rejection: Option<&'static str>,
-    requires_second_confirmation: bool,
-    nothing_to_clean: bool,
-}
-
-fn bind_evidence(
-    preview: &PreviewOutcome,
-    confirmation: &RecoveryConfirmation,
-) -> Result<OperationBinding, RecoveryExecuteError> {
-    let binding = OperationBinding {
-        rejection: rejection_code(preview),
-        requires_second_confirmation: false,
-        nothing_to_clean: false,
-    };
-    // 预览已拒绝时不再做目标绑定：宿主必须先解决拒绝原因，执行入口保持零写入。
-    if binding.rejection.is_some() {
-        return Ok(binding);
+async fn read_git_version(git: &GitProbe, root: &Path) -> Result<Vec<u8>, RecoveryExecuteError> {
+    let output = git.run_command(root, "--version", &[]).await?;
+    if !output.status.success()
+        || !output.stderr.is_empty()
+        || !output.stdout.starts_with(b"git version ")
+    {
+        return Err(RecoveryExecuteError::EvidenceUnavailable(
+            "git_version_unverified",
+        ));
     }
-    Ok(match preview {
-        PreviewOutcome::Unlock(preview) => {
-            require_bound_target(
-                confirmation,
-                &preview
-                    .candidate
-                    .path
-                    .to_path_buf()
-                    .map_err(|_| RecoveryExecuteError::InvalidInput("目标路径无法在本平台表示"))?,
-            )?;
-            binding
-        }
-        PreviewOutcome::Repair(preview) => OperationBinding {
-            // 原生命令按仓库执行，只有唯一候选才可能把范围界定到一个工作树。
-            requires_second_confirmation: preview.candidates.len() > 1,
-            ..binding
-        },
-        PreviewOutcome::Prune(preview) => OperationBinding {
-            requires_second_confirmation: preview.candidates.len() > 1,
-            ..binding
-        },
-        PreviewOutcome::RemoveRegistration(preview) => {
-            let path = match &preview.scope {
-                RemoveRegistrationScope::OnlineClean { path, .. }
-                | RemoveRegistrationScope::Disconnected { path, .. } => path,
-            };
-            let path = path
-                .to_path_buf()
-                .map_err(|_| RecoveryExecuteError::InvalidInput("目标路径无法在本平台表示"))?;
-            require_bound_target(confirmation, &path)?;
-            OperationBinding {
-                // 在线移除会同时删除工作目录与管理数据，必须独立二次确认。
-                requires_second_confirmation: matches!(
-                    preview.scope,
-                    RemoveRegistrationScope::OnlineClean { .. }
-                ),
-                ..binding
-            }
-        }
-        PreviewOutcome::PartialCleanup(preview) => OperationBinding {
-            nothing_to_clean: matches!(preview.scope, PartialCleanupScope::TargetAbsent),
-            ..binding
-        },
-    })
+    Ok(output.stdout)
 }
 
-/// 确认携带的目标必须与预览候选完全一致；换目标即视为授权复用并拒绝。
-fn require_bound_target(
-    confirmation: &RecoveryConfirmation,
-    expected: &Path,
-) -> Result<(), RecoveryExecuteError> {
-    let Some(target) = confirmation.target.as_ref() else {
-        return Err(RecoveryExecuteError::InvalidInput("该操作必须绑定单一目标"));
-    };
-    if !paths_equivalent(target, expected) {
-        return Err(RecoveryExecuteError::PreviewDrift);
+fn required_target(binding: &RecoveryBinding) -> Result<&Path, RecoveryExecuteError> {
+    binding
+        .target
+        .as_deref()
+        .ok_or(RecoveryExecuteError::InvalidInput("操作需要授权单一目标"))
+}
+
+fn linked_admin(
+    repository: &WorktreeIdentity,
+    target: &Path,
+) -> Result<(AuthorizedDirectory, PathBuf), RecoveryExecuteError> {
+    let target = checked_directory(target)?;
+    let marker = target.path().join(".git");
+    let bytes = state::read_regular_file(&marker)?;
+    let path = bytes
+        .strip_prefix(b"gitdir: ")
+        .and_then(|bytes| bytes.strip_suffix(b"\n"))
+        .ok_or(RecoveryExecuteError::IdentityChanged)?;
+    let admin = native_path(path)?;
+    if admin.parent() != Some(repository.common_dir.join("worktrees").as_path())
+        || admin
+            .components()
+            .any(|part| part == std::path::Component::ParentDir)
+    {
+        return Err(RecoveryExecuteError::IdentityChanged);
+    }
+    let directory = checked_directory(&admin)?;
+    if directory.path() != admin {
+        return Err(RecoveryExecuteError::IdentityChanged);
+    }
+    Ok((directory, marker))
+}
+
+fn verify_backlink(admin: &AuthorizedDirectory, marker: &Path) -> Result<(), RecoveryExecuteError> {
+    let gitdir = state::read_regular_file(&admin.path().join("gitdir"))?;
+    let commondir = state::read_regular_file(&admin.path().join("commondir"))?;
+    if gitdir.strip_suffix(b"\n") != Some(marker.as_os_str().as_encoded_bytes())
+        || commondir != b"../..\n"
+    {
+        return Err(RecoveryExecuteError::IdentityChanged);
     }
     Ok(())
 }
@@ -666,160 +823,37 @@ fn rejection_code(outcome: &PreviewOutcome) -> Option<&'static str> {
     }
 }
 
-fn same_scope(record: &RecoveryExecutionRecord, confirmation: &RecoveryConfirmation) -> bool {
-    if paths_equivalent(&record.source.root, &confirmation.source_root)
-        || paths_equivalent(
-            &record.source.common_dir,
-            &confirmation.repository.common_dir,
-        )
-    {
-        return true;
-    }
-    record
-        .target
-        .as_ref()
-        .zip(confirmation.target.as_ref())
-        .is_some_and(|(left, right)| paths_equivalent(left, right))
+fn same_scope(record: &RecoveryExecutionRecord, binding: &RecoveryBinding) -> bool {
+    record.source.root == binding.repository.root
+        || record.source.common_dir == binding.repository.common_dir
+        || record
+            .target
+            .as_ref()
+            .zip(binding.target.as_ref())
+            .is_some_and(|(old, new)| old == new)
 }
 
-fn native_command(
+async fn observe_unlock(
     git: &GitProbe,
-    confirmation: &RecoveryConfirmation,
-) -> Result<Option<Command>, RecoveryExecuteError> {
-    if confirmation.operation == RecoveryOperation::PartialCleanup {
-        return Ok(None);
-    }
-    let mut command = git.command(&confirmation.source_root);
-    command.arg("worktree");
-    match confirmation.operation {
-        RecoveryOperation::Prune => {
-            command.arg("prune").arg("--verbose");
-        }
-        RecoveryOperation::Unlock => {
-            command.arg("unlock").arg(native_target(confirmation)?);
-        }
-        RecoveryOperation::Repair => {
-            command.arg("repair").arg(native_target(confirmation)?);
-        }
-        RecoveryOperation::RemoveRegistration => {
-            command.arg("remove").arg(native_target(confirmation)?);
-        }
-        RecoveryOperation::PartialCleanup => return Ok(None),
-    }
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    Ok(Some(command))
-}
-
-fn native_target(confirmation: &RecoveryConfirmation) -> Result<PathBuf, RecoveryExecuteError> {
-    let target = confirmation
-        .target
-        .as_deref()
-        .ok_or(RecoveryExecuteError::InvalidInput("该操作必须绑定单一目标"))?;
-    Ok(crate::worktree_lifecycle::native_command_path(target)?)
-}
-
-async fn observe_after(
-    git: &GitProbe,
-    confirmation: &RecoveryConfirmation,
-) -> Result<RecoveryObservation, RecoveryExecuteError> {
-    let inventory = git.list_worktrees(&confirmation.source_root).await?;
-    let target_state = confirmation
-        .target
-        .as_deref()
-        .map_or(TargetState::NotExamined, target_state_of);
-    let target_registered = confirmation
-        .target
-        .as_ref()
-        .is_some_and(|target| inventory_entry(&inventory, target).is_some());
-    let mut remaining_candidates = Vec::new();
-    if confirmation.operation == RecoveryOperation::Prune {
-        // 与预览同源的 dry-run：执行后仍报告的候补即部分足迹或并发新增。
-        let output = git
-            .run_command(
-                &confirmation.source_root,
-                "worktree",
-                &["prune", "--dry-run", "--verbose"],
-            )
-            .await?;
-        if !output.status.success() {
-            return Err(GitError::CommandFailed {
-                operation: "worktree",
-                code: output.status.code(),
-                stderr: output.stderr,
-            }
-            .into());
-        }
-        for candidate in parse_prune_candidates(&output.stdout)
-            .into_iter()
-            .chain(parse_prune_candidates(&output.stderr))
-        {
-            if !remaining_candidates.contains(&candidate.admin_dir) {
-                remaining_candidates.push(candidate.admin_dir);
-            }
-        }
-    }
-    Ok(RecoveryObservation {
-        observed_at: SystemTime::now(),
-        inventory,
-        target_registered,
-        target_state,
-        remaining_candidates,
-    })
-}
-
-fn inventory_entry<'a>(
-    inventory: &'a WorktreeInventory,
-    target: &Path,
-) -> Option<&'a WorktreeEntry> {
-    inventory.entries.iter().find(|entry| {
-        entry
-            .path
-            .to_path_buf()
-            .is_ok_and(|path| paths_equivalent(&path, target))
-    })
-}
-
-/// 每类操作的预期终态；回读不符即部分足迹。
-fn expectation_satisfied(
-    confirmation: &RecoveryConfirmation,
-    observation: &RecoveryObservation,
-) -> bool {
-    let target = confirmation.target.as_deref();
-    match confirmation.operation {
-        RecoveryOperation::Unlock => target.is_some_and(|target| {
-            inventory_entry(&observation.inventory, target)
-                .is_some_and(|entry| entry.locked.is_none())
-        }),
-        RecoveryOperation::Repair => target.is_some_and(|target| {
-            observation.target_state == TargetState::Directory
-                && inventory_entry(&observation.inventory, target)
-                    .is_some_and(|entry| entry.prunable.is_none())
-                && !observation
-                    .inventory
-                    .entries
-                    .iter()
-                    .any(|entry| entry.prunable.is_some())
-        }),
-        RecoveryOperation::Prune => {
-            observation.remaining_candidates.is_empty()
-                && !observation
-                    .inventory
-                    .entries
-                    .iter()
-                    .any(|entry| entry.prunable.is_some())
-        }
-        // 删除后结果：注册消失且目标目录已不存在才算一致。
-        RecoveryOperation::RemoveRegistration => {
-            !observation.target_registered && observation.target_state == TargetState::Absent
-        }
-        RecoveryOperation::PartialCleanup => {
-            confirmation.target.is_some() && observation.target_state == TargetState::Absent
-        }
-    }
+    binding: &RecoveryBinding,
+) -> Result<(RecoveryObservation, bool), RecoveryExecuteError> {
+    verify_repository_identity(git, binding).await?;
+    let inventory = git.list_worktrees(&binding.repository.root).await?;
+    binding.refresh()?;
+    let target = required_target(binding)?;
+    let entry = inventory.entries.iter().find(|entry| {
+        entry.kind == WorktreeKind::Linked && entry.path.to_path_buf().as_deref() == Ok(target)
+    });
+    let satisfied = entry.is_some_and(|entry| entry.locked.is_none() && entry.prunable.is_none());
+    Ok((
+        RecoveryObservation {
+            observed_at: SystemTime::now(),
+            target_registered: entry.is_some(),
+            target_state: TargetState::Directory,
+            inventory,
+        },
+        satisfied,
+    ))
 }
 
 fn classify(
@@ -846,6 +880,7 @@ fn unknown_reason(result: &ExecutionResult) -> &'static str {
         ExecutionResult::SpawnFailed => "spawn_failed",
         ExecutionResult::Unknown { reason, .. } if reason == "timeout" => "timeout",
         ExecutionResult::Unknown { reason, .. } if reason == "output_limit" => "output_limit",
+        ExecutionResult::Unknown { reason, .. } if reason == "cancelled" => "cancelled",
         ExecutionResult::Unknown {
             stop_confirmed: false,
             ..
@@ -856,7 +891,12 @@ fn unknown_reason(result: &ExecutionResult) -> &'static str {
 }
 
 /// 有界运行原生 Git：读取独占管道，超时或读取失败先释放管道再停止子进程。
-async fn run_native(command: &mut Command, limit: u64, timeout: Duration) -> ExecutionResult {
+async fn run_native(
+    command: &mut Command,
+    limit: u64,
+    timeout: Duration,
+    cancellation: Option<&RecoveryCancellation>,
+) -> ExecutionResult {
     let Ok(mut child) = command.spawn() else {
         return ExecutionResult::SpawnFailed;
     };
@@ -864,7 +904,7 @@ async fn run_native(command: &mut Command, limit: u64, timeout: Duration) -> Exe
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         let child = &mut child;
-        tokio::time::timeout(timeout, async move {
+        let collect = async move {
             let stdout = stdout.ok_or("missing_stdout")?;
             let stderr = stderr.ok_or("missing_stderr")?;
             let (_, _, status) = tokio::try_join!(
@@ -873,6 +913,18 @@ async fn run_native(command: &mut Command, limit: u64, timeout: Duration) -> Exe
                 async { child.wait().await.map_err(|_| "wait_io") },
             )?;
             Ok(status)
+        };
+        tokio::time::timeout(timeout, async {
+            if let Some(cancellation) = cancellation {
+                let mut receiver = cancellation.0.subscribe();
+                tokio::select! {
+                    biased;
+                    result = collect => result,
+                    _ = receiver.wait_for(|cancelled| *cancelled) => Err("cancelled"),
+                }
+            } else {
+                collect.await
+            }
         })
         .await
     };
@@ -886,19 +938,13 @@ async fn run_native(command: &mut Command, limit: u64, timeout: Duration) -> Exe
         Ok(Err(reason)) => reason,
         Err(_) => "timeout",
     };
-    let stop_confirmed = match child.try_wait() {
-        Ok(Some(_)) => true,
-        _ => {
-            let _ = child.start_kill();
-            let reap_timeout = timeout.max(Duration::from_secs(2));
-            matches!(
-                tokio::time::timeout(reap_timeout, child.wait()).await,
-                Ok(Ok(_))
-            )
-        }
-    };
+    if !matches!(child.try_wait(), Ok(Some(_))) {
+        let _ = child.start_kill();
+        let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+    }
+    // 直接子进程回收没有提供后代进程退出的证据。
     ExecutionResult::Unknown {
-        stop_confirmed,
+        stop_confirmed: false,
         reason: reason.to_owned(),
     }
 }
@@ -914,29 +960,6 @@ async fn count_output(reader: impl AsyncRead + Unpin, limit: u64) -> Result<(), 
         return Err("output_limit");
     }
     Ok(())
-}
-
-fn paths_equivalent(left: &Path, right: &Path) -> bool {
-    let left: Vec<_> = left.components().collect();
-    let right: Vec<_> = right.components().collect();
-    left.len() == right.len()
-        && left.iter().zip(&right).all(|(left, right)| {
-            match (component_bytes(*left), component_bytes(*right)) {
-                (Some(left), Some(right)) if left.is_ascii() && right.is_ascii() => {
-                    left.eq_ignore_ascii_case(right)
-                }
-                (Some(left), Some(right)) => left == right,
-                (None, None) => left == right,
-                _ => false,
-            }
-        })
-}
-
-fn component_bytes(component: Component<'_>) -> Option<&[u8]> {
-    match component {
-        Component::Normal(path) => Some(path.as_encoded_bytes()),
-        _ => None,
-    }
 }
 
 // ---------------------------------------------------------------- 预览摘要编码
@@ -1201,105 +1224,12 @@ fn target_state_tag(state: TargetState) -> u8 {
     }
 }
 
-// ------------------------------------------------------------------- SHA-256
-
-const K: [u32; 64] = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-];
-
-fn sha256(data: &[u8]) -> [u8; 32] {
-    let mut state: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
-        0x5be0cd19,
-    ];
-    let bit_length = (data.len() as u64).wrapping_mul(8);
-    let mut message = data.to_vec();
-    message.push(0x80);
-    while message.len() % 64 != 56 {
-        message.push(0);
-    }
-    message.extend_from_slice(&bit_length.to_be_bytes());
-    for chunk in message.as_chunks::<64>().0 {
-        let mut words = [0u32; 64];
-        for (index, bytes) in chunk.as_chunks::<4>().0.iter().enumerate() {
-            words[index] = u32::from_be_bytes(*bytes);
-        }
-        for index in 16..64 {
-            let s0 = words[index - 15].rotate_right(7)
-                ^ words[index - 15].rotate_right(18)
-                ^ (words[index - 15] >> 3);
-            let s1 = words[index - 2].rotate_right(17)
-                ^ words[index - 2].rotate_right(19)
-                ^ (words[index - 2] >> 10);
-            words[index] = words[index - 16]
-                .wrapping_add(s0)
-                .wrapping_add(words[index - 7])
-                .wrapping_add(s1);
-        }
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
-        for index in 0..64 {
-            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-            let choose = (e & f) ^ ((!e) & g);
-            let temp1 = h
-                .wrapping_add(s1)
-                .wrapping_add(choose)
-                .wrapping_add(K[index])
-                .wrapping_add(words[index]);
-            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-            let majority = (a & b) ^ (a & c) ^ (b & c);
-            let temp2 = s0.wrapping_add(majority);
-            h = g;
-            g = f;
-            f = e;
-            e = d.wrapping_add(temp1);
-            d = c;
-            c = b;
-            b = a;
-            a = temp1.wrapping_add(temp2);
-        }
-        for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
-            *slot = slot.wrapping_add(value);
-        }
-    }
-    let mut digest = [0u8; 32];
-    for (chunk, value) in digest.as_chunks_mut::<4>().0.iter_mut().zip(state) {
-        *chunk = value.to_be_bytes();
-    }
-    digest
-}
-
 #[cfg(test)]
 mod tests {
     use std::process::Stdio;
     use std::time::Duration;
 
     use super::*;
-
-    #[test]
-    fn sha256_matches_known_vectors() {
-        assert_eq!(
-            RecoveryPreviewDigest(sha256(b"")).to_hex(),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-        assert_eq!(
-            RecoveryPreviewDigest(sha256(b"abc")).to_hex(),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
-        assert_eq!(
-            RecoveryPreviewDigest(sha256(
-                b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
-            ))
-            .to_hex(),
-            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
-        );
-    }
 
     fn sample_observation() -> PreviewObservation {
         PreviewObservation {
@@ -1345,101 +1275,6 @@ mod tests {
     }
 
     #[test]
-    fn confirmation_window_and_field_binding_fail_closed() {
-        let now = SystemTime::now();
-        // 绝对路径取自宿主临时目录，避免把 Unix 风格常量当成 Windows 绝对路径。
-        let root = std::env::temp_dir().join("soxu-exec-confirmation");
-        let target = root.join("wt");
-        let repository = WorktreeIdentity {
-            root: root.clone(),
-            git_dir: root.join(".git"),
-            common_dir: root.join(".git"),
-        };
-        let make = |operation, with_target: bool, issued, expires| RecoveryConfirmation {
-            execution_id: "exec-window".to_owned(),
-            operation,
-            preview_digest: RecoveryPreviewDigest([0; 32]),
-            source_root: root.clone(),
-            repository: repository.clone(),
-            target: with_target.then(|| target.clone()),
-            issued_at: issued,
-            expires_at: expires,
-            risk_acknowledged: false,
-            partial_cleanup_request_id: None,
-        };
-        assert!(
-            validate_confirmation(&make(
-                RecoveryOperation::Unlock,
-                true,
-                now,
-                now + Duration::from_secs(60)
-            ))
-            .is_ok()
-        );
-        let expired = make(
-            RecoveryOperation::Unlock,
-            true,
-            now - Duration::from_secs(3600),
-            now - Duration::from_secs(1),
-        );
-        assert!(matches!(
-            validate_confirmation(&expired),
-            Err(RecoveryExecuteError::ConfirmationExpired)
-        ));
-        let too_long = make(
-            RecoveryOperation::Unlock,
-            true,
-            now,
-            now + MAX_CONFIRMATION_WINDOW + Duration::from_secs(1),
-        );
-        assert!(matches!(
-            validate_confirmation(&too_long),
-            Err(RecoveryExecuteError::InvalidInput(_))
-        ));
-        let future = make(
-            RecoveryOperation::Unlock,
-            true,
-            now + Duration::from_secs(600),
-            now + Duration::from_secs(900),
-        );
-        assert!(matches!(
-            validate_confirmation(&future),
-            Err(RecoveryExecuteError::InvalidInput(_))
-        ));
-        // 操作与目标/请求 ID 的绑定必须一致。
-        let prune_with_target = make(
-            RecoveryOperation::Prune,
-            true,
-            now,
-            now + Duration::from_secs(60),
-        );
-        assert!(matches!(
-            validate_confirmation(&prune_with_target),
-            Err(RecoveryExecuteError::InvalidInput(_))
-        ));
-        let unlock_without_target = make(
-            RecoveryOperation::Unlock,
-            false,
-            now,
-            now + Duration::from_secs(60),
-        );
-        assert!(matches!(
-            validate_confirmation(&unlock_without_target),
-            Err(RecoveryExecuteError::InvalidInput(_))
-        ));
-        let cleanup_without_request = make(
-            RecoveryOperation::PartialCleanup,
-            true,
-            now,
-            now + Duration::from_secs(60),
-        );
-        assert!(matches!(
-            validate_confirmation(&cleanup_without_request),
-            Err(RecoveryExecuteError::InvalidInput(_))
-        ));
-    }
-
-    #[test]
     fn classification_keeps_partial_footprint_and_unknown_distinct() {
         let observation = RecoveryObservation {
             observed_at: SystemTime::UNIX_EPOCH,
@@ -1448,7 +1283,6 @@ mod tests {
             },
             target_registered: false,
             target_state: TargetState::Absent,
-            remaining_candidates: Vec::new(),
         };
         // 命令成功但回读不符：保留足迹并标记阻断。
         assert_eq!(
@@ -1519,17 +1353,77 @@ mod tests {
                 stdout.flush().expect("刷新夹具输出");
             }
             "timeout" => std::thread::sleep(Duration::from_secs(5)),
+            "cancel" => {
+                let marker = std::env::var_os("SOXU_RECOVERY_STARTED_MARKER").expect("启动标记");
+                std::fs::write(marker, b"started").expect("记录原生子进程已启动");
+                std::thread::sleep(Duration::from_secs(10));
+            }
             "success" => {}
             _ => panic!("未知执行夹具模式"),
         }
     }
 
     #[tokio::test]
-    async fn native_runner_separates_spawn_exit_limits_and_confirmed_stops() {
+    async fn cancellation_after_native_start_preserves_unknown() {
+        let root = (0..64)
+            .find_map(|index| {
+                let path = std::env::temp_dir().join(format!(
+                    "soxu-recovery-cancel-{}-{index}",
+                    std::process::id()
+                ));
+                match std::fs::create_dir(&path) {
+                    Ok(()) => Some(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => None,
+                    Err(error) => panic!("建立取消夹具失败：{error}"),
+                }
+            })
+            .expect("创建独占夹具根");
+        let marker = root.join("started");
+        let cancellation = RecoveryCancellation::new();
+        let mut command = Command::new(std::env::current_exe().expect("原生夹具程序"));
+        command
+            .args([
+                "--exact",
+                "worktree_recovery::execute::tests::execution_child_fixture",
+                "--nocapture",
+            ])
+            .env("SOXU_RECOVERY_EXECUTION_FIXTURE", "cancel")
+            .env("SOXU_RECOVERY_STARTED_MARKER", &marker)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let (result, started) = tokio::join!(
+            run_native(
+                &mut command,
+                8192,
+                Duration::from_secs(5),
+                Some(&cancellation)
+            ),
+            tokio::time::timeout(Duration::from_secs(4), async {
+                while !marker.is_file() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                cancellation.cancel();
+            })
+        );
+        std::fs::remove_dir_all(root).expect("清理取消夹具");
+        started.expect("仅在证实启动后发送取消");
+        assert_eq!(
+            result,
+            ExecutionResult::Unknown {
+                stop_confirmed: false,
+                reason: "cancelled".to_owned()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn native_runner_preserves_unknown_on_timeout_and_output_limit() {
         let executable = std::env::current_exe().expect("取得原生测试入口");
         let mut missing = Command::new(executable.join("missing-program"));
         assert_eq!(
-            run_native(&mut missing, 1024, Duration::from_secs(5)).await,
+            run_native(&mut missing, 1024, Duration::from_secs(5), None).await,
             ExecutionResult::SpawnFailed
         );
         for (mode, limit, deadline, expected) in [
@@ -1552,7 +1446,7 @@ mod tests {
                 1024,
                 Duration::from_secs(5),
                 ExecutionResult::Unknown {
-                    stop_confirmed: true,
+                    stop_confirmed: false,
                     reason: "output_limit".to_owned(),
                 },
             ),
@@ -1561,7 +1455,7 @@ mod tests {
                 8192,
                 Duration::from_millis(400),
                 ExecutionResult::Unknown {
-                    stop_confirmed: true,
+                    stop_confirmed: false,
                     reason: "timeout".to_owned(),
                 },
             ),
@@ -1579,95 +1473,10 @@ mod tests {
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
             assert_eq!(
-                run_native(&mut command, limit, deadline).await,
+                run_native(&mut command, limit, deadline, None).await,
                 expected,
                 "执行模式 {mode}"
             );
         }
-    }
-
-    /// 进程树未收敛的持久记录必须阻断同仓新执行；重启诊断只读不重放。
-    #[tokio::test]
-    #[cfg(target_os = "linux")]
-    async fn unconfirmed_stop_reserves_scope_and_is_diagnosed_without_replay() {
-        use std::os::unix::fs::DirBuilderExt;
-
-        let root = std::env::temp_dir().join(format!("soxu-exec-reserve-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).expect("创建夹具根");
-        let state = root.join("state");
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&state)
-            .expect("创建私有状态根");
-        let coordinator = WorktreeRegistrationCoordinator::open(&state, &[]).expect("打开协调域");
-        let repository_root = root.join("repo");
-        let started = RecoveryExecutionRecord {
-            execution_id: "exec-unknown".to_owned(),
-            operation: RecoveryOperation::Unlock,
-            source: WorktreeIdentity {
-                root: repository_root.clone(),
-                git_dir: repository_root.join(".git"),
-                common_dir: repository_root.join(".git"),
-            },
-            target: Some(root.join("wt")),
-            stage: ExecutionStage::Started,
-            result: ExecutionResult::Unknown {
-                stop_confirmed: false,
-                reason: "timeout".to_owned(),
-            },
-            recorded_at: SystemTime::now(),
-            started_at: Some(SystemTime::now()),
-            observed_at: None,
-            note: RecoveryNote::NotStarted,
-            blocked: false,
-        };
-        journal::begin(
-            &coordinator.state_root,
-            &JournalRecord {
-                record: started.clone(),
-                preview_digest: [0; 32],
-            },
-        )
-        .expect("持久化 Started 记录");
-
-        let confirmation = RecoveryConfirmation {
-            execution_id: "exec-next".to_owned(),
-            operation: RecoveryOperation::Unlock,
-            preview_digest: RecoveryPreviewDigest([0; 32]),
-            source_root: repository_root.clone(),
-            repository: started.source.clone(),
-            target: Some(root.join("wt")),
-            issued_at: SystemTime::now(),
-            expires_at: SystemTime::now() + Duration::from_secs(60),
-            risk_acknowledged: false,
-            partial_cleanup_request_id: None,
-        };
-        let git = GitProbe::discover().expect("测试需要原生 Git");
-        assert!(matches!(
-            git.execute_recovery(&coordinator, &confirmation, None).await,
-            Err(RecoveryExecuteError::ExecutionStillUnknown(id)) if id == "exec-unknown"
-        ));
-        let records = journal::read_all(&coordinator.state_root).expect("读取全部记录");
-        assert_eq!(records.len(), 1, "拒绝路径不得写入新记录");
-        assert!(records[0].record.reserves_scope());
-        assert_eq!(
-            git.diagnose_recovery(&coordinator, "exec-unknown")
-                .expect("只读诊断")
-                .expect("记录必须存在"),
-            started
-        );
-
-        // 明确的非零退出不预约范围：宿主重新预览并取得新确认后可重试。
-        let mut failed = started.clone();
-        failed.execution_id = "exec-failed".to_owned();
-        failed.stage = ExecutionStage::Observed;
-        failed.result = ExecutionResult::Failed {
-            exit_code: Some(128),
-        };
-        failed.note = RecoveryNote::CommandFailed;
-        failed.blocked = true;
-        assert!(!failed.reserves_scope());
-        std::fs::remove_dir_all(&root).expect("清理夹具");
     }
 }

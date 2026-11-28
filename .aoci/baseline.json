@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-24T14:12:38Z",
-  "updated_at": "2026-11-28T09:01:32Z",
+  "updated_at": "2026-11-28T09:38:32Z",
   "files": {
     ".agents/skills/paseo-orchestrator/SKILL.md": {
       "role": "index",
@@ -89,9 +89,9 @@
     },
     "Cargo.lock": {
       "role": "index",
-      "sha256": "946391d8d1e376f8cbc50041e427e2f4a78ea383692ab50de42964616a901e0e",
-      "size": 211861,
-      "normalized_sha256": "946391d8d1e376f8cbc50041e427e2f4a78ea383692ab50de42964616a901e0e"
+      "sha256": "67af913b3c8a1f3b073f87c18fe0a83fc63efc0be511281d8939eff68accb524",
+      "size": 211877,
+      "normalized_sha256": "67af913b3c8a1f3b073f87c18fe0a83fc63efc0be511281d8939eff68accb524"
     },
     "Cargo.toml": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "c2689b65c66bad6b39dcafca1c15727ef285b6ce796132cbbf6c60c096df8eb8",
-      "size": 157092,
-      "normalized_sha256": "c2689b65c66bad6b39dcafca1c15727ef285b6ce796132cbbf6c60c096df8eb8"
+      "sha256": "aafed1fd0676413776ae0940717bdc9e2322d4a477a19d0924df0dbd2562fa49",
+      "size": 155419,
+      "normalized_sha256": "aafed1fd0676413776ae0940717bdc9e2322d4a477a19d0924df0dbd2562fa49"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1079,15 +1079,15 @@
     },
     "crates/soxu-git/Cargo.toml": {
       "role": "index",
-      "sha256": "414b632024cf4498b58ca80732c8a573a1288fd1bbab49e71036bf4bda879fa9",
-      "size": 324,
-      "normalized_sha256": "414b632024cf4498b58ca80732c8a573a1288fd1bbab49e71036bf4bda879fa9"
+      "sha256": "b7ed312da43b2c0c6555c5c7973c07e032e5d9d24e0720ba84c263003bf91b00",
+      "size": 346,
+      "normalized_sha256": "b7ed312da43b2c0c6555c5c7973c07e032e5d9d24e0720ba84c263003bf91b00"
     },
     "crates/soxu-git/README.md": {
       "role": "index",
-      "sha256": "ec4f4536ec213f9cd6b4f8f6026ea883028078c039a96316734b38574220ecfa",
-      "size": 45439,
-      "normalized_sha256": "ec4f4536ec213f9cd6b4f8f6026ea883028078c039a96316734b38574220ecfa"
+      "sha256": "20d7ad5fee903d6c3b496d3d84129c007a900b360fc79a09b4c43588a6c902d2",
+      "size": 43258,
+      "normalized_sha256": "20d7ad5fee903d6c3b496d3d84129c007a900b360fc79a09b4c43588a6c902d2"
     },
     "crates/soxu-git/src/checkpoint.rs": {
       "role": "index",
@@ -1157,9 +1157,9 @@
     },
     "crates/soxu-git/src/lib.rs": {
       "role": "index",
-      "sha256": "278d62be47d0058988cb2340e2b49a0cb7b1a8f4d9ae32f6748d622a395f466b",
-      "size": 3433,
-      "normalized_sha256": "278d62be47d0058988cb2340e2b49a0cb7b1a8f4d9ae32f6748d622a395f466b"
+      "sha256": "fbe08d2b73bf2ded153f9cf5f9bb48f38861bb6f1c181ef0970efd054933fb35",
+      "size": 3459,
+      "normalized_sha256": "fbe08d2b73bf2ded153f9cf5f9bb48f38861bb6f1c181ef0970efd054933fb35"
     },
     "crates/soxu-git/src/probe.rs": {
       "role": "index",
@@ -1301,27 +1301,27 @@
     },
     "crates/soxu-git/src/worktree_recovery.rs": {
       "role": "index",
-      "sha256": "1317d762d35383692384e71a453ce402651774b9e088934770f981d5ed3b3c35",
-      "size": 2979,
-      "normalized_sha256": "1317d762d35383692384e71a453ce402651774b9e088934770f981d5ed3b3c35"
+      "sha256": "2f3926285a8f8b0f8137de7e820654c34fcb4a4a219adf2727bc78a50271672b",
+      "size": 2969,
+      "normalized_sha256": "2f3926285a8f8b0f8137de7e820654c34fcb4a4a219adf2727bc78a50271672b"
     },
     "crates/soxu-git/src/worktree_recovery/execute.rs": {
       "role": "index",
-      "sha256": "9a6d87ef52a0ea10ca9101207cc0063556f33ec40ad1b561fd1b70b739baf70b",
-      "size": 63612,
-      "normalized_sha256": "9a6d87ef52a0ea10ca9101207cc0063556f33ec40ad1b561fd1b70b739baf70b"
+      "sha256": "33c2763fec97fdb552801dcf863259ed8cc5f55ab63966e61ba75234fff2e890",
+      "size": 56035,
+      "normalized_sha256": "33c2763fec97fdb552801dcf863259ed8cc5f55ab63966e61ba75234fff2e890"
     },
     "crates/soxu-git/src/worktree_recovery/journal.rs": {
       "role": "index",
-      "sha256": "21df283e67f7bec5580d90e89490062d19b16de4274946f518d51af3a1ba195b",
-      "size": 29132,
-      "normalized_sha256": "21df283e67f7bec5580d90e89490062d19b16de4274946f518d51af3a1ba195b"
+      "sha256": "e8b19fd149a3d3259f5d5f5a703edb7dcb7118c373dad8924874f75fbfc05bdf",
+      "size": 30063,
+      "normalized_sha256": "e8b19fd149a3d3259f5d5f5a703edb7dcb7118c373dad8924874f75fbfc05bdf"
     },
     "crates/soxu-git/src/worktree_recovery/preview.rs": {
       "role": "index",
-      "sha256": "eb1595a666501c3faf8dbb465139f25c54f4466f22fdbb16f012f9a0528687d2",
-      "size": 35662,
-      "normalized_sha256": "eb1595a666501c3faf8dbb465139f25c54f4466f22fdbb16f012f9a0528687d2"
+      "sha256": "4c915086a00ad7e5e32b0202bce3408d5855a3cdd5391ab520a2851428d1268f",
+      "size": 35651,
+      "normalized_sha256": "4c915086a00ad7e5e32b0202bce3408d5855a3cdd5391ab520a2851428d1268f"
     },
     "crates/soxu-git/src/worktrees.rs": {
       "role": "index",
@@ -1391,9 +1391,9 @@
     },
     "crates/soxu-git/tests/worktree_recovery_execute.rs": {
       "role": "observe",
-      "sha256": "9e448b91b72d4cbd27a78da5a04b6b7489e56e878635897257ddc1e04b9a27a5",
-      "size": 34412,
-      "normalized_sha256": "9e448b91b72d4cbd27a78da5a04b6b7489e56e878635897257ddc1e04b9a27a5"
+      "sha256": "3ad618ca6b6c2c3680633ab3eb1b1b7bb632af8d22b251082a096d1e98d62678",
+      "size": 17861,
+      "normalized_sha256": "3ad618ca6b6c2c3680633ab3eb1b1b7bb632af8d22b251082a096d1e98d62678"
     },
     "crates/soxu-git/tests/worktree_recovery_preview.rs": {
       "role": "observe",
@@ -1709,9 +1709,9 @@
     },
     "docs/ops/PROGRESS.md": {
       "role": "index",
-      "sha256": "c7a712eb69c306096d82785dd51ea4134f790357b8f58bfeaf2594d6df236cad",
-      "size": 8676,
-      "normalized_sha256": "c7a712eb69c306096d82785dd51ea4134f790357b8f58bfeaf2594d6df236cad"
+      "sha256": "ab5cefd9c5b4f24790ec3496d955f341e524adfebe5d0d1d98e9c5a2c871dade",
+      "size": 7707,
+      "normalized_sha256": "ab5cefd9c5b4f24790ec3496d955f341e524adfebe5d0d1d98e9c5a2c871dade"
     },
     "docs/user/getting-started.md": {
       "role": "index",

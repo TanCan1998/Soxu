@@ -12,7 +12,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use crate::worktree_lifecycle::identity::{AuthorizedDirectory, checked_directory, is_reparse};
+use crate::worktree_lifecycle::identity::{
+    AuthorizedDirectory, DirectoryIdentity, checked_directory, is_reparse,
+};
 use crate::worktree_lifecycle::{ExecutionResult, ExecutionStage, WorktreeLifecycleError};
 use crate::{RecoveryOperation, WorktreeIdentity};
 
@@ -36,7 +38,7 @@ pub enum RecoveryNote {
     CommandFailed,
     /// 无法确认结局：启动失败、超时、输出超限、进程树未收敛或回读失败。
     UnknownOutcome,
-    /// 启动前被取消，确认未被消费。
+    /// 持久化意图后、启动 Git 前取消，记录仍占用该执行 ID。
     Cancelled,
     /// 清理部分落盘：没有可证明的宿主资产需要处理。
     NothingToClean,
@@ -87,19 +89,11 @@ pub struct RecoveryExecutionRecord {
 }
 
 impl RecoveryExecutionRecord {
-    /// 该记录是否仍预约目标与仓库：只有「命令可能仍在写」时阻断新的执行。
-    ///
-    /// 明确的非零退出、启动失败与部分足迹不阻断新确认——它们已经把结论写死在
-    /// journal 中，新的执行必须重新生成预览与确认；`blocked` 只约束宿主接入。
+    /// 未完成复核或进程结局未知时保留预约。旧记录的 `stop_confirmed`
+    /// 只涉及直接子进程，不能据此解除预约。
     pub(crate) fn reserves_scope(&self) -> bool {
-        self.stage == ExecutionStage::Started
-            || matches!(
-                self.result,
-                ExecutionResult::Unknown {
-                    stop_confirmed: false,
-                    ..
-                }
-            )
+        self.stage != ExecutionStage::Observed
+            || matches!(self.result, ExecutionResult::Unknown { .. })
     }
 }
 
@@ -108,6 +102,7 @@ impl RecoveryExecutionRecord {
 pub(crate) struct JournalRecord {
     pub(crate) record: RecoveryExecutionRecord,
     pub(crate) preview_digest: [u8; 32],
+    pub(crate) common_identity: Option<DirectoryIdentity>,
 }
 
 fn directory_path(state_root: &AuthorizedDirectory) -> PathBuf {
@@ -132,27 +127,22 @@ fn ensure_directory(
         }
         Err(error) => return Err(error.into()),
     }
-    let directory = checked_directory(&path)?;
-    for entry in std::fs::read_dir(directory.path())? {
-        let metadata = entry?.metadata()?;
-        if metadata.is_symlink() || is_reparse(&metadata) {
-            return Err(WorktreeLifecycleError::Unauthorized(
-                "恢复 journal 目录包含链接或 reparse point",
-            ));
-        }
-    }
-    state_root.refresh()?;
-    Ok(directory)
+    existing_directory(state_root)?.ok_or(WorktreeLifecycleError::IdentityChanged)
 }
 
 fn existing_directory(
     state_root: &AuthorizedDirectory,
 ) -> Result<Option<AuthorizedDirectory>, WorktreeLifecycleError> {
-    match directory_path(state_root).symlink_metadata() {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error.into()),
-        Ok(_) => Ok(Some(ensure_directory(state_root)?)),
-    }
+    state_root.refresh()?;
+    let directory = match checked_directory(&directory_path(state_root)) {
+        Err(WorktreeLifecycleError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(None);
+        }
+        Err(error) => return Err(error),
+        Ok(directory) => directory,
+    };
+    state_root.refresh()?;
+    Ok(Some(directory))
 }
 
 fn sync_directory(directory: &AuthorizedDirectory) -> Result<(), WorktreeLifecycleError> {
@@ -343,6 +333,9 @@ fn encode(record: &JournalRecord) -> Result<Vec<u8>, WorktreeLifecycleError> {
     encode_time(&mut output, stored.observed_at)?;
     output.push(u8::from(stored.blocked));
     output.push(stored.note.tag());
+    if let Some(identity) = record.common_identity {
+        output.extend_from_slice(&identity.to_bytes());
+    }
     if output.len() > MAX_JOURNAL_BYTES {
         return Err(WorktreeLifecycleError::InvalidInput(
             "journal 记录超过大小限制",
@@ -542,14 +535,26 @@ fn decode(bytes: &[u8]) -> Result<JournalRecord, WorktreeLifecycleError> {
     let recorded_at = time_from_nanos(cursor.u64()?)?;
     let started_at = decode_time(&mut cursor)?;
     let observed_at = decode_time(&mut cursor)?;
-    let blocked = match cursor.u8()? {
+    let stored_blocked = match cursor.u8()? {
         0 => false,
         1 => true,
         _ => return Err(WorktreeLifecycleError::InvalidInput("journal 阻断标记")),
     };
     let note = RecoveryNote::from_tag(cursor.u8()?)
         .ok_or(WorktreeLifecycleError::InvalidInput("journal 结果分类"))?;
+    // 早期 SOXURV1 记录没有共享 Git 目录身份，仍可只读诊断。
+    let common_identity = if cursor.bytes.is_empty() {
+        None
+    } else {
+        Some(
+            DirectoryIdentity::from_bytes(&cursor.array::<{ DirectoryIdentity::ENCODED_LEN }>()?)
+                .ok_or(WorktreeLifecycleError::InvalidInput("journal 仓库身份"))?,
+        )
+    };
     cursor.finish()?;
+    let blocked = stored_blocked
+        || stage != ExecutionStage::Observed
+        || matches!(result, ExecutionResult::Unknown { .. });
     Ok(JournalRecord {
         record: RecoveryExecutionRecord {
             execution_id,
@@ -569,6 +574,7 @@ fn decode(bytes: &[u8]) -> Result<JournalRecord, WorktreeLifecycleError> {
             blocked,
         },
         preview_digest,
+        common_identity,
     })
 }
 
@@ -667,9 +673,10 @@ mod tests {
                 started_at: None,
                 observed_at: None,
                 note: RecoveryNote::NotStarted,
-                blocked: false,
+                blocked: true,
             },
             preview_digest: [7; 32],
+            common_identity: None,
         }
     }
 
@@ -680,7 +687,7 @@ mod tests {
                 ExecutionStage::Prepared,
                 ExecutionResult::NotStarted,
                 RecoveryNote::NotStarted,
-                false,
+                true,
             ),
             (
                 ExecutionStage::Started,
@@ -689,7 +696,7 @@ mod tests {
                     reason: "running".to_owned(),
                 },
                 RecoveryNote::NotStarted,
-                false,
+                true,
             ),
             (
                 ExecutionStage::Completed,
@@ -723,6 +730,21 @@ mod tests {
             let bytes = encode(&record).expect("编码 journal");
             assert_eq!(decode(&bytes).expect("解码 journal"), record);
         }
+    }
+
+    #[test]
+    fn legacy_unknown_remains_blocked_even_if_direct_child_was_reaped() {
+        let mut old = sample("legacy-timeout");
+        old.record.stage = ExecutionStage::Observed;
+        old.record.blocked = false;
+        old.record.result = ExecutionResult::Unknown {
+            stop_confirmed: true,
+            reason: "timeout".to_owned(),
+        };
+        let stored = decode(&encode(&old).expect("编码旧记录")).expect("解码旧记录");
+        assert!(stored.record.blocked);
+        assert!(stored.record.reserves_scope());
+        assert_eq!(stored.record.result, old.record.result);
     }
 
     #[test]
