@@ -5,7 +5,7 @@ Soxu 跨端（GPUI 桌面端、移动端 PWA 与 CLI）统一版本化通信协�
 - HTTP/WebSocket RPC 信封：`RpcRequest` / `RpcResponse` / `RpcCommand` / `RpcResultData`；
 - 实时事件流：`EventEnvelope<DaemonEvent>`，单调 `seq` 支持熄屏/断网后按 `after_seq` 追平；
 - 领域契约：会话与轮次、审批与提问、配对与偏好、M3 Git 操作（`git_ops`）、
-  以及 M6 前置三组契约（`scripts` / `schedules` / `pty`）；
+  以及 M6 三组契约（`scripts` / `schedules` / `pty`）及其 `RpcCommand` 传输变体；
 - `PROTOCOL_VERSION` 为握手主版本，客户端与守护进程启动时必须核对。
 
 ## 命名与校验约定
@@ -86,17 +86,51 @@ Soxu 跨端（GPUI 桌面端、移动端 PWA 与 CLI）统一版本化通信协�
   `RpcResultData::{ManagedScript, Schedule, ControlledPty}` 与
   `DaemonEvent::{ScriptLifecycleChanged, ScheduleActivity, PtyActivity}`。
 
-## 兼容策略（M6 前置）
+## 兼容策略（M6 传输层）
 
-- `PROTOCOL_VERSION` 保持 `1`：三组契约全部通过**新增模块、新增枚举变体与新类型**接入，
-  不修改任何既有字段与既有变体语义；
-- 全局 `RpcCommand` 未新增变体：`soxu-daemon` 的 `dispatch_command` 对 `RpcCommand`
-  是穷尽匹配，本单冻结 `soxu-daemon`，新增变体会直接打断工作区编译。
-  因此三组契约先以 `ScriptCommand` / `ScheduleCommand` / `PtyCommand` 域命令枚举独立成型，
-  由后续实现 PR 在 `RpcCommand` 中 1:1 转发 `ManagedScript(_)` / `Schedule(_)` / `ControlledPty(_)`
-  并补齐守护进程分支；
-- 握手结构体（`ClientHello` / `ServerHello` / `StateSnapshot`）同样未新增字段，理由相同；
-  能力位在握手入口的接线随实现 PR 一并落地。
+- `PROTOCOL_VERSION` 保持 `1`：本波只**新增**`RpcCommand` 变体，不改既有字段、既有变体语义与
+  既有线缆形状；旧客户端不会发出新方法，因此无需主版本提升；
+- 新结果的可见性仍由能力位把关：只有客户端声明 `managed_scripts` / `schedules` /
+  `heartbeats` / `controlled_pty` 后，服务端才可下发
+  `RpcResultData::{ManagedScript, Schedule, ControlledPty}` 与
+  `DaemonEvent::{ScriptLifecycleChanged, ScheduleActivity, PtyActivity}`；
+- 未协商能力时由守护进程回 `ActionableError { code: Unsupported, .. }`（`ok: false`，不带 `result`）；
+  协议层只定义类型与变体，不做能力判定；
+- 未知命令 / 结果 / 事件变体在 serde 层返回 `Err`（不 panic），由接收方转成三要素错误响应；
+  已知变体仍容忍未知字段（不使用 `deny_unknown_fields`）。
+
+## M6 传输层（`RpcCommand` 变体）
+
+全局 `RpcCommand` 补齐脚本 / 调度 / PTY 全集命令，载荷一律直接复用域类型，
+不新增字段、不做二次校验；`RpcCommand::into_domain_command()` 把变体 1:1 折叠成
+`ScriptCommand` / `ScheduleCommand` / `PtyCommand`，供守护进程接线时直接转发域服务。
+
+| `RpcCommand` 变体 | 线缆 `method` | 折叠的域命令 | 载荷类型 |
+| :--- | :--- | :--- | :--- |
+| `ListScripts` | `list_scripts` | `ScriptCommand::List` | `ListScriptsRequest` |
+| `RunScript` | `run_script` | `ScriptCommand::Run` | `RunScriptRequest` |
+| `StopScript` | `stop_script` | `ScriptCommand::Stop` | `StopScriptRequest` |
+| `InspectScript` | `inspect_script` | `ScriptCommand::Inspect` | `InspectScriptRequest` |
+| `ListSchedules` | `list_schedules` | `ScheduleCommand::List` | `ListSchedulesRequest` |
+| `CreateSchedule` | `create_schedule` | `ScheduleCommand::Create` | `CreateScheduleRequest` |
+| `UpdateSchedule` | `update_schedule` | `ScheduleCommand::Update` | `UpdateScheduleRequest` |
+| `DisableSchedule` | `disable_schedule` | `ScheduleCommand::Pause` | `PauseScheduleRequest` |
+| `DeleteSchedule` | `delete_schedule` | `ScheduleCommand::Delete` | `DeleteScheduleRequest` |
+| `TriggerSchedule` | `trigger_schedule` | `ScheduleCommand::TriggerNow` | `TriggerScheduleRequest` |
+| `OpenPty` | `open_pty` | `PtyCommand::Open` | `OpenPtyRequest` |
+| `WritePty` | `write_pty` | `PtyCommand::Write` | `WritePtyRequest` |
+| `ResizePty` | `resize_pty` | `PtyCommand::Resize` | `ResizePtyRequest` |
+| `ClosePty` | `close_pty` | `PtyCommand::Close` | `ClosePtyRequest` |
+
+- `DisableSchedule` 复用 `PauseScheduleRequest`：`paused = true` 停用、`false` 恢复，
+  不另造 `disabled` 字段，避免调度状态出现第二套真相源；
+- 结果仍走 `RpcResultData::{ManagedScript, Schedule, ControlledPty}` 三个既有变体，
+  内部是 `ScriptCommandResult` / `ScheduleCommandResult` / `PtyCommandResult`；
+- 事件无需新增封装：脚本生命周期、PTY 输出、调度触发与运行结果已分别由
+  `DaemonEvent::{ScriptLifecycleChanged, ScheduleActivity, PtyActivity}` 承载，
+  共用同一 `EventEnvelope<DaemonEvent>` 与 `seq` 追平通道；
+- 守护进程侧只补了一条 `Unsupported` 分支（脚本 / 调度 / PTY 的 handler 接线属后续实现 PR），
+  避免新增变体打断 `dispatch_command` 的穷尽匹配。
 
 ## 测试
 
@@ -107,5 +141,7 @@ cargo clippy -p soxu-protocol --all-targets --locked -- -D warnings
 
 - `tests/m6_contracts.rs`：三组契约的 serde 往返、未知字段容错、非法参数拒绝、
   分片边界与序号、能力位缺省关闭、增量扩展不改主版本；
+- `tests/m6_transport.rs`：14 个 `RpcCommand` 变体的线缆往返与域命令 1:1 折叠、
+  未知变体不 panic、载荷沿用域校验、能力关闭的类型表达、三类事件共用信封与追平批量；
 - `tests/git_ops_wire.rs`：M3 Git 契约线缆形状回归；
 - `src/**` 内联单测覆盖标量校验（路径越级、环境变量名、幂等键）与分片切分/尺寸边界。

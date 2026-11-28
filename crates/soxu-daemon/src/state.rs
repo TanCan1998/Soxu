@@ -397,6 +397,27 @@ impl DaemonState {
                 "当前请求未执行，工作树、暂存区和分支均未修改",
                 "请在守护进程接入相应 Git 能力后重试",
             )),
+            // M6 传输契约（#147）已定型，但脚本/调度/PTY 的守护进程接线属后续实现 PR。
+            // 此处统一回 `Unsupported`（能力位缺省关闭），避免旧客户端收到静默空实现。
+            RpcCommand::ListScripts(_)
+            | RpcCommand::RunScript(_)
+            | RpcCommand::StopScript(_)
+            | RpcCommand::InspectScript(_)
+            | RpcCommand::ListSchedules(_)
+            | RpcCommand::CreateSchedule(_)
+            | RpcCommand::UpdateSchedule(_)
+            | RpcCommand::DisableSchedule(_)
+            | RpcCommand::DeleteSchedule(_)
+            | RpcCommand::TriggerSchedule(_)
+            | RpcCommand::OpenPty(_)
+            | RpcCommand::WritePty(_)
+            | RpcCommand::ResizePty(_)
+            | RpcCommand::ClosePty(_) => Err(ActionableError::new(
+                ErrorCode::Unsupported,
+                "脚本 / 调度 / PTY 的守护进程接线尚未落地",
+                "当前请求未执行，未派发任何子进程、终端会话或调度任务",
+                "请在守护进程接入对应域服务后重试",
+            )),
             RpcCommand::GetStateSnapshot => Ok(RpcResultData::StateSnapshot(self.snapshot()?)),
             RpcCommand::CatchUpEvents { after_seq, limit } => {
                 let (events, latest_seq) = self.events_after(after_seq, limit.unwrap_or(500))?;

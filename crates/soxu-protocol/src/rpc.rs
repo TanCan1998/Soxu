@@ -22,9 +22,18 @@ use crate::pairing::{
     PairingOfferPayload, PairingTransportMode,
 };
 use crate::preferences::SoxuPreferences;
-use crate::pty::PtyCommandResult;
-use crate::schedules::ScheduleCommandResult;
-use crate::scripts::ScriptCommandResult;
+use crate::pty::{
+    ClosePtyRequest, OpenPtyRequest, PtyCommand, PtyCommandResult, ResizePtyRequest,
+    WritePtyRequest,
+};
+use crate::schedules::{
+    CreateScheduleRequest, DeleteScheduleRequest, ListSchedulesRequest, PauseScheduleRequest,
+    ScheduleCommand, ScheduleCommandResult, TriggerScheduleRequest, UpdateScheduleRequest,
+};
+use crate::scripts::{
+    InspectScriptRequest, ListScriptsRequest, RunScriptRequest, ScriptCommand, ScriptCommandResult,
+    StopScriptRequest,
+};
 use serde::{Deserialize, Serialize};
 
 /// 守护进程健康状态快照。
@@ -164,6 +173,79 @@ pub enum RpcCommand {
     PreviewStructuredCommit(CommitPreviewRequest),
     ExecuteStructuredCommit(CommitApprovalTicket),
     GetGitOperationStatus(GitOperationStatusQuery),
+    // M6 传输层：受管脚本、Schedules & Heartbeats、受控 PTY。
+    // 载荷一律直接复用 `scripts` / `schedules` / `pty` 域类型，本层不新增字段。
+    ListScripts(ListScriptsRequest),
+    RunScript(RunScriptRequest),
+    StopScript(StopScriptRequest),
+    InspectScript(InspectScriptRequest),
+    ListSchedules(ListSchedulesRequest),
+    CreateSchedule(CreateScheduleRequest),
+    UpdateSchedule(UpdateScheduleRequest),
+    /// 停用或恢复调度：`paused = true` 停用，`false` 恢复。
+    DisableSchedule(PauseScheduleRequest),
+    DeleteSchedule(DeleteScheduleRequest),
+    TriggerSchedule(TriggerScheduleRequest),
+    OpenPty(OpenPtyRequest),
+    WritePty(WritePtyRequest),
+    ResizePty(ResizePtyRequest),
+    ClosePty(ClosePtyRequest),
+}
+
+impl RpcCommand {
+    /// 把 M6 传输变体折叠回域命令枚举，供守护进程接线时 1:1 转发。
+    ///
+    /// 非 M6 命令返回 `None`；本方法不解释、不改写任何字段，也不做出能力位判定
+    /// （是否允许执行由守护进程按 `DaemonFeatureSet` 判定，未声明即回 `ErrorCode::Unsupported`）。
+    #[must_use]
+    pub fn into_domain_command(self) -> Option<RpcDomainCommand> {
+        match self {
+            Self::ListScripts(request) => {
+                Some(RpcDomainCommand::Script(ScriptCommand::List(request)))
+            }
+            Self::RunScript(request) => Some(RpcDomainCommand::Script(ScriptCommand::Run(request))),
+            Self::StopScript(request) => {
+                Some(RpcDomainCommand::Script(ScriptCommand::Stop(request)))
+            }
+            Self::InspectScript(request) => {
+                Some(RpcDomainCommand::Script(ScriptCommand::Inspect(request)))
+            }
+            Self::ListSchedules(request) => {
+                Some(RpcDomainCommand::Schedule(ScheduleCommand::List(request)))
+            }
+            Self::CreateSchedule(request) => {
+                Some(RpcDomainCommand::Schedule(ScheduleCommand::Create(request)))
+            }
+            Self::UpdateSchedule(request) => {
+                Some(RpcDomainCommand::Schedule(ScheduleCommand::Update(request)))
+            }
+            Self::DisableSchedule(request) => {
+                Some(RpcDomainCommand::Schedule(ScheduleCommand::Pause(request)))
+            }
+            Self::DeleteSchedule(request) => {
+                Some(RpcDomainCommand::Schedule(ScheduleCommand::Delete(request)))
+            }
+            Self::TriggerSchedule(request) => Some(RpcDomainCommand::Schedule(
+                ScheduleCommand::TriggerNow(request),
+            )),
+            Self::OpenPty(request) => Some(RpcDomainCommand::Pty(PtyCommand::Open(request))),
+            Self::WritePty(request) => Some(RpcDomainCommand::Pty(PtyCommand::Write(request))),
+            Self::ResizePty(request) => Some(RpcDomainCommand::Pty(PtyCommand::Resize(request))),
+            Self::ClosePty(request) => Some(RpcDomainCommand::Pty(PtyCommand::Close(request))),
+            _ => None,
+        }
+    }
+}
+
+/// 守护进程内部消费的 M6 域命令：由 [`RpcCommand::into_domain_command`] 折叠产生。
+///
+/// 三个域各自已有独立的请求/结果/事件枚举（`ScriptCommand` / `ScheduleCommand` / `PtyCommand`），
+/// 本枚举只承担「全局 RPC 变体 → 域命令」的一次映射，不引入新的线缆形状。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RpcDomainCommand {
+    Script(ScriptCommand),
+    Schedule(ScheduleCommand),
+    Pty(PtyCommand),
 }
 
 /// 带请求关联 ID 的 RPC 请求信封。

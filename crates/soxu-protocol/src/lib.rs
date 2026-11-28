@@ -65,8 +65,8 @@ pub use pty::{
     ResizePtyResponse, WritePtyRequest, WritePtyResponse,
 };
 pub use rpc::{
-    ClientHello, ClientKind, HealthSnapshot, RpcCommand, RpcRequest, RpcResponse, RpcResultData,
-    ServerHello, StateSnapshot,
+    ClientHello, ClientKind, HealthSnapshot, RpcCommand, RpcDomainCommand, RpcRequest, RpcResponse,
+    RpcResultData, ServerHello, StateSnapshot,
 };
 pub use schedules::{
     CreateScheduleRequest, CronExpression, DeleteScheduleRequest, ListSchedulesRequest,

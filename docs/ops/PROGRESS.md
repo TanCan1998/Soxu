@@ -25,6 +25,7 @@
 - **主线基线**：`main` = `f360bec`（`#145` 看板重构）；业务基线 `8097f12`。
 - **最近合入**：看板重构 `#145`（`f360bec`）、M6-A `#142`（`8097f12`）、M6-B `#141`（`edbe47b`）、M6 契约 `#137`（`2debe53`）、M5-C/B/A（`13e784d`/`1684e66`/`dd26757`）、M4-W2A/B（`80a9185`/`365201b`）、构建目录治理 `#127`（`fb40e31`）。
 - **待审**：`#146` M6-C（`#143`）——daemon 调度执行器（cron/固定周期/心跳、可注入时钟、幂等与重试、停用删除收敛、能力缺省关闭零事件）+ 桌面调度中心（纯内存状态机、44px 热区、`ReviewDiff` 焦点复用）+ 50k Diff 跑`#[ignore]` 手测（本机 `475 ms`、patch `8.10 MB`、峰值工作集 `17.8 MB`）+ 四平台打包只读核验（daemon/cli 均入包，PWA 随 daemon 二进制内嵌）。
+- **进行中**：`#147` M6 传输契约（分支 `feat/147-m6-rpc-transport`，基线 `0ddd041`）——`RpcCommand` 补齐脚本/调度/PTY 全集 14 个变体 + `into_domain_command()` 1:1 折叠 + `tests/m6_transport.rs`；事件封装无需新增（三类事件已共用 `EventEnvelope<DaemonEvent>`）；daemon 仅补一条 `Unsupported` 分支（冻结面最小扩展，见 PR 说明）。
 - **门禁**：三平台 Rust（windows/linux/macos-arm64）+ PWA + 格式 + 隐私 + `CI Gate`；合入统一 `--match-head-commit`，合并后归档工作树与分支。
 - **尚未交付**：Git 恢复执行/回退/结构化提交、`direct` MCP 运行时挂载、非 Windows 宿主真机补测、Antigravity 项目入口与全代理验收、正式发布（未核验原生测试）。
 
@@ -41,13 +42,15 @@
 
 ## 4. 下一步行动队列（Next Actions）
 
-1. **M6-C 收口**：审查/合入 `#146`（`Closes #143`），归档 `feat-143-m6-schedules`，合并后把本看板§2「待审」改为「最近合入」；`RpcCommand` 调度/脚本/PTY 请求变体仍属冻结协议面，需独立契约 PR 才能把三个域的 `handle` 接上传输层。
-2. **M6-D 打包与发布核验**：`soxu-releases` 四平台构建已在 `cargo build` 前执行 `pnpm build`（Linux/Windows/macOS 均确认），并含活二进制校验与 `soxu`+`soxu-daemon` 双产物；正式发版前补一次 tag 级 dry-run。
-3. **M3 剩余**：恢复执行与 journal（`execute.rs`/`journal.rs`）、Safety Snapshot 先行 Rewind、文件级结构化提交预检；按设计文档顺序，涉及协议变更先走独立契约 PR。
-4. **`direct` MCP 运行时挂载**与 Worktree 内写权限：需先冻结协议面，再接入 daemon。
-5. **非 Windows 宿主补测**：`#49`/`#51`/`#56`/`#69` 的真实注册、固定提交检出、宿主接入、路由重试与 Worktree 原生会话。
-6. **M2 收尾**：Antigravity 项目目录入口、七代理全验收；Copilot 钩子安全、历史导入、附件/移交/更高权限与移动端投递。
-7. **发布**：未核验的跨平台原生测试与正式发版仍为待办；Intel 仅保留 `full-with-intel` 手动入口与 tag 入口。
+1. **M6 传输契约收口**：审查/合入 `#147`（`Closes #147`，分支 `feat/147-m6-rpc-transport`）——`RpcCommand` 补齐脚本/调度/PTY 全集 14 个变体 + `into_domain_command()` 1:1 折叠 + `tests/m6_transport.rs`；daemon 侧只补一条 `Unsupported` 分支，未接 handler。
+2. **M6 daemon 接线**：把 `into_domain_command()` 折叠出的域命令转给 `scripts::ScriptService` / `schedules::ScheduleExecutor` / `pty::PtyHub`，并按能力位判定补齐事件广播与 `StateSnapshot` 握手字段（需再次扩写 `RpcCommand` 分支，已由本契约预置类型）。
+3. **M6-C 收口**：审查/合入 `#146`（`Closes #143`），归档 `feat-143-m6-schedules`，合并后把本看板§2「待审」改为「最近合入」。
+4. **M6-D 打包与发布核验**：`soxu-releases` 四平台构建已在 `cargo build` 前执行 `pnpm build`（Linux/Windows/macOS 均确认），并含活二进制校验与 `soxu`+`soxu-daemon` 双产物；正式发版前补一次 tag 级 dry-run。
+5. **M3 剩余**：恢复执行与 journal（`execute.rs`/`journal.rs`）、Safety Snapshot 先行 Rewind、文件级结构化提交预检；按设计文档顺序，涉及协议变更先走独立契约 PR。
+6. **`direct` MCP 运行时挂载**与 Worktree 内写权限：需先冻结协议面，再接入 daemon。
+7. **非 Windows 宿主补测**：`#49`/`#51`/`#56`/`#69` 的真实注册、固定提交检出、宿主接入、路由重试与 Worktree 原生会话。
+8. **M2 收尾**：Antigravity 项目目录入口、七代理全验收；Copilot 钩子安全、历史导入、附件/移交/更高权限与移动端投递。
+9. **发布**：未核验的跨平台原生测试与正式发版仍为待办；Intel 仅保留 `full-with-intel` 手动入口与 tag 入口。
 
 ---
 
